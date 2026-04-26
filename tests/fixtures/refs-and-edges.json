@@ -1,0 +1,66 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Edges", "version": "1.0.0" },
+  "components": {
+    "parameters": {
+      "TaskId": {
+        "name": "taskId",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      },
+      "Page": {
+        "name": "page",
+        "in": "query",
+        "schema": { "type": "integer" }
+      }
+    },
+    "requestBodies": {
+      "TaskCreate": {
+        "required": false,
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Task" } }
+        }
+      }
+    },
+    "responses": {
+      "TaskOk": {
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Task" } }
+        }
+      }
+    },
+    "schemas": {
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "const": "task" },
+          "tuple": {
+            "type": "array",
+            "prefixItems": [{ "type": "string" }, { "type": "number" }]
+          },
+          "user-id": { "type": "string" }
+        },
+        "required": ["id"]
+      },
+      "User-Profile": {
+        "type": "object",
+        "properties": { "name": { "type": "string" } }
+      }
+    }
+  },
+  "paths": {
+    "/tasks/{taskId}": {
+      "parameters": [{ "$ref": "#/components/parameters/TaskId" }],
+      "get": {
+        "parameters": [{ "$ref": "#/components/parameters/Page" }],
+        "responses": { "200": { "$ref": "#/components/responses/TaskOk" } }
+      },
+      "patch": {
+        "requestBody": { "$ref": "#/components/requestBodies/TaskCreate" },
+        "responses": { "204": { "description": "No Content" } }
+      }
+    }
+  }
+}

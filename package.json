@@ -1,0 +1,48 @@
+{
+  "name": "openapi-shape",
+  "version": "0.0.0",
+  "description": "Generate TypeScript declarations and API shapes from OpenAPI JSON",
+  "license": "MIT",
+  "bin": {
+    "openapi-shape": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./cli": "./dist/cli.mjs",
+    "./client": "./dist/client.mjs",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "prepare": "lefthook install",
+    "prepublishOnly": "npm run build",
+    "dev": "tsdown --watch",
+    "build": "tsdown",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "release": "bumpp --commit 'chore(release): v%s' --tag 'v%s' --push"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.5.2",
+    "@commitlint/config-conventional": "^20.5.0",
+    "@types/node": "^25.6.0",
+    "bumpp": "^11.0.1",
+    "lefthook": "^2.1.6",
+    "oxfmt": "^0.46.0",
+    "oxlint": "^1.61.0",
+    "tsdown": "^0.21.10",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "lefthook"
+    ]
+  }
+}

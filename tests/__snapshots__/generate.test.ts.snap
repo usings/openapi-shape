@@ -1,0 +1,174 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`generate (integration) > generates correct output for discriminator fixture 1`] = `
+"export interface API {
+  "GET /animal": {
+    params: void
+    query: void
+    body: void
+    response: Animal
+  }
+}
+
+export type Animal = Cat | Dog
+
+export type Vehicle = Car | Truck
+
+export interface Cat {
+  type: "cat"
+  purr: string
+}
+
+export interface Dog {
+  bark: string
+  type: "dog"
+}
+
+export interface Car {
+  wheels?: number
+  type: "Car"
+}
+
+export interface Truck {
+  payload?: number
+  type: "Truck"
+}
+"
+`;
+
+exports[`generate (integration) > generates correct output for edge-cases fixture 1`] = `
+"export interface API {
+  "GET /items": {
+    params: void
+    query: { q: string }
+    body: void
+    response: Item[]
+  }
+  "GET /items/{itemId}": {
+    params: { itemId: string }
+    query: void
+    body: void
+    response: Item
+  }
+  "GET /health": {
+    params: void
+    query: void
+    body: void
+    response: void
+  }
+}
+
+export type ItemKind = "book" | "movie" | "music"
+
+export type Shape = Circle | Square
+
+export type Extended = Circle & {
+  color: string
+}
+
+export type NullableOld = string | null
+
+export interface Item {
+  id: number
+  name: string | null
+  tags?: string[]
+  metadata?: Record<string, string>
+  kind?: ItemKind
+}
+
+export interface Circle {
+  radius: number
+}
+
+export interface Square {
+  side: number
+}
+"
+`;
+
+exports[`generate (integration) > generates correct output for petstore fixture 1`] = `
+"export interface API {
+  /**
+   * List pets
+   *
+   * Returns all pets, optionally limited.
+   */
+  "GET /pets": {
+    params: void
+    query: {
+      /** Max number of results */
+      limit?: number
+    }
+    body: void
+    response: Pet[]
+  }
+  /** Create a pet */
+  "POST /pets": {
+    params: void
+    query: void
+    body?: CreatePet
+    response: Pet
+  }
+  "GET /pets/{petId}": {
+    params: { petId: string }
+    query: void
+    body: void
+    response: Pet
+  }
+  /** @deprecated */
+  "DELETE /pets/{petId}": {
+    params: { petId: string }
+    query: void
+    body: void
+    response: void
+  }
+}
+
+/** Lifecycle status of a pet */
+export type PetStatus = "available" | "pending" | "sold"
+
+/** A pet in the store */
+export interface Pet {
+  /** Unique identifier */
+  id: number
+  /** Display name */
+  name: string
+  tag?: string
+  status?: PetStatus
+}
+
+export interface CreatePet {
+  name: string
+  tag?: string
+}
+"
+`;
+
+exports[`generate (integration) > generates correct output for refs-and-edges fixture 1`] = `
+"export interface API {
+  "GET /tasks/{taskId}": {
+    params: { taskId: string }
+    query: { page?: number }
+    body: void
+    response: Task
+  }
+  "PATCH /tasks/{taskId}": {
+    params: { taskId: string }
+    query: void
+    body?: Task
+    response: void
+  }
+}
+
+export interface Task {
+  id: string
+  kind?: "task"
+  tuple?: [string, number]
+  "user-id"?: string
+}
+
+export interface User_Profile {
+  name?: string
+}
+"
+`;

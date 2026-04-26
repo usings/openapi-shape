@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/lefthook/schema.json",
+  "commit-msg": {
+    "commands": {
+      "commitlint": {
+        "run": "npm exec -- commitlint --edit {1}"
+      }
+    }
+  },
+  "pre-commit": {
+    "parallel": true,
+    "commands": {
+      "format": {
+        "glob": "*.{ts,tsx,js,mjs,cjs,jsx}",
+        "run": "npm exec -- oxfmt {staged_files} --no-error-on-unmatched-pattern",
+        "stage_fixed": true
+      },
+      "lint": {
+        "glob": "*.{ts,tsx,js,mjs,cjs,jsx}",
+        "run": "npm exec -- oxlint {staged_files}"
+      }
+    }
+  }
+}

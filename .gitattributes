@@ -1,0 +1,18 @@
+# https://git-scm.com/docs/gitattributes
+
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Source code
+*.toml text eol=lf linguist-language=TOML
+*.js text eol=lf linguist-language=JavaScript
+*.ts text eol=lf linguist-language=TypeScript
+*.html text eol=lf linguist-language=HTML
+*.css text eol=lf linguist-language=CSS
+*.json text eol=lf linguist-language=JSON
+*.yaml text eol=lf linguist-language=YAML
+*.yml text eol=lf linguist-language=YAML
+*.md text eol=lf linguist-language=Markdown
+*.sh text eol=lf linguist-language=Shell
+*.bash text eol=lf linguist-language=Shell
+*.ps1 text eol=crlf linguist-language=PowerShell

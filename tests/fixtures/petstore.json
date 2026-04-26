@@ -1,0 +1,99 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Petstore", "version": "1.0.0" },
+  "paths": {
+    "/pets": {
+      "get": {
+        "summary": "List pets",
+        "description": "Returns all pets, optionally limited.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Max number of results",
+            "schema": { "type": "number" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Pet" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a pet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreatePet" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Pet" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pets/{petId}": {
+      "parameters": [{ "name": "petId", "in": "path", "schema": { "type": "string" } }],
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Pet" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "deprecated": true,
+        "responses": {
+          "204": { "description": "Deleted" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Pet": {
+        "type": "object",
+        "description": "A pet in the store",
+        "properties": {
+          "id": { "type": "integer", "description": "Unique identifier" },
+          "name": { "type": "string", "description": "Display name" },
+          "tag": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/PetStatus" }
+        },
+        "required": ["id", "name"]
+      },
+      "CreatePet": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "tag": { "type": "string" }
+        },
+        "required": ["name"]
+      },
+      "PetStatus": {
+        "type": "string",
+        "description": "Lifecycle status of a pet",
+        "enum": ["available", "pending", "sold"]
+      }
+    }
+  }
+}

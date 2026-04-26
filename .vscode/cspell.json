@@ -1,0 +1,12 @@
+{
+  "ignorePaths": [
+    "node_modules",
+    "dist"
+  ],
+  "words": [
+    "bumpp",
+    "changelogithub",
+    "oxfmt",
+    "oxlint"
+  ]
+}

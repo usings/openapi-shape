@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine release meta
+        id: release_meta
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME" =~ -([^+]+) ]]; then
+            echo "channel=${BASH_REMATCH[1]%%.*}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=latest" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Publish to NPM
+        run: npm publish --access=public --provenance --tag="${{ steps.release_meta.outputs.channel }}"
+
+      - name: Create GitHub Release
+        if: ${{ success() }}
+        run: npx changelogithub --capitalize=false ${{ steps.release_meta.outputs.prerelease == 'true' && '--prerelease' || '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

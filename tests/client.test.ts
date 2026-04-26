@@ -1,0 +1,413 @@
+import { describe, expect, it, vi } from "vitest";
+import { createClient, type Adapter } from "../src/client";
+
+interface TestAPI {
+  "GET /pets": {
+    params: void;
+    query: { limit?: number };
+    body: void;
+    response: { id: number; name: string }[];
+  };
+  "POST /pets": {
+    params: void;
+    query: void;
+    body: { name: string };
+    response: { id: number };
+  };
+  "GET /pets/{petId}": {
+    params: { petId: string };
+    query: void;
+    body: void;
+    response: { id: number; name: string };
+  };
+  "DELETE /pets/{petId}/tags/{tagId}": {
+    params: { petId: string; tagId: string };
+    query: void;
+    body: void;
+    response: void;
+  };
+  "GET /search": {
+    params: void;
+    query: { q: string; page?: number };
+    body: void;
+    response: string[];
+  };
+  "POST /upload": {
+    params: void;
+    query: void;
+    body: { file: Blob; name: string };
+    response: { url: string };
+  };
+}
+
+describe("createClient", () => {
+  it("calls adapter with correct method and url", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter);
+
+    await api("GET /pets");
+
+    expect(adapter).toHaveBeenCalledWith({
+      method: "GET",
+      url: "/pets",
+      body: undefined,
+      headers: {},
+    });
+  });
+
+  it("appends query parameters to url", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter);
+
+    await api("GET /pets", { query: { limit: 10 } });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("/pets?limit=10");
+  });
+
+  it("appends array query parameters as repeated keys", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter);
+
+    await api("GET /search", { query: { q: "cat", tags: ["small", "short hair"] } as any });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("/search?q=cat&tags=small&tags=short+hair");
+  });
+
+  it("replaces path parameters", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1, name: "Buddy" });
+    const api = createClient<TestAPI>(adapter);
+
+    await api("GET /pets/{petId}", { params: { petId: "123" } });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("/pets/123");
+  });
+
+  it("replaces multiple path parameters", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined);
+    const api = createClient<TestAPI>(adapter);
+
+    await api("DELETE /pets/{petId}/tags/{tagId}", {
+      params: { petId: "1", tagId: "2" },
+    });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("/pets/1/tags/2");
+  });
+
+  it("replaces repeated path parameter placeholders", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined);
+    const api = createClient<{
+      "GET /items/{id}/related/{id}": {
+        params: { id: string };
+        query: void;
+        body: void;
+        response: void;
+      };
+    }>(adapter);
+
+    await api("GET /items/{id}/related/{id}", { params: { id: "x/y" } });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("/items/x%2Fy/related/x%2Fy");
+  });
+
+  it("stringifies non-string path parameter values before encoding", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined);
+    const api = createClient<{
+      "GET /pets/{petId}": {
+        params: { petId: number };
+        query: void;
+        body: void;
+        response: void;
+      };
+    }>(adapter);
+
+    await api("GET /pets/{petId}", { params: { petId: 123 } });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("/pets/123");
+  });
+
+  it("serializes plain object body as JSON", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1 });
+    const api = createClient<TestAPI>(adapter);
+
+    await api("POST /pets", { body: { name: "Buddy" } });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.method).toBe("POST");
+    expect(call.body).toBe('{"name":"Buddy"}');
+    expect(call.headers).toEqual({ "Content-Type": "application/json" });
+  });
+
+  it("passes FormData body through without setting Content-Type", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
+    const api = createClient<TestAPI>(adapter);
+
+    const form = new FormData();
+    form.append("name", "test");
+    await api("POST /upload", { body: form as any });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.body).toBe(form);
+    expect(call.headers).toEqual({});
+  });
+
+  it("passes URLSearchParams body through without setting Content-Type", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1 });
+    const api = createClient<TestAPI>(adapter);
+
+    const params = new URLSearchParams({ name: "Buddy" });
+    await api("POST /pets", { body: params as any });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.body).toBe(params);
+    expect(call.headers).toEqual({});
+  });
+
+  it("passes Blob body through without setting Content-Type", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
+    const api = createClient<TestAPI>(adapter);
+
+    const blob = new Blob(["hello"], { type: "text/plain" });
+    await api("POST /upload", { body: blob as any });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.body).toBe(blob);
+    expect(call.headers).toEqual({});
+  });
+
+  it("passes ArrayBuffer body through without setting Content-Type", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
+    const api = createClient<TestAPI>(adapter);
+
+    const buffer = new ArrayBuffer(4);
+    await api("POST /upload", { body: buffer as any });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.body).toBe(buffer);
+    expect(call.headers).toEqual({});
+  });
+
+  it("passes typed array body through without setting Content-Type", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
+    const api = createClient<TestAPI>(adapter);
+
+    const bytes = new Uint8Array([1, 2, 3]);
+    await api("POST /upload", { body: bytes as any });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.body).toBe(bytes);
+    expect(call.headers).toEqual({});
+  });
+
+  it("passes ReadableStream body through without setting Content-Type", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
+    const api = createClient<TestAPI>(adapter);
+
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]));
+        controller.close();
+      },
+    });
+    await api("POST /upload", { body: stream as any });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.body).toBe(stream);
+    expect(call.headers).toEqual({});
+  });
+
+  it("omits body and headers for no body", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter);
+
+    await api("GET /pets");
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.body).toBeUndefined();
+    expect(call.headers).toEqual({});
+  });
+
+  it("skips undefined query params", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter);
+
+    await api("GET /search", { query: { q: "hello", page: undefined as any } });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("/search?q=hello");
+  });
+
+  it("encodes path parameter values", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1, name: "test" });
+    const api = createClient<TestAPI>(adapter);
+
+    await api("GET /pets/{petId}", { params: { petId: "a/b" } });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("/pets/a%2Fb");
+  });
+
+  it("returns adapter result", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([{ id: 1, name: "Buddy" }]);
+    const api = createClient<TestAPI>(adapter);
+
+    const result = await api("GET /pets");
+    expect(result).toEqual([{ id: 1, name: "Buddy" }]);
+  });
+
+  it("supports baseURL option", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter, { baseURL: "https://api.example.com" });
+
+    await api("GET /pets");
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("https://api.example.com/pets");
+  });
+
+  it("strips trailing slash from baseURL to avoid double slashes", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter, { baseURL: "https://api.example.com/" });
+
+    await api("GET /pets");
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("https://api.example.com/pets");
+  });
+
+  it("strips multiple trailing slashes from baseURL", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter, { baseURL: "https://api.example.com///" });
+
+    await api("GET /pets");
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("https://api.example.com/pets");
+  });
+
+  it("keeps falsy but defined query values (0, false, empty string)", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter);
+
+    await api("GET /search", {
+      query: { q: "", page: 0, extra: false as any } as any,
+    });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.url).toBe("/search?q=&page=0&extra=false");
+  });
+
+  it("merges per-call headers on top of body Content-Type", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({});
+    const api = createClient<TestAPI>(adapter);
+
+    await api("POST /pets", {
+      body: { name: "x" },
+      headers: { "X-Trace-Id": "abc" },
+    });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.headers).toEqual({
+      "Content-Type": "application/json",
+      "X-Trace-Id": "abc",
+    });
+  });
+
+  it("per-call header overrides the auto-set Content-Type", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({});
+    const api = createClient<TestAPI>(adapter);
+
+    await api("POST /pets", {
+      body: { name: "x" },
+      headers: { "Content-Type": "text/plain" },
+    });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.headers).toEqual({ "Content-Type": "text/plain" });
+  });
+
+  it("passes per-call options through to the adapter", async () => {
+    type CustomOptions = { timeout?: number; tag?: string };
+    const adapter = vi.fn<Adapter<CustomOptions>>().mockResolvedValue([]);
+    const api = createClient<TestAPI, CustomOptions>(adapter);
+
+    await api("GET /pets", {
+      query: { limit: 5 },
+      options: { timeout: 5000, tag: "v1" },
+    });
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.options).toEqual({ timeout: 5000, tag: "v1" });
+  });
+
+  it("options is undefined when caller omits it", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
+    const api = createClient<TestAPI>(adapter);
+
+    await api("GET /pets");
+
+    const call = adapter.mock.calls[0][0];
+    expect(call.options).toBeUndefined();
+  });
+});
+
+describe("createClient body optionality (type-level)", () => {
+  interface OptAPI {
+    "PATCH /x": {
+      params: void;
+      query: void;
+      body?: { name: string };
+      response: void;
+    };
+  }
+  interface ReqAPI {
+    "POST /x": {
+      params: void;
+      query: void;
+      body: { name: string };
+      response: void;
+    };
+  }
+  interface NoBodyAPI {
+    "GET /x": {
+      params: void;
+      query: void;
+      body: void;
+      response: void;
+    };
+  }
+
+  it("optional body: caller may omit body entirely", async () => {
+    const adapter: Adapter = vi.fn<Adapter>().mockResolvedValue(undefined);
+    const api = createClient<OptAPI>(adapter);
+    await api("PATCH /x");
+    await api("PATCH /x", {});
+    await api("PATCH /x", { body: { name: "x" } });
+    expect(adapter).toBeDefined();
+  });
+
+  it("required body: caller must supply body", async () => {
+    const adapter: Adapter = vi.fn<Adapter>().mockResolvedValue(undefined);
+    const api = createClient<ReqAPI>(adapter);
+    await api("POST /x", { body: { name: "x" } });
+    // @ts-expect-error: body is required
+    await api("POST /x");
+    // @ts-expect-error: body is required
+    await api("POST /x", {});
+    expect(adapter).toBeDefined();
+  });
+
+  it("body: void: caller must not pass body", async () => {
+    const adapter: Adapter = vi.fn<Adapter>().mockResolvedValue(undefined);
+    const api = createClient<NoBodyAPI>(adapter);
+    await api("GET /x");
+    // @ts-expect-error: body is not allowed
+    await api("GET /x", { body: { foo: 1 } });
+    expect(adapter).toBeDefined();
+  });
+});
