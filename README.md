@@ -1,5 +1,10 @@
 # openapi-shape
 
+[![npm version][npm-version-src]][npm-version-href]
+[![npm downloads][npm-downloads-src]][npm-downloads-href]
+[![bundle][bundle-src]][bundle-href]
+[![License][license-src]][license-href]
+
 Generate TypeScript declarations and API shapes from OpenAPI JSON.
 
 `openapi-shape` turns an OpenAPI 3.x JSON document into TypeScript declarations: schema types plus an `API` route map that describes params, query, request body, and response for each endpoint.
@@ -328,4 +333,15 @@ Identifier handling:
 
 ## License
 
-MIT
+[MIT](./LICENSE) License
+
+<!-- Badges -->
+
+[npm-version-src]: https://img.shields.io/npm/v/openapi-shape?style=flat&colorA=080f12&colorB=1fa669
+[npm-version-href]: https://npmx.dev/package/openapi-shape
+[npm-downloads-src]: https://img.shields.io/npm/dm/openapi-shape?style=flat&colorA=080f12&colorB=1fa669
+[npm-downloads-href]: https://npmx.dev/package/openapi-shape
+[bundle-src]: https://img.shields.io/bundlephobia/minzip/openapi-shape?style=flat&colorA=080f12&colorB=1fa669&label=minzip
+[bundle-href]: https://bundlephobia.com/result?p=openapi-shape
+[license-src]: https://img.shields.io/github/license/usings/openapi-shape.svg?style=flat&colorA=080f12&colorB=1fa669
+[license-href]: https://github.com/usings/openapi-shape/blob/main/LICENSE
