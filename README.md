@@ -149,7 +149,9 @@ await api("GET /pets", {
 - `Adapter<TOptions>` makes `options` typed for axios, ky, ofetch, or your own client.
 
 <details>
-<summary>Axios adapter</summary>
+<summary>Adapter examples for axios, ky, and ofetch</summary>
+
+Axios:
 
 ```ts
 import axios, { type AxiosRequestConfig } from "axios";
@@ -162,6 +164,34 @@ const adapter: Adapter<AxiosRequestConfig> = async ({ method, url, body, headers
 };
 
 export const api = createClient<API, AxiosRequestConfig>(adapter);
+```
+
+ky:
+
+```ts
+import ky, { type Options as KyOptions } from "ky";
+import { createClient, type Adapter } from "openapi-shape/client";
+import type { API } from "./api";
+
+const adapter: Adapter<KyOptions> = async ({ method, url, body, headers, options }) => {
+  return ky(url, { method, body, headers, ...options }).json();
+};
+
+export const api = createClient<API, KyOptions>(adapter);
+```
+
+ofetch:
+
+```ts
+import { ofetch, type FetchOptions } from "ofetch";
+import { createClient, type Adapter } from "openapi-shape/client";
+import type { API } from "./api";
+
+const adapter: Adapter<FetchOptions> = async ({ method, url, body, headers, options }) => {
+  return ofetch(url, { method, body, headers, ...options });
+};
+
+export const api = createClient<API, FetchOptions>(adapter);
 ```
 
 </details>
