@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "description": "Generate TypeScript declarations and API shapes from OpenAPI JSON",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/usings/openapi-shape.git"
+  },
   "bin": {
     "openapi-shape": "./dist/cli.mjs"
   },
@@ -19,13 +23,13 @@
   "scripts": {
     "prepare": "lefthook install",
     "prepublishOnly": "npm run build",
+    "release": "bumpp",
     "dev": "tsdown --watch",
     "build": "tsdown",
     "test": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
-    "format": "oxfmt",
-    "release": "bumpp --commit 'chore(release): v%s' --tag 'v%s' --push"
+    "format": "oxfmt"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.2",
