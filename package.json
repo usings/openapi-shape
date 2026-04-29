@@ -20,7 +20,7 @@
     "url": "git+https://github.com/usings/openapi-shape.git"
   },
   "bin": {
-    "openapi-shape": "./dist/cli.mjs"
+    "openapi-shape": "dist/cli.mjs"
   },
   "files": [
     "dist"
