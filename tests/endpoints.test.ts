@@ -539,4 +539,50 @@ describe("generateEndpoints", () => {
     });
     expect(result).toContain("response: unknown");
   });
+
+  it("falls back to `default` response when no 2xx is declared (Springdoc default)", () => {
+    const result = generateEndpoints({
+      "/api/games": {
+        get: {
+          responses: {
+            default: {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/GamePageVo" } },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(result).toContain("response: GamePageVo");
+  });
+
+  it("prefers explicit 2xx over `default`", () => {
+    const result = generateEndpoints({
+      "/x": {
+        get: {
+          responses: {
+            "200": { content: { "application/json": { schema: { type: "string" } } } },
+            default: { content: { "application/json": { schema: { type: "number" } } } },
+          },
+        },
+      },
+    });
+    expect(result).toContain("response: string");
+    expect(result).not.toContain("response: number");
+  });
+
+  it("prefers explicit 2xx-no-content (void) over `default`", () => {
+    const result = generateEndpoints({
+      "/x": {
+        delete: {
+          responses: {
+            "204": { description: "No Content" },
+            default: { content: { "application/json": { schema: { type: "string" } } } },
+          },
+        },
+      },
+    });
+    expect(result).toContain("response: void");
+  });
 });

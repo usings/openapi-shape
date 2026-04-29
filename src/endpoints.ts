@@ -14,7 +14,12 @@ function findResponseType(responses: any): string {
     const t = extractResponseType(r);
     if (t) return t;
   }
-  return sawSuccessNoContent ? "void" : "unknown";
+  if (sawSuccessNoContent) return "void";
+  if (responses.default?.content) {
+    const t = extractResponseType(responses.default);
+    if (t) return t;
+  }
+  return "unknown";
 }
 
 function isBinaryContentType(contentType: string): boolean {
