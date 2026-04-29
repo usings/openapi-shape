@@ -2,6 +2,18 @@
   "name": "openapi-shape",
   "version": "0.0.1",
   "description": "Generate TypeScript declarations and API shapes from OpenAPI JSON",
+  "keywords": [
+    "codegen",
+    "dts",
+    "openapi",
+    "openapi-typescript",
+    "openapi3",
+    "schema-to-typescript",
+    "type-generation",
+    "typed-api-client",
+    "types",
+    "typescript"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
