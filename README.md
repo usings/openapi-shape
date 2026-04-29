@@ -152,6 +152,7 @@ await api("GET /pets", {
 - `headers` are merged after automatic headers, so your values win.
 - `options` is passed to the adapter untouched.
 - `Adapter<TOptions>` makes `options` typed for axios, ky, ofetch, or your own client.
+- `Omit` the fields the adapter already owns (`method`, `url`, `body`/`data`, `headers`) from `TOptions` so callers can't override them.
 
 <details>
 <summary>Adapter examples for axios, ky, and ofetch</summary>
@@ -163,12 +164,14 @@ import axios, { type AxiosRequestConfig } from "axios";
 import { createClient, type Adapter } from "openapi-shape/client";
 import type { Endpoints } from "./api";
 
-const adapter: Adapter<AxiosRequestConfig> = async ({ method, url, body, headers, options }) => {
+type AdapterOptions = Omit<AxiosRequestConfig, "method" | "url" | "data" | "headers">;
+
+const adapter: Adapter<AdapterOptions> = async ({ method, url, body, headers, options }) => {
   const response = await axios.request({ method, url, data: body, headers, ...options });
   return response.data;
 };
 
-export const api = createClient<Endpoints, AxiosRequestConfig>(adapter);
+export const api = createClient<Endpoints, AdapterOptions>(adapter);
 ```
 
 ky:
@@ -178,11 +181,13 @@ import ky, { type Options as KyOptions } from "ky";
 import { createClient, type Adapter } from "openapi-shape/client";
 import type { Endpoints } from "./api";
 
-const adapter: Adapter<KyOptions> = async ({ method, url, body, headers, options }) => {
+type AdapterOptions = Omit<KyOptions, "method" | "body" | "headers">;
+
+const adapter: Adapter<AdapterOptions> = async ({ method, url, body, headers, options }) => {
   return ky(url, { method, body, headers, ...options }).json();
 };
 
-export const api = createClient<Endpoints, KyOptions>(adapter);
+export const api = createClient<Endpoints, AdapterOptions>(adapter);
 ```
 
 ofetch:
@@ -192,11 +197,13 @@ import { ofetch, type FetchOptions } from "ofetch";
 import { createClient, type Adapter } from "openapi-shape/client";
 import type { Endpoints } from "./api";
 
-const adapter: Adapter<FetchOptions> = async ({ method, url, body, headers, options }) => {
+type AdapterOptions = Omit<FetchOptions, "method" | "body" | "headers">;
+
+const adapter: Adapter<AdapterOptions> = async ({ method, url, body, headers, options }) => {
   return ofetch(url, { method, body, headers, ...options });
 };
 
-export const api = createClient<Endpoints, FetchOptions>(adapter);
+export const api = createClient<Endpoints, AdapterOptions>(adapter);
 ```
 
 </details>
