@@ -3,6 +3,17 @@ import { readSource } from "../src/parser";
 import { writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
+async function withTmpFile<T>(content: string, fn: (path: string) => Promise<T>): Promise<T> {
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const tmp = `/tmp/openapi-dts-test-${stamp}.json`;
+  await writeFile(tmp, content);
+  try {
+    return await fn(tmp);
+  } finally {
+    await unlink(tmp);
+  }
+}
+
 describe("readSource", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -20,10 +31,9 @@ describe("readSource", () => {
   });
 
   it("throws on invalid JSON", async () => {
-    const tmp = "/tmp/openapi-dts-test-invalid.json";
-    await writeFile(tmp, "not json");
-    await expect(readSource(tmp)).rejects.toThrow();
-    await unlink(tmp);
+    await withTmpFile("not json", async (tmp) => {
+      await expect(readSource(tmp)).rejects.toThrow();
+    });
   });
 
   it("fetches an http(s) URL and parses JSON", async () => {
@@ -43,26 +53,19 @@ describe("readSource", () => {
   });
 
   it("returns a doc with parameter $refs pre-resolved", async () => {
-    const tmp = "/tmp/openapi-dts-parser-test.json";
-    const { writeFile, unlink } = await import("node:fs/promises");
-    await writeFile(
-      tmp,
-      JSON.stringify({
-        components: {
-          parameters: { P: { name: "p", in: "query", schema: { type: "string" } } },
+    const content = JSON.stringify({
+      components: {
+        parameters: { P: { name: "p", in: "query", schema: { type: "string" } } },
+      },
+      paths: {
+        "/x": {
+          get: { parameters: [{ $ref: "#/components/parameters/P" }], responses: {} },
         },
-        paths: {
-          "/x": {
-            get: { parameters: [{ $ref: "#/components/parameters/P" }], responses: {} },
-          },
-        },
-      }),
-    );
-    try {
+      },
+    });
+    await withTmpFile(content, async (tmp) => {
       const doc = await readSource(tmp);
       expect(doc.paths["/x"].get.parameters[0].name).toBe("p");
-    } finally {
-      await unlink(tmp);
-    }
+    });
   });
 });

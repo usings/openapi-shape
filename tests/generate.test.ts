@@ -15,6 +15,20 @@ function run(cmd: string, args: string[]): Promise<void> {
   });
 }
 
+async function expectPassesTsc(codes: string[]): Promise<void> {
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const tmpFiles = codes.map((_, i) => `/tmp/openapi-dts-test-${stamp}-${i}.d.ts`);
+  await Promise.all(codes.map((code, i) => writeFile(tmpFiles[i], code)));
+  try {
+    const tsc = join(import.meta.dirname, "..", "node_modules", ".bin", "tsc");
+    await expect(
+      run(tsc, ["--ignoreConfig", "--noEmit", "--strict", "--target", "esnext", ...tmpFiles]),
+    ).resolves.toBeUndefined();
+  } finally {
+    await Promise.all(tmpFiles.map((tmp) => unlink(tmp)));
+  }
+}
+
 describe("generate (integration)", () => {
   it("generates correct output for petstore fixture", async () => {
     const code = await generateFromSource(join(import.meta.dirname, "fixtures/petstore.json"));
@@ -27,37 +41,11 @@ describe("generate (integration)", () => {
   });
 
   it("generated code is valid as .d.ts and passes tsc --noEmit", async () => {
-    const petstoreCode = await generateFromSource(
-      join(import.meta.dirname, "fixtures/petstore.json"),
-    );
-    const edgeCasesCode = await generateFromSource(
-      join(import.meta.dirname, "fixtures/edge-cases.json"),
-    );
-
-    const tmpPetstore = "/tmp/openapi-dts-test-petstore.d.ts";
-    const tmpEdgeCases = "/tmp/openapi-dts-test-edge-cases.d.ts";
-
-    await Promise.all([
-      writeFile(tmpPetstore, petstoreCode),
-      writeFile(tmpEdgeCases, edgeCasesCode),
+    const [petstoreCode, edgeCasesCode] = await Promise.all([
+      generateFromSource(join(import.meta.dirname, "fixtures/petstore.json")),
+      generateFromSource(join(import.meta.dirname, "fixtures/edge-cases.json")),
     ]);
-
-    try {
-      const tsc = join(import.meta.dirname, "..", "node_modules", ".bin", "tsc");
-      await expect(
-        run(tsc, [
-          "--ignoreConfig",
-          "--noEmit",
-          "--strict",
-          "--target",
-          "esnext",
-          tmpPetstore,
-          tmpEdgeCases,
-        ]),
-      ).resolves.toBeUndefined();
-    } finally {
-      await Promise.all([unlink(tmpPetstore), unlink(tmpEdgeCases)]);
-    }
+    await expectPassesTsc([petstoreCode, edgeCasesCode]);
   });
 
   it("generates correct output for refs-and-edges fixture", async () => {
@@ -71,16 +59,7 @@ describe("generate (integration)", () => {
     const code = await generateFromSource(
       join(import.meta.dirname, "fixtures/refs-and-edges.json"),
     );
-    const tmp = "/tmp/openapi-dts-test-refs-and-edges.d.ts";
-    await writeFile(tmp, code);
-    try {
-      const tsc = join(import.meta.dirname, "..", "node_modules", ".bin", "tsc");
-      await expect(
-        run(tsc, ["--ignoreConfig", "--noEmit", "--strict", "--target", "esnext", tmp]),
-      ).resolves.toBeUndefined();
-    } finally {
-      await unlink(tmp);
-    }
+    await expectPassesTsc([code]);
   });
 
   it("generate(doc) accepts unresolved refs and resolves them", async () => {
@@ -163,15 +142,6 @@ describe("generate (integration)", () => {
 
   it("discriminator fixture is valid as .d.ts and passes tsc --noEmit", async () => {
     const code = await generateFromSource(join(import.meta.dirname, "fixtures/discriminator.json"));
-    const tmp = "/tmp/openapi-dts-test-discriminator.d.ts";
-    await writeFile(tmp, code);
-    try {
-      const tsc = join(import.meta.dirname, "..", "node_modules", ".bin", "tsc");
-      await expect(
-        run(tsc, ["--ignoreConfig", "--noEmit", "--strict", "--target", "esnext", tmp]),
-      ).resolves.toBeUndefined();
-    } finally {
-      await unlink(tmp);
-    }
+    await expectPassesTsc([code]);
   });
 });

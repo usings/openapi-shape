@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { injectDiscriminators } from "../src/discriminator";
 
+function expectConst(out: any, schema: string, prop: string, value: string): void {
+  expect(out.components.schemas[schema].properties[prop]).toEqual({ const: value });
+}
+
 describe("injectDiscriminators", () => {
   describe("oneOf + mapping (happy path)", () => {
     it("injects const literal into each branch schema via mapping", () => {
@@ -23,8 +27,8 @@ describe("injectDiscriminators", () => {
         },
       };
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
-      expect(out.components.schemas.Dog.properties.type).toEqual({ const: "dog" });
+      expectConst(out, "Cat", "type", "cat");
+      expectConst(out, "Dog", "type", "dog");
       expect(out.components.schemas.Cat.required).toContain("type");
       expect(out.components.schemas.Dog.required).toContain("type");
     });
@@ -56,8 +60,8 @@ describe("injectDiscriminators", () => {
         },
       };
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
-      expect(out.components.schemas.Dog.properties.type).toEqual({ const: "dog" });
+      expectConst(out, "Cat", "type", "cat");
+      expectConst(out, "Dog", "type", "dog");
     });
 
     it("infers value from schema name when mapping is omitted", () => {
@@ -74,8 +78,8 @@ describe("injectDiscriminators", () => {
         },
       };
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "Cat" });
-      expect(out.components.schemas.Dog.properties.type).toEqual({ const: "Dog" });
+      expectConst(out, "Cat", "type", "Cat");
+      expectConst(out, "Dog", "type", "Dog");
     });
 
     it("accepts bare schema name as mapping value", () => {
@@ -91,7 +95,7 @@ describe("injectDiscriminators", () => {
         },
       };
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
+      expectConst(out, "Cat", "type", "cat");
     });
 
     it("falls back to schema name for branches not in partial mapping", () => {
@@ -108,8 +112,8 @@ describe("injectDiscriminators", () => {
         },
       };
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
-      expect(out.components.schemas.Dog.properties.type).toEqual({ const: "Dog" });
+      expectConst(out, "Cat", "type", "cat");
+      expectConst(out, "Dog", "type", "Dog");
     });
   });
 
@@ -134,7 +138,7 @@ describe("injectDiscriminators", () => {
         properties: { type: { type: "string" }, name: { type: "string" } },
       });
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
+      expectConst(out, "Cat", "type", "cat");
       expect(out.components.schemas.Cat.properties.name).toEqual({ type: "string" });
     });
 
@@ -145,7 +149,7 @@ describe("injectDiscriminators", () => {
         required: ["type"],
       });
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
+      expectConst(out, "Cat", "type", "cat");
       expect(out.components.schemas.Cat.required).toEqual(["type"]);
     });
 
@@ -187,7 +191,7 @@ describe("injectDiscriminators", () => {
         properties: { type: { type: "string", enum: ["cat"] } },
       });
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
+      expectConst(out, "Cat", "type", "cat");
     });
 
     it("narrows a multi-value enum that contains the discriminator value", () => {
@@ -196,7 +200,7 @@ describe("injectDiscriminators", () => {
         properties: { type: { type: "string", enum: ["cat", "feline"] } },
       });
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
+      expectConst(out, "Cat", "type", "cat");
     });
 
     it("throws when the existing enum does not include the discriminator value", () => {
@@ -229,7 +233,7 @@ describe("injectDiscriminators", () => {
         },
       };
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
+      expectConst(out, "Cat", "type", "cat");
     });
 
     it("throws when same schema is referenced with same field but different values", () => {
@@ -270,8 +274,8 @@ describe("injectDiscriminators", () => {
         },
       };
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
-      expect(out.components.schemas.Cat.properties.kind).toEqual({ const: "feline" });
+      expectConst(out, "Cat", "type", "cat");
+      expectConst(out, "Cat", "kind", "feline");
       expect(out.components.schemas.Cat.required).toEqual(expect.arrayContaining(["type", "kind"]));
     });
   });
@@ -452,8 +456,8 @@ describe("injectDiscriminators", () => {
         },
       };
       const out = injectDiscriminators(doc);
-      expect(out.components.schemas.Cat.properties.type).toEqual({ const: "cat" });
-      expect(out.components.schemas.Dog.properties.type).toEqual({ const: "dog" });
+      expectConst(out, "Cat", "type", "cat");
+      expectConst(out, "Dog", "type", "dog");
     });
 
     it("is idempotent (calling twice yields the same result)", () => {

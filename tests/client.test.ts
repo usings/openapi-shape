@@ -143,81 +143,38 @@ describe("createClient", () => {
     expect(call.headers).toEqual({ "Content-Type": "application/json" });
   });
 
-  it("passes FormData body through without setting Content-Type", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
-    const api = createClient<TestAPI>(adapter);
-
-    const form = new FormData();
-    form.append("name", "test");
-    await api("POST /upload", { body: form as any });
-
-    const call = adapter.mock.calls[0][0];
-    expect(call.body).toBe(form);
-    expect(call.headers).toEqual({});
-  });
-
-  it("passes URLSearchParams body through without setting Content-Type", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1 });
-    const api = createClient<TestAPI>(adapter);
-
-    const params = new URLSearchParams({ name: "Buddy" });
-    await api("POST /pets", { body: params as any });
-
-    const call = adapter.mock.calls[0][0];
-    expect(call.body).toBe(params);
-    expect(call.headers).toEqual({});
-  });
-
-  it("passes Blob body through without setting Content-Type", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
-    const api = createClient<TestAPI>(adapter);
-
-    const blob = new Blob(["hello"], { type: "text/plain" });
-    await api("POST /upload", { body: blob as any });
-
-    const call = adapter.mock.calls[0][0];
-    expect(call.body).toBe(blob);
-    expect(call.headers).toEqual({});
-  });
-
-  it("passes ArrayBuffer body through without setting Content-Type", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
-    const api = createClient<TestAPI>(adapter);
-
-    const buffer = new ArrayBuffer(4);
-    await api("POST /upload", { body: buffer as any });
-
-    const call = adapter.mock.calls[0][0];
-    expect(call.body).toBe(buffer);
-    expect(call.headers).toEqual({});
-  });
-
-  it("passes typed array body through without setting Content-Type", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
-    const api = createClient<TestAPI>(adapter);
-
-    const bytes = new Uint8Array([1, 2, 3]);
-    await api("POST /upload", { body: bytes as any });
-
-    const call = adapter.mock.calls[0][0];
-    expect(call.body).toBe(bytes);
-    expect(call.headers).toEqual({});
-  });
-
-  it("passes ReadableStream body through without setting Content-Type", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
-    const api = createClient<TestAPI>(adapter);
-
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(new Uint8Array([1]));
-        controller.close();
+  it.each([
+    [
+      "FormData",
+      () => {
+        const form = new FormData();
+        form.append("name", "test");
+        return form;
       },
-    });
-    await api("POST /upload", { body: stream as any });
+    ],
+    ["URLSearchParams", () => new URLSearchParams({ name: "Buddy" })],
+    ["Blob", () => new Blob(["hello"], { type: "text/plain" })],
+    ["ArrayBuffer", () => new ArrayBuffer(4)],
+    ["Uint8Array", () => new Uint8Array([1, 2, 3])],
+    [
+      "ReadableStream",
+      () =>
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1]));
+            controller.close();
+          },
+        }),
+    ],
+  ])("passes %s body through without setting Content-Type", async (_name, makeBody) => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." });
+    const api = createClient<TestAPI>(adapter);
+
+    const body = makeBody();
+    await api("POST /upload", { body: body as any });
 
     const call = adapter.mock.calls[0][0];
-    expect(call.body).toBe(stream);
+    expect(call.body).toBe(body);
     expect(call.headers).toEqual({});
   });
 

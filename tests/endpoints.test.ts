@@ -258,9 +258,7 @@ describe("generateEndpoints", () => {
               { $ref: "#/components/parameters/TaskId" },
               { name: "page", in: "query", schema: { type: "number" } },
             ],
-            responses: {
-              "200": { content: { "application/json": { schema: { type: "string" } } } },
-            },
+            responses: json({ type: "string" }),
           },
         },
       },
@@ -391,7 +389,7 @@ describe("generateEndpoints", () => {
       "/api/pets/{pet-id}": {
         get: {
           parameters: [{ name: "pet-id", in: "path", required: true, schema: { type: "string" } }],
-          responses: { "200": { content: { "application/json": { schema: { type: "string" } } } } },
+          responses: json({ type: "string" }),
         },
       },
     });
@@ -403,7 +401,7 @@ describe("generateEndpoints", () => {
       "/api/x": {
         get: {
           parameters: [{ name: "user-name", in: "query", schema: { type: "string" } }],
-          responses: { "200": { content: { "application/json": { schema: { type: "string" } } } } },
+          responses: json({ type: "string" }),
         },
       },
     });
@@ -418,7 +416,7 @@ describe("generateEndpoints", () => {
             required: true,
             content: { "application/json": { schema: { type: "object", properties: {} } } },
           },
-          responses: { "200": { content: { "application/json": { schema: { type: "string" } } } } },
+          responses: json({ type: "string" }),
         },
       },
     });
@@ -433,7 +431,7 @@ describe("generateEndpoints", () => {
           requestBody: {
             content: { "application/json": { schema: { type: "object", properties: {} } } },
           },
-          responses: { "200": { content: { "application/json": { schema: { type: "string" } } } } },
+          responses: json({ type: "string" }),
         },
       },
     });
@@ -451,7 +449,7 @@ describe("generateEndpoints", () => {
               "application/json": { schema: { $ref: "#/components/schemas/CreateTask" } },
             },
           },
-          responses: { "200": { content: { "application/json": { schema: { type: "string" } } } } },
+          responses: json({ type: "string" }),
         },
       },
     });
@@ -468,9 +466,7 @@ describe("generateEndpoints", () => {
               { name: "taskId", in: "path", required: true, schema: { type: "string" } },
             ],
             get: {
-              responses: {
-                "200": { content: { "application/json": { schema: { type: "string" } } } },
-              },
+              responses: json({ type: "string" }),
             },
           },
         },
@@ -491,7 +487,7 @@ describe("generateEndpoints", () => {
             required: false,
             content: { "application/json": { schema: { type: "object", properties: {} } } },
           },
-          responses: { "200": { content: { "application/json": { schema: { type: "string" } } } } },
+          responses: json({ type: "string" }),
         },
       },
     });
