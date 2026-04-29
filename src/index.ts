@@ -1,4 +1,4 @@
 export { generate, generateFromSource } from "./generate";
 export { schemaToType, generateSchemas } from "./schemas";
-export { generateRoutes } from "./routes";
+export { generateEndpoints } from "./endpoints";
 export { readSource } from "./parser";

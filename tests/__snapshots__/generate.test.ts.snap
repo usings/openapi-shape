@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`generate (integration) > generates correct output for discriminator fixture 1`] = `
-"export interface API {
+"export interface Endpoints {
   "GET /animal": {
     params: void
     query: void
@@ -37,7 +37,7 @@ export interface Truck {
 `;
 
 exports[`generate (integration) > generates correct output for edge-cases fixture 1`] = `
-"export interface API {
+"export interface Endpoints {
   "GET /items": {
     params: void
     query: { q: string }
@@ -87,7 +87,7 @@ export interface Square {
 `;
 
 exports[`generate (integration) > generates correct output for petstore fixture 1`] = `
-"export interface API {
+"export interface Endpoints {
   /**
    * List pets
    *
@@ -145,7 +145,7 @@ export interface CreatePet {
 `;
 
 exports[`generate (integration) > generates correct output for refs-and-edges fixture 1`] = `
-"export interface API {
+"export interface Endpoints {
   "GET /tasks/{taskId}": {
     params: { taskId: string }
     query: { page?: number }

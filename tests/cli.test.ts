@@ -32,7 +32,7 @@ describe("runCli", () => {
   it("writes generated code to stdout when -o is omitted", async () => {
     const { exitCode, stdout } = await runCli([fixture]);
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("export interface API");
+    expect(stdout).toContain("export interface Endpoints");
     expect(stdout).toContain("export interface Pet");
   });
 
@@ -43,7 +43,7 @@ describe("runCli", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toBe(`Generated ${out}\n`);
     const written = await readFile(out, "utf-8");
-    expect(written).toContain("export interface API");
+    expect(written).toContain("export interface Endpoints");
   });
 
   it("rejects when -o has no value", async () => {

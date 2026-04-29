@@ -7,13 +7,13 @@
 
 Generate TypeScript declarations and API shapes from OpenAPI JSON.
 
-`openapi-shape` turns an OpenAPI 3.x JSON document into TypeScript declarations: schema types plus an `API` route map that describes params, query, request body, and response for each endpoint.
+`openapi-shape` turns an OpenAPI 3.x JSON document into TypeScript declarations: schema types plus an `Endpoints` map that describes params, query, request body, and response for each endpoint.
 
 Use it when you want OpenAPI as a type contract, but you still want to keep your own HTTP layer.
 
 - Emits `.d.ts` declarations.
 - Keeps schemas as named TypeScript types.
-- Generates an `API` route map keyed by `"METHOD /path"`.
+- Generates an `Endpoints` map keyed by `"METHOD /path"`.
 - Includes an optional adapter-based client for typed calls.
 - Does not generate a full SDK or own your network stack.
 
@@ -64,7 +64,7 @@ Common package script:
 The generated file contains ordinary TypeScript declarations.
 
 ```ts
-export interface API {
+export interface Endpoints {
   "GET /pets": {
     params: void;
     query: { limit?: number };
@@ -95,18 +95,18 @@ export interface CreatePet {
 }
 ```
 
-`void` means that route has no value for that slot. If all you need is a type boundary between your API spec and your app, this is the whole workflow.
+`void` means that endpoint has no value for that slot. If all you need is a type boundary between your API spec and your app, this is the whole workflow.
 
 ## Optional Typed Client
 
-`createClient<API>(adapter)` gives you one typed request function. It validates the route key, path params, query, body, and response type at compile time.
+`createClient<Endpoints>(adapter)` gives you one typed request function. It validates the endpoint key, path params, query, body, and response type at compile time.
 
 It is intentionally not a fetch wrapper. Your adapter still owns auth, errors, retries, response parsing, and the HTTP library.
 
 ```ts
 // src/api-client.ts
 import { createClient, type Adapter } from "openapi-shape/client";
-import type { API } from "./api";
+import type { Endpoints } from "./api";
 
 const adapter: Adapter = async ({ method, url, body, headers }) => {
   const response = await fetch(url, { method, body, headers });
@@ -114,7 +114,7 @@ const adapter: Adapter = async ({ method, url, body, headers }) => {
   return response.json();
 };
 
-export const api = createClient<API>(adapter, {
+export const api = createClient<Endpoints>(adapter, {
   baseURL: "https://api.example.com",
 });
 ```
@@ -161,14 +161,14 @@ Axios:
 ```ts
 import axios, { type AxiosRequestConfig } from "axios";
 import { createClient, type Adapter } from "openapi-shape/client";
-import type { API } from "./api";
+import type { Endpoints } from "./api";
 
 const adapter: Adapter<AxiosRequestConfig> = async ({ method, url, body, headers, options }) => {
   const response = await axios.request({ method, url, data: body, headers, ...options });
   return response.data;
 };
 
-export const api = createClient<API, AxiosRequestConfig>(adapter);
+export const api = createClient<Endpoints, AxiosRequestConfig>(adapter);
 ```
 
 ky:
@@ -176,13 +176,13 @@ ky:
 ```ts
 import ky, { type Options as KyOptions } from "ky";
 import { createClient, type Adapter } from "openapi-shape/client";
-import type { API } from "./api";
+import type { Endpoints } from "./api";
 
 const adapter: Adapter<KyOptions> = async ({ method, url, body, headers, options }) => {
   return ky(url, { method, body, headers, ...options }).json();
 };
 
-export const api = createClient<API, KyOptions>(adapter);
+export const api = createClient<Endpoints, KyOptions>(adapter);
 ```
 
 ofetch:
@@ -190,13 +190,13 @@ ofetch:
 ```ts
 import { ofetch, type FetchOptions } from "ofetch";
 import { createClient, type Adapter } from "openapi-shape/client";
-import type { API } from "./api";
+import type { Endpoints } from "./api";
 
 const adapter: Adapter<FetchOptions> = async ({ method, url, body, headers, options }) => {
   return ofetch(url, { method, body, headers, ...options });
 };
 
-export const api = createClient<API, FetchOptions>(adapter);
+export const api = createClient<Endpoints, FetchOptions>(adapter);
 ```
 
 </details>
@@ -207,24 +207,24 @@ The optional client builds the adapter input like this:
 
 | Field     | Behavior                                                                                                                                                                                   |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `method`  | Read from the route key, such as `GET /pets`.                                                                                                                                              |
+| `method`  | Read from the endpoint key, such as `GET /pets`.                                                                                                                                              |
 | `url`     | `baseURL` plus path params and query string. Path params are URL-encoded. Query arrays become repeated keys, for example `tags=a&tags=b`. `null` and `undefined` query values are skipped. |
 | `body`    | `FormData`, `URLSearchParams`, `Blob`, `ArrayBuffer`, typed arrays, and `ReadableStream` pass through unchanged. `undefined` stays `undefined`. Everything else is `JSON.stringify`-ed.    |
 | `headers` | JSON bodies get `Content-Type: application/json`. Passthrough bodies get no automatic content type. Per-call headers override auto headers.                                                |
 | `options` | Passed through to your adapter without inspection.                                                                                                                                         |
 
-For multipart requests, keep any cast close to the wrapper that knows the route. For example, if your API has a `POST /upload` route:
+For multipart requests, keep any cast close to the wrapper that knows the endpoint. For example, if your API has a `POST /upload` endpoint:
 
 ```ts
 import { api } from "./api-client";
-import type { API } from "./api";
+import type { Endpoints } from "./api";
 
 export function uploadPetPhoto(file: File) {
   const form = new FormData();
   form.append("file", file);
 
   return api("POST /upload", {
-    body: form as API["POST /upload"]["body"],
+    body: form as Endpoints["POST /upload"]["body"],
   });
 }
 ```
@@ -234,7 +234,7 @@ export function uploadPetPhoto(file: File) {
 
 ```ts
 import { createClient, type Adapter } from "openapi-shape/client";
-import type { API } from "./api";
+import type { Endpoints } from "./api";
 
 class HttpError extends Error {
   constructor(
@@ -268,7 +268,7 @@ const adapter: Adapter = async ({ method, url, body, headers }) => {
   return response.blob();
 };
 
-export const api = createClient<API>(adapter, {
+export const api = createClient<Endpoints>(adapter, {
   baseURL: "https://api.example.com",
 });
 ```
@@ -295,7 +295,7 @@ import { generate } from "openapi-shape";
 const code = generate(openapi);
 ```
 
-Lower-level exports are available when needed: `schemaToType`, `generateSchemas`, `generateRoutes`, and `readSource`.
+Lower-level exports are available when needed: `schemaToType`, `generateSchemas`, `generateEndpoints`, and `readSource`.
 
 ## Supported
 
@@ -305,7 +305,7 @@ OpenAPI 3.0 and 3.1 JSON specs.
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `components.schemas`                                     | `export interface` or `export type` declarations.                                                                    |
 | `$ref` schemas                                           | Preserved as named TypeScript references.                                                                            |
-| `$ref` parameters, request bodies, responses, path items | Resolved before route generation.                                                                                    |
+| `$ref` parameters, request bodies, responses, path items | Resolved before endpoint generation.                                                                                    |
 | `oneOf` / `anyOf` / `allOf`                              | Union / union / intersection types.                                                                                  |
 | `discriminator` on `oneOf` / `anyOf`                     | Discriminator literals injected into branches for narrowable unions, including `allOf` branch schemas.               |
 | `enum` / `const`                                         | Literal types.                                                                                                       |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateRoutes } from "../src/routes";
+import { generateEndpoints } from "../src/endpoints";
 
 const json = (schema: any) => ({ "200": { content: { "application/json": { schema } } } });
 const jsonAt = (status: string, schema: any) => ({
@@ -7,9 +7,9 @@ const jsonAt = (status: string, schema: any) => ({
 });
 const okText = { "200": { content: { "text/plain": { schema: { type: "string" } } } } };
 
-describe("generateRoutes", () => {
+describe("generateEndpoints", () => {
   it("generates a simple GET endpoint", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         get: { responses: json({ type: "array", items: { $ref: "#/components/schemas/Task" } }) },
       },
@@ -22,7 +22,7 @@ describe("generateRoutes", () => {
   });
 
   it("generates POST with request body", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         post: {
           requestBody: {
@@ -45,7 +45,7 @@ describe("generateRoutes", () => {
   });
 
   it("extracts path parameters", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks/{taskId}": {
         get: {
           parameters: [{ name: "taskId", in: "path", schema: { type: "string" } }],
@@ -57,7 +57,7 @@ describe("generateRoutes", () => {
   });
 
   it("extracts query parameters with optional", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         get: {
           parameters: [
@@ -72,14 +72,14 @@ describe("generateRoutes", () => {
   });
 
   it("uses unknown for missing response schema", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/ping": { get: { responses: {} } },
     });
     expect(result).toContain("response: unknown");
   });
 
   it("picks first 2xx and ignores later ones", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         post: {
           responses: {
@@ -93,7 +93,7 @@ describe("generateRoutes", () => {
   });
 
   it("falls back to 2XX wildcard response", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         delete: { responses: jsonAt("2XX", { type: "boolean" }) },
       },
@@ -102,7 +102,7 @@ describe("generateRoutes", () => {
   });
 
   it("generates multiple methods on same path", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         get: { responses: json({ type: "string" }) },
         post: { responses: json({ type: "number" }) },
@@ -113,7 +113,7 @@ describe("generateRoutes", () => {
   });
 
   it("handles path-level parameters", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks/{taskId}": {
         parameters: [{ name: "taskId", in: "path", schema: { type: "string" } }],
         get: { responses: json({ type: "string" }) },
@@ -123,7 +123,7 @@ describe("generateRoutes", () => {
   });
 
   it("deduplicates path-level and operation-level params", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks/{taskId}": {
         parameters: [{ name: "taskId", in: "path", schema: { type: "string" } }],
         get: {
@@ -137,14 +137,14 @@ describe("generateRoutes", () => {
   });
 
   it("maps text/* response to string type", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/health": { get: { responses: okText } },
     });
     expect(result).toContain("response: string");
   });
 
   it("maps binary response to Blob type", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/files/{id}": {
         get: {
           parameters: [{ name: "id", in: "path", schema: { type: "string" } }],
@@ -162,7 +162,7 @@ describe("generateRoutes", () => {
   });
 
   it("prefers json over text when both are available", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/data": {
         get: {
           responses: {
@@ -186,7 +186,7 @@ describe("generateRoutes", () => {
   });
 
   it("extracts body from multipart/form-data", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/upload": {
         post: {
           requestBody: {
@@ -236,7 +236,7 @@ describe("generateRoutes", () => {
   });
 
   it("skips non-operation path-item keys (summary, description, x-* extensions)", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         summary: "Tasks resource",
         description: "Manage tasks",
@@ -249,7 +249,7 @@ describe("generateRoutes", () => {
   });
 
   it("ignores header and cookie parameters", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         get: {
           parameters: [
@@ -268,7 +268,7 @@ describe("generateRoutes", () => {
   });
 
   it("emits JSDoc above route from operation summary and description", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         get: {
           summary: "List tasks",
@@ -283,7 +283,7 @@ describe("generateRoutes", () => {
   });
 
   it("emits multi-line params with JSDoc when path param has description", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks/{taskId}": {
         get: {
           parameters: [
@@ -304,7 +304,7 @@ describe("generateRoutes", () => {
   });
 
   it("emits multi-line query with JSDoc when any query param has description", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         get: {
           parameters: [
@@ -321,7 +321,7 @@ describe("generateRoutes", () => {
   });
 
   it("keeps single-line query format when no descriptions are present", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/tasks": {
         get: {
           parameters: [
@@ -336,7 +336,7 @@ describe("generateRoutes", () => {
   });
 
   it("marks deprecated operations with @deprecated", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/old": {
         get: { deprecated: true, responses: json({ type: "string" }) },
       },
@@ -344,15 +344,15 @@ describe("generateRoutes", () => {
     expect(result).toContain('  /** @deprecated */\n  "GET /api/old"');
   });
 
-  it("wraps everything in export interface API", () => {
-    const result = generateRoutes({
+  it("wraps everything in export interface Endpoints", () => {
+    const result = generateEndpoints({
       "/api/ping": { get: { responses: { "200": { description: "OK" } } } },
     });
-    expect(result).toContain("export interface API {");
+    expect(result).toContain("export interface Endpoints {");
   });
 
   it("quotes path parameter names with illegal identifier chars", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/pets/{pet-id}": {
         get: {
           parameters: [{ name: "pet-id", in: "path", required: true, schema: { type: "string" } }],
@@ -364,7 +364,7 @@ describe("generateRoutes", () => {
   });
 
   it("quotes query parameter names with illegal identifier chars", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/api/x": {
         get: {
           parameters: [{ name: "user-name", in: "query", schema: { type: "string" } }],
@@ -376,7 +376,7 @@ describe("generateRoutes", () => {
   });
 
   it("emits body: T when requestBody.required is true", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/x": {
         post: {
           requestBody: {
@@ -392,7 +392,7 @@ describe("generateRoutes", () => {
   });
 
   it("emits body?: T when requestBody.required is missing", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/x": {
         post: {
           requestBody: {
@@ -406,7 +406,7 @@ describe("generateRoutes", () => {
   });
 
   it("prefers application/json request body schema over other content types", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/x": {
         post: {
           requestBody: {
@@ -449,7 +449,7 @@ describe("generateRoutes", () => {
   });
 
   it("emits body?: T when requestBody.required is explicitly false", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/x": {
         patch: {
           requestBody: {
@@ -464,7 +464,7 @@ describe("generateRoutes", () => {
   });
 
   it("returns void for a 204-only response", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/x": {
         delete: { responses: { "204": { description: "No Content" } } },
       },
@@ -473,7 +473,7 @@ describe("generateRoutes", () => {
   });
 
   it("returns void for a 200 with no content", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/x": {
         get: { responses: { "200": { description: "OK" } } },
       },
@@ -482,7 +482,7 @@ describe("generateRoutes", () => {
   });
 
   it("prefers a 2xx with content schema over an empty 2xx", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/x": {
         get: {
           responses: {
@@ -497,7 +497,7 @@ describe("generateRoutes", () => {
   });
 
   it("returns unknown when no 2xx exists", () => {
-    const result = generateRoutes({
+    const result = generateEndpoints({
       "/x": {
         get: { responses: { "500": { description: "Server Error" } } },
       },

@@ -6,7 +6,7 @@ export type Adapter<TOptions = unknown> = (request: {
   options: TOptions | undefined;
 }) => Promise<unknown>;
 
-type RouteDefinition = {
+type EndpointDefinition = {
   params: unknown;
   query: unknown;
   body?: unknown;
@@ -21,24 +21,24 @@ type RequestField<TKey extends string, TValue> = TValue extends void
       ? { [Property in TKey]?: TValue }
       : { [Property in TKey]: TValue };
 
-type RequestOptions<T extends RouteDefinition, TOptions> = RequestField<"params", T["params"]> &
+type RequestOptions<T extends EndpointDefinition, TOptions> = RequestField<"params", T["params"]> &
   RequestField<"query", T["query"]> &
   RequestField<"body", T["body"]> & {
     headers?: Record<string, string>;
     options?: TOptions;
   };
 
-type HasRequiredOptions<T extends RouteDefinition> =
+type HasRequiredOptions<T extends EndpointDefinition> =
   {} extends RequestOptions<T, unknown> ? false : true;
 
 export interface ClientOptions {
   baseURL?: string;
 }
 
-function splitRoute(route: string): { method: string; path: string } {
-  const space = route.indexOf(" ");
-  if (space === -1) return { method: route, path: "" };
-  return { method: route.slice(0, space), path: route.slice(space + 1) };
+function splitEndpoint(endpoint: string): { method: string; path: string } {
+  const space = endpoint.indexOf(" ");
+  if (space === -1) return { method: endpoint, path: "" };
+  return { method: endpoint.slice(0, space), path: endpoint.slice(space + 1) };
 }
 
 function replacePathParams(path: string, params: Record<string, unknown> | undefined): string {
@@ -89,19 +89,19 @@ function serializeBody(body: unknown): {
   return { body: JSON.stringify(body), headers: { "Content-Type": "application/json" } };
 }
 
-export function createClient<API extends { [K in keyof API]: RouteDefinition }, TOptions = unknown>(
-  adapter: Adapter<TOptions>,
-  options?: ClientOptions,
-) {
+export function createClient<
+  Endpoints extends { [K in keyof Endpoints]: EndpointDefinition },
+  TOptions = unknown,
+>(adapter: Adapter<TOptions>, options?: ClientOptions) {
   const baseURL = (options?.baseURL ?? "").replace(/\/+$/, "");
 
-  return async <K extends keyof API & string>(
-    route: K,
-    ...args: HasRequiredOptions<API[K]> extends true
-      ? [options: RequestOptions<API[K], TOptions>]
-      : [options?: RequestOptions<API[K], TOptions>]
-  ): Promise<API[K]["response"]> => {
-    const { method, path } = splitRoute(route);
+  return async <K extends keyof Endpoints & string>(
+    endpoint: K,
+    ...args: HasRequiredOptions<Endpoints[K]> extends true
+      ? [options: RequestOptions<Endpoints[K], TOptions>]
+      : [options?: RequestOptions<Endpoints[K], TOptions>]
+  ): Promise<Endpoints[K]["response"]> => {
+    const { method, path } = splitEndpoint(endpoint);
 
     const opts = (args[0] ?? {}) as Record<string, any>;
     const url = appendQuery(
@@ -120,6 +120,6 @@ export function createClient<API extends { [K in keyof API]: RouteDefinition }, 
       options: opts.options as TOptions | undefined,
     });
 
-    return result as API[K]["response"];
+    return result as Endpoints[K]["response"];
   };
 }

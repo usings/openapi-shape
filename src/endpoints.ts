@@ -105,7 +105,7 @@ function buildRequestType(operation: any): { type: string; required: boolean } {
   return { type: "void", required: true };
 }
 
-export function generateRoutes(paths: Record<string, any>): string {
+export function generateEndpoints(paths: Record<string, any>): string {
   const entries: string[] = [];
 
   for (const [path, pathItem] of Object.entries(paths)) {
@@ -114,7 +114,7 @@ export function generateRoutes(paths: Record<string, any>): string {
     for (const [method, operation] of Object.entries<any>(pathItem)) {
       if (!operation?.responses) continue;
 
-      const routeKey = `${method.toUpperCase()} ${path}`;
+      const endpointKey = `${method.toUpperCase()} ${path}`;
       const operationParams: any[] = operation.parameters || [];
       const allParams = deduplicateParams([...pathLevelParams, ...operationParams]);
 
@@ -130,9 +130,9 @@ export function generateRoutes(paths: Record<string, any>): string {
             ? `body: ${indentContinuation(bodyType, "    ")}`
             : `body?: ${indentContinuation(bodyType, "    ")}`;
 
-      const routeDoc = jsdoc(operation, "  ");
+      const endpointDoc = jsdoc(operation, "  ");
       entries.push(
-        `${routeDoc}  "${routeKey}": {\n` +
+        `${endpointDoc}  "${endpointKey}": {\n` +
           `    params: ${indentContinuation(params, "    ")}\n` +
           `    query: ${indentContinuation(query, "    ")}\n` +
           `    ${bodyLine}\n` +
@@ -142,5 +142,5 @@ export function generateRoutes(paths: Record<string, any>): string {
     }
   }
 
-  return `export interface API {\n${entries.join("\n")}\n}`;
+  return `export interface Endpoints {\n${entries.join("\n")}\n}`;
 }

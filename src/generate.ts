@@ -1,7 +1,7 @@
 import { readSource } from "./parser";
 import { resolveRefs } from "./refs";
 import { injectDiscriminators } from "./discriminator";
-import { generateRoutes } from "./routes";
+import { generateEndpoints } from "./endpoints";
 import { generateSchemas } from "./schemas";
 
 export function generate(openapi: any): string {
@@ -10,7 +10,7 @@ export function generate(openapi: any): string {
   const parts: string[] = [];
 
   if (injectedOpenapi.paths) {
-    parts.push(generateRoutes(injectedOpenapi.paths));
+    parts.push(generateEndpoints(injectedOpenapi.paths));
   }
 
   if (injectedOpenapi.components?.schemas) {
