@@ -22,15 +22,24 @@ function findResponseType(responses: any): string {
   return "unknown";
 }
 
+function isJsonContentType(contentType: string): boolean {
+  return contentType.toLowerCase().includes("json");
+}
+
 function isBinaryContentType(contentType: string): boolean {
+  const ct = contentType.toLowerCase();
   return (
-    contentType === "application/octet-stream" ||
-    contentType === "application/pdf" ||
-    contentType === "application/zip" ||
-    contentType.startsWith("image/") ||
-    contentType.startsWith("audio/") ||
-    contentType.startsWith("video/")
+    ct === "application/octet-stream" ||
+    ct === "application/pdf" ||
+    ct === "application/zip" ||
+    ct.startsWith("image/") ||
+    ct.startsWith("audio/") ||
+    ct.startsWith("video/")
   );
+}
+
+function isTextContentType(contentType: string): boolean {
+  return contentType.toLowerCase().startsWith("text/");
 }
 
 function isBinarySchema(schema: any): boolean {
@@ -42,7 +51,7 @@ function extractResponseType(response: any): string | null {
   if (!content) return null;
 
   for (const contentType of Object.keys(content)) {
-    if (contentType.includes("json") && content[contentType].schema) {
+    if (isJsonContentType(contentType) && content[contentType].schema) {
       return schemaToType(content[contentType].schema);
     }
   }
@@ -54,7 +63,7 @@ function extractResponseType(response: any): string | null {
   }
 
   for (const contentType of Object.keys(content)) {
-    if (contentType.startsWith("text/")) {
+    if (isTextContentType(contentType)) {
       return "string";
     }
   }
@@ -74,7 +83,7 @@ function extractResponseType(response: any): string | null {
 
 function findContentSchema(content: Record<string, any>): any | undefined {
   for (const contentType of Object.keys(content)) {
-    if (contentType.includes("json") && content[contentType].schema) {
+    if (isJsonContentType(contentType) && content[contentType].schema) {
       return content[contentType].schema;
     }
   }

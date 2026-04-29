@@ -196,6 +196,43 @@ describe("generateEndpoints", () => {
     expect(result).toContain("response: Blob");
   });
 
+  it("matches JSON response content-type case-insensitively (over binary CT)", () => {
+    const result = generateEndpoints({
+      "/api/thing": {
+        get: {
+          responses: {
+            "200": {
+              content: {
+                "application/octet-stream": { schema: { type: "string", format: "binary" } },
+                "Application/JSON": { schema: { $ref: "#/components/schemas/RespVo" } },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(result).toContain("response: RespVo");
+    expect(result).not.toContain("Blob");
+  });
+
+  it("matches JSON request-body content-type case-insensitively (over text)", () => {
+    const result = generateEndpoints({
+      "/api/thing": {
+        post: {
+          requestBody: {
+            required: true,
+            content: {
+              "text/plain": { schema: { type: "string" } },
+              "Application/JSON": { schema: { $ref: "#/components/schemas/CreateTask" } },
+            },
+          },
+          responses: json({ type: "string" }),
+        },
+      },
+    });
+    expect(result).toContain("body: CreateTask");
+  });
+
   it("prefers json over text when both are available", () => {
     const result = generateEndpoints({
       "/api/data": {
@@ -240,7 +277,7 @@ describe("generateEndpoints", () => {
         },
       },
     });
-    expect(result).toContain("body: {\n      file: string\n    }");
+    expect(result).toContain("body: {\n      file: Blob\n    }");
   });
 
   it("resolves $ref parameters via generate(doc)", async () => {
