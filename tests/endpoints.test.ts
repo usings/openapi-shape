@@ -161,6 +161,41 @@ describe("generateEndpoints", () => {
     expect(result).toContain("response: Blob");
   });
 
+  it("uses the schema for wildcard */* response (Springdoc default)", () => {
+    const result = generateEndpoints({
+      "/api/thing": {
+        get: {
+          responses: {
+            "200": {
+              content: {
+                "*/*": { schema: { $ref: "#/components/schemas/RespVo" } },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(result).toContain("response: RespVo");
+    expect(result).not.toContain("Blob");
+  });
+
+  it("treats wildcard */* with binary-format schema as Blob", () => {
+    const result = generateEndpoints({
+      "/api/thing": {
+        get: {
+          responses: {
+            "200": {
+              content: {
+                "*/*": { schema: { type: "string", format: "binary" } },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(result).toContain("response: Blob");
+  });
+
   it("prefers json over text when both are available", () => {
     const result = generateEndpoints({
       "/api/data": {

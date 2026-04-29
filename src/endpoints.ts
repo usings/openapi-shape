@@ -17,14 +17,34 @@ function findResponseType(responses: any): string {
   return sawSuccessNoContent ? "void" : "unknown";
 }
 
+function isBinaryContentType(contentType: string): boolean {
+  return (
+    contentType === "application/octet-stream" ||
+    contentType === "application/pdf" ||
+    contentType === "application/zip" ||
+    contentType.startsWith("image/") ||
+    contentType.startsWith("audio/") ||
+    contentType.startsWith("video/")
+  );
+}
+
+function isBinarySchema(schema: any): boolean {
+  return schema?.format === "binary" || schema?.format === "byte";
+}
+
 function extractResponseType(response: any): string | null {
   const content = response?.content;
   if (!content) return null;
 
-  // Priority: application/json > text/* > anything else
   for (const contentType of Object.keys(content)) {
     if (contentType.includes("json") && content[contentType].schema) {
       return schemaToType(content[contentType].schema);
+    }
+  }
+
+  for (const contentType of Object.keys(content)) {
+    if (isBinaryContentType(contentType) || isBinarySchema(content[contentType].schema)) {
+      return "Blob";
     }
   }
 
@@ -34,7 +54,12 @@ function extractResponseType(response: any): string | null {
     }
   }
 
-  // Binary/blob fallback
+  for (const contentType of Object.keys(content)) {
+    if (content[contentType].schema) {
+      return schemaToType(content[contentType].schema);
+    }
+  }
+
   if (Object.keys(content).length > 0) {
     return "Blob";
   }
