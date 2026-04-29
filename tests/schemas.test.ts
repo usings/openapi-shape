@@ -11,6 +11,13 @@ describe("schemaToType", () => {
     expect(schemaToType({ type })).toBe(expected);
   });
 
+  it.each([
+    [{ type: "string", format: "binary" }, "Blob"],
+    [{ type: "string", format: "byte" }, "Blob"],
+  ])("maps string with binary/byte format to Blob", (schema, expected) => {
+    expect(schemaToType(schema)).toBe(expected);
+  });
+
   it("converts array", () => {
     expect(schemaToType({ type: "array", items: { type: "string" } })).toBe("string[]");
   });
@@ -86,6 +93,11 @@ describe("schemaToType", () => {
         anyOf: [{ type: "string" }, { type: "boolean" }],
       }),
     ).toBe("string | boolean");
+  });
+
+  it("emits never for empty oneOf and anyOf", () => {
+    expect(schemaToType({ oneOf: [] })).toBe("never");
+    expect(schemaToType({ anyOf: [] })).toBe("never");
   });
 
   it("converts allOf to intersection", () => {
@@ -178,6 +190,10 @@ describe("schemaToType", () => {
     it("deduplicates repeated enum values", () => {
       expect(schemaToType({ type: "integer", enum: [0, 1, 2, 4, 4] })).toBe("0 | 1 | 2 | 4");
       expect(schemaToType({ type: "string", enum: ["a", "b", "a"] })).toBe('"a" | "b"');
+    });
+
+    it("emits never for empty enum", () => {
+      expect(schemaToType({ type: "string", enum: [] })).toBe("never");
     });
 
     it("emits boolean union for boolean enum", () => {

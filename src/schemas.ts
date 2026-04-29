@@ -19,6 +19,7 @@ export function schemaToType(schema: any): string {
   }
 
   if (Array.isArray(schema.enum)) {
+    if (schema.enum.length === 0) return "never";
     const literals = schema.enum.map((value: unknown) => constToType(value));
     return [...new Set<string>(literals)].join(" | ");
   }
@@ -29,10 +30,12 @@ export function schemaToType(schema: any): string {
   }
 
   if (schema.oneOf) {
+    if (schema.oneOf.length === 0) return "never";
     return schema.oneOf.map((branch: any) => schemaToType(branch)).join(" | ");
   }
 
   if (schema.anyOf) {
+    if (schema.anyOf.length === 0) return "never";
     return schema.anyOf.map((branch: any) => schemaToType(branch)).join(" | ");
   }
 
@@ -113,6 +116,10 @@ function isSchemaObject(value: unknown): value is Record<string, unknown> {
 }
 
 function convertType(schema: any): string {
+  if (schema.type === "string" && (schema.format === "binary" || schema.format === "byte")) {
+    return "Blob";
+  }
+
   if (schema.type === "array") {
     if (Array.isArray(schema.prefixItems)) {
       const tupleHead = schema.prefixItems.map((item: any) => schemaToType(item)).join(", ");
