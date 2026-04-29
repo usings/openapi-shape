@@ -175,6 +175,11 @@ describe("schemaToType", () => {
       expect(schemaToType({ type: "integer", enum: [1, 2, 3] })).toBe("1 | 2 | 3");
     });
 
+    it("deduplicates repeated enum values", () => {
+      expect(schemaToType({ type: "integer", enum: [0, 1, 2, 4, 4] })).toBe("0 | 1 | 2 | 4");
+      expect(schemaToType({ type: "string", enum: ["a", "b", "a"] })).toBe('"a" | "b"');
+    });
+
     it("emits boolean union for boolean enum", () => {
       expect(schemaToType({ type: "boolean", enum: [true, false] })).toBe("true | false");
     });

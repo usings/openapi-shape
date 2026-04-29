@@ -19,7 +19,8 @@ export function schemaToType(schema: any): string {
   }
 
   if (Array.isArray(schema.enum)) {
-    return schema.enum.map((value: unknown) => constToType(value)).join(" | ");
+    const literals = schema.enum.map((value: unknown) => constToType(value));
+    return [...new Set<string>(literals)].join(" | ");
   }
 
   if (schema.$ref) {
