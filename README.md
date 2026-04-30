@@ -59,6 +59,14 @@ Common package script:
 }
 ```
 
+CLI flags:
+
+```sh
+openapi-shape ./openapi.json --errors                       # include 4xx/5xx response types
+openapi-shape ./openapi.json --no-header                    # omit the @generated JSDoc header
+openapi-shape ./openapi.json --endpoint-key=operation-id    # use operationId as the Endpoints key
+```
+
 ## What You Get
 
 The generated file contains ordinary TypeScript declarations.
@@ -294,7 +302,7 @@ const code = await generateFromSource("./openapi.json");
 await writeFile("src/api.d.ts", code);
 ```
 
-You can also generate from an already parsed object:
+`generate(doc)` is synchronous and accepts an already-parsed object:
 
 ```ts
 import { generate } from "openapi-shape";
@@ -302,7 +310,47 @@ import { generate } from "openapi-shape";
 const code = generate(openapi);
 ```
 
-Lower-level exports are available when needed: `schemaToType`, `generateSchemas`, `generateEndpoints`, and `readSource`.
+### Options
+
+Both `generate` and `generateFromSource` accept a second argument:
+
+```ts
+await generateFromSource("./openapi.json", {
+  formatTypes: { "date-time": "Date", "uuid": "UUID" },
+  errors: true,
+  header: false,
+  endpointKey: "operation-id",
+});
+```
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `formatTypes` | `{}` | Map OpenAPI `format` values to custom TypeScript types. Applies to schemas with `type: "string" \| "number" \| "integer"` (and `["X", "null"]` variants). User mappings override the built-in `binary`/`byte` → `Blob`. |
+| `errors` | `false` | When `true`, each endpoint type gains an `errors` field listing 4xx/5xx response types (or `4XX`/`5XX` wildcards). `default` responses are not collected. The runtime `createClient` does not consume this; it is static metadata for callers to narrow against. |
+| `header` | default | `false` omits the JSDoc header. A function `(info) => string` replaces it with a custom string. |
+| `endpointKey` | `"method-path"` | `"operation-id"` uses `operationId` (falls back to `"METHOD /path"` when absent). A function `(endpoint) => string` provides full control. |
+
+### Advanced API
+
+For finer control, the pipeline is exposed in three pieces:
+
+```ts
+import { loadDocument, prepareDocument, buildIR, render } from "openapi-shape";
+
+// File / URL → prepared OpenAPI document
+const doc = await loadDocument("./openapi.json");
+
+// In-memory raw object → prepared document (sync)
+const doc2 = prepareDocument(rawObject);
+
+// Prepared document → intermediate representation
+const ir = buildIR(doc, { formatTypes: { "date-time": "Date" } });
+
+// IR → TypeScript string
+const code = render(ir, { errors: true });
+```
+
+`OpenAPIDocument`, `IR`, `TypeNode`, and the rest of the IR types are exported as well. `LoadError` (read / parse / unsupported version) and `BuildError` (schema name collision, discriminator conflict) are also exported for `instanceof` checks.
 
 ## Supported
 
