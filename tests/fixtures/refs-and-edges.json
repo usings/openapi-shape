@@ -36,10 +36,6 @@
         "properties": {
           "id": { "type": "string" },
           "kind": { "const": "task" },
-          "tuple": {
-            "type": "array",
-            "prefixItems": [{ "type": "string" }, { "type": "number" }]
-          },
           "user-id": { "type": "string" }
         },
         "required": ["id"]

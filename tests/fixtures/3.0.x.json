@@ -1,0 +1,20 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "OpenAPI 3.0 Differences", "version": "1.0.0" },
+  "components": {
+    "schemas": {
+      "NullableString": {
+        "type": "string",
+        "nullable": true
+      },
+      "Foo": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "nullable": true },
+          "age": { "type": "integer", "nullable": true }
+        },
+        "required": ["name"]
+      }
+    }
+  }
+}

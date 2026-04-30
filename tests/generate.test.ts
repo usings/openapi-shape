@@ -163,4 +163,22 @@ describe("generate (integration)", () => {
     const code = await generateFromSource(join(import.meta.dirname, "fixtures/discriminator.json"));
     await expectPassesTsc([code]);
   });
+
+  it("generates correct output for 3.0.x fixture", async () => {
+    const code = await generateFromSource(join(import.meta.dirname, "fixtures/3.0.x.json"));
+    expect(code).toMatchSnapshot();
+  });
+
+  it("generates correct output for 3.1.x fixture", async () => {
+    const code = await generateFromSource(join(import.meta.dirname, "fixtures/3.1.x.json"));
+    expect(code).toMatchSnapshot();
+  });
+
+  it("3.0.x and 3.1.x fixtures are valid as .d.ts and pass tsc --noEmit", async () => {
+    const [v30, v31] = await Promise.all([
+      generateFromSource(join(import.meta.dirname, "fixtures/3.0.x.json")),
+      generateFromSource(join(import.meta.dirname, "fixtures/3.1.x.json")),
+    ]);
+    await expectPassesTsc([v30, v31]);
+  });
 });

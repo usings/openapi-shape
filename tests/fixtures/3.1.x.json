@@ -1,0 +1,23 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "OpenAPI 3.1 Differences", "version": "1.0.0" },
+  "components": {
+    "schemas": {
+      "NullableString": {
+        "type": ["string", "null"]
+      },
+      "Foo": {
+        "type": "object",
+        "properties": {
+          "name": { "type": ["string", "null"] },
+          "age": { "type": ["integer", "null"] },
+          "tuple": {
+            "type": "array",
+            "prefixItems": [{ "type": "string" }, { "type": "number" }]
+          }
+        },
+        "required": ["name"]
+      }
+    }
+  }
+}
