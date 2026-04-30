@@ -1,6 +1,6 @@
 {
   "name": "openapi-shape",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "Generate TypeScript declarations and API shapes from OpenAPI JSON",
   "keywords": [
     "codegen",
