@@ -181,4 +181,59 @@ describe("generate (integration)", () => {
     ]);
     await expectPassesTsc([v30, v31]);
   });
+
+  it("formatTypes maps date-time to Date in petstore", async () => {
+    const code = await generateFromSource(join(import.meta.dirname, "fixtures/petstore.json"), {
+      formatTypes: { "date-time": "Date" },
+    });
+    expect(code).toMatchSnapshot();
+  });
+
+  it("errors: true adds errors field", async () => {
+    const { generate } = await import("../src/index");
+    const code = generate(
+      {
+        paths: {
+          "/x": {
+            get: {
+              responses: {
+                "200": { content: { "application/json": { schema: { type: "string" } } } },
+                "400": { content: { "application/json": { schema: { type: "string" } } } },
+              },
+            },
+          },
+        },
+      },
+      { errors: true },
+    );
+    expect(code).toContain('errors: { "400": string }');
+  });
+
+  it("header: false omits the JSDoc header", async () => {
+    const code = await generateFromSource(join(import.meta.dirname, "fixtures/petstore.json"), {
+      header: false,
+    });
+    expect(code.startsWith("/**\n")).toBe(false);
+  });
+
+  it("endpointKey: operation-id uses operationId", async () => {
+    const { generate } = await import("../src/index");
+    const code = generate(
+      {
+        paths: {
+          "/pets": {
+            get: {
+              operationId: "listPets",
+              responses: {
+                "200": { content: { "application/json": { schema: { type: "string" } } } },
+              },
+            },
+          },
+        },
+      },
+      { endpointKey: "operation-id" },
+    );
+    expect(code).toContain('"listPets":');
+    expect(code).not.toContain('"GET /pets"');
+  });
 });

@@ -5,9 +5,22 @@
     "correctness": "error"
   },
   "rules": {
-    "vitest/require-to-throw-message": "off"
+    "vitest/require-to-throw-message": "off",
+    "no-explicit-any": "error"
   },
   "env": {
     "builtin": true
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/loader/source.ts",
+        "src/loader/normalize.ts",
+        "tests/client.test.ts"
+      ],
+      "rules": {
+        "no-explicit-any": "off"
+      }
+    }
+  ]
 }

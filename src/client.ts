@@ -103,7 +103,7 @@ export function createClient<
   ): Promise<Endpoints[K]["response"]> => {
     const { method, path } = splitEndpoint(endpoint);
 
-    const opts = (args[0] ?? {}) as Record<string, any>;
+    const opts = (args[0] ?? {}) as Record<string, unknown>;
     const url = appendQuery(
       replacePathParams(path, opts.params as Record<string, unknown> | undefined),
       opts.query as Record<string, unknown> | undefined,
