@@ -4,14 +4,23 @@ import { render, type RenderOptions } from "./render";
 
 export interface GenerateOptions extends BuildOptions, RenderOptions {}
 
-export function generate(doc: object, options: GenerateOptions = {}): string {
+function generateFromDocument(doc: object, options: GenerateOptions): string {
   const prepared = prepareDocument(doc);
   return render(buildIR(prepared, options), options);
 }
 
-export async function generateFromSource(
-  source: string | URL,
-  options: GenerateOptions = {},
-): Promise<string> {
+async function generateFromSource(source: string | URL, options: GenerateOptions): Promise<string> {
   return render(buildIR(await loadDocument(source), options), options);
+}
+
+export function generate(source: string | URL, options?: GenerateOptions): Promise<string>;
+export function generate(doc: object, options?: GenerateOptions): string;
+export function generate(
+  input: object | string | URL,
+  options: GenerateOptions = {},
+): string | Promise<string> {
+  if (typeof input === "string" || input instanceof URL) {
+    return generateFromSource(input, options);
+  }
+  return generateFromDocument(input, options);
 }

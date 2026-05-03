@@ -327,14 +327,14 @@ export const api = createClient<Endpoints>(adapter, {
 Use the generator from build scripts, CLIs, or tests:
 
 ```ts
-import { generate, generateFromSource } from "openapi-shape";
+import { generate } from "openapi-shape";
 import { writeFile } from "node:fs/promises";
 
-const code = await generateFromSource("./openapi.json");
+const code = await generate("./openapi.json");
 await writeFile("src/api.d.ts", code);
 ```
 
-`generate(doc)` is synchronous and accepts an already-parsed object:
+`generate(source)` is async for file paths and URLs. `generate(doc)` is synchronous for already-parsed OpenAPI objects:
 
 ```ts
 import { generate } from "openapi-shape";
@@ -344,10 +344,10 @@ const code = generate(openapi);
 
 ### Options
 
-Both `generate` and `generateFromSource` accept options:
+Both forms accept options:
 
 ```ts
-await generateFromSource("./openapi.json", {
+await generate("./openapi.json", {
   formats: { "date-time": "Date", uuid: "UUID" },
   errors: true,
   header: false,

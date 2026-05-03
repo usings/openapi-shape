@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { generateFromSource } from "./index";
+import { generate } from "./index";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -25,7 +25,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
   if (values.help) return { exitCode: 0, stdout: HELP + "\n" };
   if (positionals.length === 0) return { exitCode: 1, stdout: HELP + "\n" };
 
-  const code = await generateFromSource(positionals[0]);
+  const code = await generate(positionals[0]);
 
   if (values.output) {
     await writeFile(resolve(values.output), code, "utf-8");

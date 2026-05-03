@@ -6,7 +6,7 @@
 // discriminator injection remain implementation details.
 
 // Main API
-export { generate, generateFromSource, type GenerateOptions } from "./generate";
+export { generate, type GenerateOptions } from "./generate";
 
 // Loader
 export { loadDocument, prepareDocument } from "./loader";

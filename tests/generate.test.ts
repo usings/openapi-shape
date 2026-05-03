@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateFromSource } from "../src/index";
+import { generate } from "../src/index";
 import { spawn } from "node:child_process";
 import { writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -31,34 +31,30 @@ async function expectPassesTsc(codes: string[]): Promise<void> {
 
 describe("generate (integration)", () => {
   it("generates correct output for petstore fixture", async () => {
-    const code = await generateFromSource(join(import.meta.dirname, "fixtures/petstore.json"));
+    const code = await generate(join(import.meta.dirname, "fixtures/petstore.json"));
     expect(code).toMatchSnapshot();
   });
 
   it("generates correct output for edge-cases fixture", async () => {
-    const code = await generateFromSource(join(import.meta.dirname, "fixtures/edge-cases.json"));
+    const code = await generate(join(import.meta.dirname, "fixtures/edge-cases.json"));
     expect(code).toMatchSnapshot();
   });
 
   it("generated code is valid as .d.ts and passes tsc --noEmit", async () => {
     const [petstoreCode, edgeCasesCode] = await Promise.all([
-      generateFromSource(join(import.meta.dirname, "fixtures/petstore.json")),
-      generateFromSource(join(import.meta.dirname, "fixtures/edge-cases.json")),
+      generate(join(import.meta.dirname, "fixtures/petstore.json")),
+      generate(join(import.meta.dirname, "fixtures/edge-cases.json")),
     ]);
     await expectPassesTsc([petstoreCode, edgeCasesCode]);
   });
 
   it("generates correct output for refs-and-edges fixture", async () => {
-    const code = await generateFromSource(
-      join(import.meta.dirname, "fixtures/refs-and-edges.json"),
-    );
+    const code = await generate(join(import.meta.dirname, "fixtures/refs-and-edges.json"));
     expect(code).toMatchSnapshot();
   });
 
   it("refs-and-edges fixture is valid as .d.ts and passes tsc --noEmit", async () => {
-    const code = await generateFromSource(
-      join(import.meta.dirname, "fixtures/refs-and-edges.json"),
-    );
+    const code = await generate(join(import.meta.dirname, "fixtures/refs-and-edges.json"));
     await expectPassesTsc([code]);
   });
 
@@ -155,35 +151,35 @@ describe("generate (integration)", () => {
   });
 
   it("generates correct output for discriminator fixture", async () => {
-    const code = await generateFromSource(join(import.meta.dirname, "fixtures/discriminator.json"));
+    const code = await generate(join(import.meta.dirname, "fixtures/discriminator.json"));
     expect(code).toMatchSnapshot();
   });
 
   it("discriminator fixture is valid as .d.ts and passes tsc --noEmit", async () => {
-    const code = await generateFromSource(join(import.meta.dirname, "fixtures/discriminator.json"));
+    const code = await generate(join(import.meta.dirname, "fixtures/discriminator.json"));
     await expectPassesTsc([code]);
   });
 
   it("generates correct output for 3.0.x fixture", async () => {
-    const code = await generateFromSource(join(import.meta.dirname, "fixtures/3.0.x.json"));
+    const code = await generate(join(import.meta.dirname, "fixtures/3.0.x.json"));
     expect(code).toMatchSnapshot();
   });
 
   it("generates correct output for 3.1.x fixture", async () => {
-    const code = await generateFromSource(join(import.meta.dirname, "fixtures/3.1.x.json"));
+    const code = await generate(join(import.meta.dirname, "fixtures/3.1.x.json"));
     expect(code).toMatchSnapshot();
   });
 
   it("3.0.x and 3.1.x fixtures are valid as .d.ts and pass tsc --noEmit", async () => {
     const [v30, v31] = await Promise.all([
-      generateFromSource(join(import.meta.dirname, "fixtures/3.0.x.json")),
-      generateFromSource(join(import.meta.dirname, "fixtures/3.1.x.json")),
+      generate(join(import.meta.dirname, "fixtures/3.0.x.json")),
+      generate(join(import.meta.dirname, "fixtures/3.1.x.json")),
     ]);
     await expectPassesTsc([v30, v31]);
   });
 
   it("formats maps date-time to Date in petstore", async () => {
-    const code = await generateFromSource(join(import.meta.dirname, "fixtures/petstore.json"), {
+    const code = await generate(join(import.meta.dirname, "fixtures/petstore.json"), {
       formats: { "date-time": "Date" },
     });
     expect(code).toMatchSnapshot();
@@ -210,7 +206,7 @@ describe("generate (integration)", () => {
   });
 
   it("header: false omits the JSDoc header", async () => {
-    const code = await generateFromSource(join(import.meta.dirname, "fixtures/petstore.json"), {
+    const code = await generate(join(import.meta.dirname, "fixtures/petstore.json"), {
       header: false,
     });
     expect(code.startsWith("/**\n")).toBe(false);
