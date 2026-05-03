@@ -5,29 +5,29 @@
 [![bundle][bundle-src]][bundle-href]
 [![License][license-src]][license-href]
 
-Generate TypeScript declarations and API shapes from OpenAPI JSON.
+Generate TypeScript declarations and endpoint shapes from OpenAPI JSON.
 
-`openapi-shape` turns an OpenAPI 3.x JSON document into TypeScript declarations: schema types plus an `Endpoints` map that describes params, query, request body, and response for each endpoint.
+`openapi-shape` turns an OpenAPI 3.x JSON document into TypeScript declarations: named schema types plus an `Endpoints` map for each route's params, query, request body, and response.
 
-Use it when you want OpenAPI as a type contract, but you still want to keep your own HTTP layer.
+Use it when OpenAPI is your type contract, but your app should still own the HTTP layer.
 
-- Emits `.d.ts` declarations.
-- Keeps schemas as named TypeScript types.
+- Emits `.d.ts` files.
+- Preserves schemas as named TypeScript types.
 - Generates an `Endpoints` map keyed by `"METHOD /path"`.
-- Includes an optional adapter-based client for typed calls.
-- Does not generate a full SDK or own your network stack.
+- Offers an optional adapter-based client for typed calls.
+- Avoids generating a full SDK or owning your network stack.
 
 Requires Node >= 18 and TypeScript >= 5.
 
 ## Install
 
-If you only generate types:
+Install as a dev dependency if you only generate declarations:
 
 ```sh
 pnpm add -D openapi-shape
 ```
 
-If you use `createClient` at runtime:
+Install as a runtime dependency if you use `createClient` in application code:
 
 ```sh
 pnpm add openapi-shape
@@ -49,7 +49,7 @@ From a URL:
 pnpm exec openapi-shape https://api.example.com/openapi.json -o src/api.d.ts
 ```
 
-Common package script:
+Add a package script if you regenerate declarations often:
 
 ```json
 {
@@ -59,17 +59,9 @@ Common package script:
 }
 ```
 
-CLI flags:
-
-```sh
-openapi-shape ./openapi.json --errors                       # include 4xx/5xx response types
-openapi-shape ./openapi.json --no-header                    # omit the @generated JSDoc header
-openapi-shape ./openapi.json --endpoint-key=operation-id    # use operationId as the Endpoints key
-```
-
 ## What You Get
 
-The generated file contains ordinary TypeScript declarations.
+The generated file is plain TypeScript declarations.
 
 ```ts
 export interface Endpoints {
@@ -103,13 +95,13 @@ export interface CreatePet {
 }
 ```
 
-`void` means that endpoint has no value for that slot. If all you need is a type boundary between your API spec and your app, this is the whole workflow.
+`void` means the endpoint has no value for that slot. If you only need a type boundary between your API spec and your app, this is the whole workflow.
 
 ## Optional Typed Client
 
-`createClient<Endpoints>(adapter)` gives you one typed request function. It validates the endpoint key, path params, query, body, and response type at compile time.
+`createClient<Endpoints>(adapter)` gives you one typed request function. TypeScript checks the endpoint key, path params, query, body, and response type at compile time.
 
-It is intentionally not a fetch wrapper. Your adapter still owns auth, errors, retries, response parsing, and the HTTP library.
+It is intentionally not a fetch wrapper. Your adapter still owns auth, retries, error handling, response parsing, and the HTTP library.
 
 ```ts
 // src/api-client.ts
@@ -127,7 +119,7 @@ export const api = createClient<Endpoints>(adapter, {
 });
 ```
 
-Use it from application code:
+Call it from application code:
 
 ```ts
 import { api } from "./api-client";
@@ -157,10 +149,10 @@ await api("GET /pets", {
 });
 ```
 
-- `headers` are merged after automatic headers, so your values win.
-- `options` is passed to the adapter untouched.
+- `headers` are merged after automatic headers, so caller values win.
+- `options` is passed to the adapter unchanged.
 - `Adapter<TOptions>` makes `options` typed for axios, ky, ofetch, or your own client.
-- `Omit` the fields the adapter already owns (`method`, `url`, `body`/`data`, `headers`) from `TOptions` so callers can't override them.
+- Omit fields owned by the adapter (`method`, `url`, `body`/`data`, `headers`) from `TOptions` so callers cannot override them.
 
 <details>
 <summary>Adapter examples for axios, ky, and ofetch</summary>
@@ -218,17 +210,17 @@ export const api = createClient<Endpoints, AdapterOptions>(adapter);
 
 ## Request Building
 
-The optional client builds the adapter input like this:
+The optional client builds adapter input like this:
 
-| Field     | Behavior                                                                                                                                                                                   |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `method`  | Read from the endpoint key, such as `GET /pets`.                                                                                                                                              |
-| `url`     | `baseURL` plus path params and query string. Path params are URL-encoded. Query arrays become repeated keys, for example `tags=a&tags=b`. `null` and `undefined` query values are skipped. |
-| `body`    | `FormData`, `URLSearchParams`, `Blob`, `ArrayBuffer`, typed arrays, and `ReadableStream` pass through unchanged. `undefined` stays `undefined`. Everything else is `JSON.stringify`-ed.    |
-| `headers` | JSON bodies get `Content-Type: application/json`. Passthrough bodies get no automatic content type. Per-call headers override auto headers.                                                |
-| `options` | Passed through to your adapter without inspection.                                                                                                                                         |
+| Field | Behavior |
+| --- | --- |
+| `method` | Read from the endpoint key, such as `GET /pets`. |
+| `url` | `baseURL` plus path params and query string. Path params are URL-encoded. Query arrays become repeated keys, for example `tags=a&tags=b`. `null` and `undefined` query values are skipped. |
+| `body` | `FormData`, `URLSearchParams`, `Blob`, `ArrayBuffer`, typed arrays, and `ReadableStream` pass through unchanged. `undefined` stays `undefined`. Everything else is `JSON.stringify`-ed. |
+| `headers` | JSON bodies get `Content-Type: application/json`. Passthrough bodies get no automatic content type. Per-call headers override automatic headers. |
+| `options` | Passed through to your adapter without inspection. |
 
-For multipart requests, keep any cast close to the wrapper that knows the endpoint. For example, if your API has a `POST /upload` endpoint:
+For multipart requests, keep any cast close to the wrapper that knows the endpoint:
 
 ```ts
 import { api } from "./api-client";
@@ -292,7 +284,7 @@ export const api = createClient<Endpoints>(adapter, {
 
 ## Programmatic API
 
-Use the generator in build scripts or tests:
+Use the generator from build scripts or tests:
 
 ```ts
 import { generate, generateFromSource } from "openapi-shape";
@@ -312,27 +304,25 @@ const code = generate(openapi);
 
 ### Options
 
-Both `generate` and `generateFromSource` accept a second argument:
+Both `generate` and `generateFromSource` accept options:
 
 ```ts
 await generateFromSource("./openapi.json", {
-  formatTypes: { "date-time": "Date", "uuid": "UUID" },
+  formats: { "date-time": "Date", "uuid": "UUID" },
   errors: true,
   header: false,
-  endpointKey: "operation-id",
 });
 ```
 
-| Option | Default | Effect |
+| Option | Default | Description |
 | --- | --- | --- |
-| `formatTypes` | `{}` | Map OpenAPI `format` values to custom TypeScript types. Applies to schemas with `type: "string" \| "number" \| "integer"` (and `["X", "null"]` variants). User mappings override the built-in `binary`/`byte` → `Blob`. |
-| `errors` | `false` | When `true`, each endpoint type gains an `errors` field listing 4xx/5xx response types (or `4XX`/`5XX` wildcards). `default` responses are not collected. The runtime `createClient` does not consume this; it is static metadata for callers to narrow against. |
-| `header` | default | `false` omits the JSDoc header. A function `(info) => string` replaces it with a custom string. |
-| `endpointKey` | `"method-path"` | `"operation-id"` uses `operationId` (falls back to `"METHOD /path"` when absent). A function `(endpoint) => string` provides full control. |
+| `formats` | `{}` | Maps OpenAPI `format` values to custom TypeScript types. Applies to schemas with `type: "string" \| "number" \| "integer"` and nullable variants such as `["string", "null"]`. User mappings override the built-in `binary`/`byte` -> `Blob`. |
+| `errors` | `false` | Adds an `errors` field to each endpoint type with collected 4xx/5xx response types, including `4XX`/`5XX` wildcards. `default` responses are not collected. The runtime client does not consume this field. |
+| `header` | default | Pass `false` to omit the generated JSDoc header, or a function `(info) => string` to replace it. |
 
 ### Advanced API
 
-For finer control, the pipeline is exposed in three pieces:
+For finer control, use the pipeline directly:
 
 ```ts
 import { loadDocument, prepareDocument, buildIR, render } from "openapi-shape";
@@ -344,37 +334,37 @@ const doc = await loadDocument("./openapi.json");
 const doc2 = prepareDocument(rawObject);
 
 // Prepared document → intermediate representation
-const ir = buildIR(doc, { formatTypes: { "date-time": "Date" } });
+const ir = buildIR(doc, { formats: { "date-time": "Date" } });
 
 // IR → TypeScript string
 const code = render(ir, { errors: true });
 ```
 
-`OpenAPIDocument`, `IR`, `TypeNode`, and the rest of the IR types are exported as well. `LoadError` (read / parse / unsupported version) and `BuildError` (schema name collision, discriminator conflict) are also exported for `instanceof` checks.
+`OpenAPIDocument`, `IR`, `TypeNode`, and the rest of the IR types are exported. `LoadError` (read, parse, unsupported version) and `BuildError` (schema name collision, discriminator conflict) are exported for `instanceof` checks.
 
 ## Supported
 
-OpenAPI 3.0 and 3.1 JSON specs.
+OpenAPI 3.0 and 3.1 JSON documents.
 
-| Feature                                                  | Output                                                                                                               |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `components.schemas`                                     | `export interface` or `export type` declarations.                                                                    |
-| `$ref` schemas                                           | Preserved as named TypeScript references.                                                                            |
-| `$ref` parameters, request bodies, responses, path items | Resolved before endpoint generation.                                                                                    |
-| `oneOf` / `anyOf` / `allOf`                              | Union / union / intersection types.                                                                                  |
-| `discriminator` on `oneOf` / `anyOf`                     | Discriminator literals injected into branches for narrowable unions, including `allOf` branch schemas.               |
-| `enum` / `const`                                         | Literal types.                                                                                                       |
-| OpenAPI 3.0 `nullable`                                   | Adds `null`.                                                                                                         |
-| OpenAPI 3.1 `type: ["T", "null"]`                        | Adds `null`.                                                                                                         |
-| `prefixItems`                                            | Tuple types, with optional rest from `items`.                                                                        |
-| `additionalProperties`                                   | `Record<string, T>` or explicit properties plus an index signature.                                                  |
-| `requestBody.required`                                   | Honored. Missing or `false` means `body?: T`; `true` means `body: T`.                                                |
-| 2xx responses                                            | JSON schema -> typed response, `text/*` -> `string`, binary -> `Blob`, empty success -> `void`, otherwise `unknown`. |
+| Feature | Output |
+| --- | --- |
+| `components.schemas` | `export interface` or `export type` declarations. |
+| `$ref` schemas | Named TypeScript references. |
+| `$ref` parameters, request bodies, responses, path items | Resolved before endpoint generation. |
+| `oneOf` / `anyOf` / `allOf` | Union / union / intersection types. |
+| `discriminator` on `oneOf` / `anyOf` | Discriminator literals injected into branches for narrowable unions, including `allOf` branch schemas. |
+| `enum` / `const` | Literal types. |
+| OpenAPI 3.0 `nullable` | Adds `null`. |
+| OpenAPI 3.1 `type: ["T", "null"]` | Adds `null`. |
+| `prefixItems` | Tuple types, with optional rest from `items`. |
+| `additionalProperties` | `Record<string, T>` or explicit properties plus an index signature. |
+| `requestBody.required` | Missing or `false` means `body?: T`; `true` means `body: T`. |
+| 2xx responses | JSON schema -> typed response, `text/*` -> `string`, binary -> `Blob`, empty success -> `void`, otherwise `unknown`. |
 
 Identifier handling:
 
-- Invalid object property and parameter names are quoted, such as `"user-id"?: string`.
-- Invalid or reserved schema names are sanitized, such as `User-Profile` -> `User_Profile` and `class` -> `_class`.
+- Invalid object property and parameter names are quoted, for example `"user-id"?: string`.
+- Invalid or reserved schema names are sanitized, for example `User-Profile` -> `User_Profile` and `class` -> `_class`.
 - Schema name collisions after sanitization throw an error.
 
 ## Not Supported Yet
@@ -382,9 +372,7 @@ Identifier handling:
 - Swagger 2.0. Convert to OpenAPI 3 first.
 - YAML input.
 - `readOnly` / `writeOnly` request and response variants.
-- `format` branding.
 - External `$ref` targets such as remote URLs or separate files.
-- Error response typing for 4xx / 5xx responses. Handle errors in your adapter.
 
 ## License
 

@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`generate (integration) > formatTypes maps date-time to Date in petstore 1`] = `
+exports[`generate (integration) > formats maps date-time to Date in petstore 1`] = `
 "/**
  * Petstore
  *

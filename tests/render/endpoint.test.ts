@@ -112,27 +112,3 @@ describe("renderEndpointsInterface: errors option", () => {
     expect(renderEndpointsInterface([baseEndpoint], { errors: true })).not.toContain("errors:");
   });
 });
-
-describe("renderEndpointsInterface: endpointKey option", () => {
-  const ep: EndpointModel = {
-    ...baseEndpoint,
-    operationId: "listPets",
-    responses: { success: { kind: "primitive", name: "string" }, errors: [] },
-  };
-  it("default = method-path key", () => {
-    expect(renderEndpointsInterface([ep])).toContain('"GET /pets"');
-  });
-  it("operation-id mode uses operationId", () => {
-    expect(renderEndpointsInterface([ep], { endpointKey: "operation-id" })).toContain('"listPets"');
-  });
-  it("operation-id falls back to method-path when operationId missing", () => {
-    expect(renderEndpointsInterface([baseEndpoint], { endpointKey: "operation-id" })).toContain(
-      '"GET /pets"',
-    );
-  });
-  it("function form", () => {
-    expect(
-      renderEndpointsInterface([ep], { endpointKey: (e) => `${e.method}:${e.path}` }),
-    ).toContain('"get:/pets"');
-  });
-});

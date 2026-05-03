@@ -5,7 +5,6 @@ import { safeKey } from "../naming";
 
 export interface RenderEndpointsOptions {
   errors?: boolean;
-  endpointKey?: "method-path" | "operation-id" | ((endpoint: EndpointModel) => string);
 }
 
 export function renderEndpointsInterface(
@@ -17,7 +16,6 @@ export function renderEndpointsInterface(
 }
 
 function renderEndpointEntry(endpoint: EndpointModel, options: RenderEndpointsOptions): string {
-  const key = pickKey(endpoint, options);
   const docHeader = jsdoc(
     {
       summary: endpoint.summary,
@@ -37,14 +35,7 @@ function renderEndpointEntry(endpoint: EndpointModel, options: RenderEndpointsOp
     lines.push(`    errors: ${renderErrors(endpoint.responses.errors)}`);
   }
 
-  return `${docHeader}  "${key}": {\n${lines.join("\n")}\n  }`;
-}
-
-function pickKey(endpoint: EndpointModel, options: RenderEndpointsOptions): string {
-  const opt = options.endpointKey;
-  if (typeof opt === "function") return opt(endpoint);
-  if (opt === "operation-id") return endpoint.operationId ?? endpoint.key;
-  return endpoint.key;
+  return `${docHeader}  "${endpoint.key}": {\n${lines.join("\n")}\n  }`;
 }
 
 function renderParam(group: ParamGroup): string {

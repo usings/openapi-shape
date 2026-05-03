@@ -182,9 +182,9 @@ describe("generate (integration)", () => {
     await expectPassesTsc([v30, v31]);
   });
 
-  it("formatTypes maps date-time to Date in petstore", async () => {
+  it("formats maps date-time to Date in petstore", async () => {
     const code = await generateFromSource(join(import.meta.dirname, "fixtures/petstore.json"), {
-      formatTypes: { "date-time": "Date" },
+      formats: { "date-time": "Date" },
     });
     expect(code).toMatchSnapshot();
   });
@@ -214,26 +214,5 @@ describe("generate (integration)", () => {
       header: false,
     });
     expect(code.startsWith("/**\n")).toBe(false);
-  });
-
-  it("endpointKey: operation-id uses operationId", async () => {
-    const { generate } = await import("../src/index");
-    const code = generate(
-      {
-        paths: {
-          "/pets": {
-            get: {
-              operationId: "listPets",
-              responses: {
-                "200": { content: { "application/json": { schema: { type: "string" } } } },
-              },
-            },
-          },
-        },
-      },
-      { endpointKey: "operation-id" },
-    );
-    expect(code).toContain('"listPets":');
-    expect(code).not.toContain('"GET /pets"');
   });
 });

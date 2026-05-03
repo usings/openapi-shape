@@ -25,7 +25,7 @@ import { BuildError } from "../errors";
 import { safeIdentifier } from "../naming";
 
 export interface BuildOptions {
-  formatTypes?: Record<string, string>;
+  formats?: Record<string, string>;
 }
 
 export function buildIR(doc: OpenAPIDocument, options: BuildOptions = {}): IR {
@@ -152,12 +152,12 @@ function typeArrayToNode(schema: OpenAPISchema, options: BuildOptions): TypeNode
 
   if (
     schema.format !== undefined &&
-    options.formatTypes &&
-    Object.prototype.hasOwnProperty.call(options.formatTypes, schema.format) &&
+    options.formats &&
+    Object.prototype.hasOwnProperty.call(options.formats, schema.format) &&
     nonNull.length === 1 &&
     isFormatMappablePrimitive(nonNull[0])
   ) {
-    const mapped: TypeNode = { kind: "raw", text: options.formatTypes[schema.format] };
+    const mapped: TypeNode = { kind: "raw", text: options.formats[schema.format] };
     return includesNull ? { kind: "union", members: [mapped, primitive("null")] } : mapped;
   }
 
@@ -172,11 +172,11 @@ function convertSingleType(schema: OpenAPISchema, options: BuildOptions): TypeNo
 
   if (
     schema.format !== undefined &&
-    options.formatTypes &&
-    Object.prototype.hasOwnProperty.call(options.formatTypes, schema.format) &&
+    options.formats &&
+    Object.prototype.hasOwnProperty.call(options.formats, schema.format) &&
     (t === undefined || isFormatMappablePrimitive(t))
   ) {
-    return { kind: "raw", text: options.formatTypes[schema.format] };
+    return { kind: "raw", text: options.formats[schema.format] };
   }
 
   if (

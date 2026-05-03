@@ -1,12 +1,11 @@
 import type { IR } from "../ir/types";
 import { renderHeader, type HeaderOption } from "./header";
-import { renderEndpointsInterface, type RenderEndpointsOptions } from "./endpoint";
+import { renderEndpointsInterface } from "./endpoint";
 import { renderSchemas } from "./schema";
 
 export interface RenderOptions {
   header?: HeaderOption;
   errors?: boolean;
-  endpointKey?: RenderEndpointsOptions["endpointKey"];
 }
 
 export function render(ir: IR, options: RenderOptions = {}): string {

@@ -203,30 +203,30 @@ describe("buildIR: TypeNode coverage via schemas", () => {
     expect(ir.schemas[0].type).toEqual({ kind: "primitive", name: "Blob" });
   });
 
-  it("formatTypes: date-time → raw('Date')", () => {
+  it("formats: date-time → raw('Date')", () => {
     const ir = buildIR(
       { components: { schemas: { A: { type: "string", format: "date-time" } } } },
-      { formatTypes: { "date-time": "Date" } },
+      { formats: { "date-time": "Date" } },
     );
     expect(ir.schemas[0].type).toEqual({ kind: "raw", text: "Date" });
   });
 
-  it("formatTypes: user mapping wins over builtin binary→Blob", () => {
+  it("formats: user mapping wins over builtin binary→Blob", () => {
     const ir = buildIR(
       { components: { schemas: { A: { type: "string", format: "binary" } } } },
-      { formatTypes: { binary: "Buffer" } },
+      { formats: { binary: "Buffer" } },
     );
     expect(ir.schemas[0].type).toEqual({ kind: "raw", text: "Buffer" });
   });
 
-  it("formatTypes: triggers on [string, null] + format", () => {
+  it("formats: triggers on [string, null] + format", () => {
     const ir = buildIR(
       {
         components: {
           schemas: { A: { type: ["string", "null"], format: "date-time" } },
         },
       },
-      { formatTypes: { "date-time": "Date" } },
+      { formats: { "date-time": "Date" } },
     );
     expect(ir.schemas[0].type).toEqual({
       kind: "union",
@@ -237,7 +237,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
     });
   });
 
-  it("formatTypes: ignored on object/array types", () => {
+  it("formats: ignored on object/array types", () => {
     const ir = buildIR(
       {
         components: {
@@ -247,7 +247,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
           },
         },
       },
-      { formatTypes: { anything: "Foo" } },
+      { formats: { anything: "Foo" } },
     );
     expect(ir.schemas[0].kind).toBe("interface");
     expect(ir.schemas[1].type).toEqual({
