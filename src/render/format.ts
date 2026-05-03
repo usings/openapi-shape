@@ -6,15 +6,19 @@ export function indent(text: string, depth: number = 1): string {
     .join("\n");
 }
 
+export function escapeCommentText(text: string): string {
+  return text.replaceAll("*/", "*\\/");
+}
+
 export function jsdoc(
   parts: { description?: string; summary?: string; deprecated?: boolean },
   indentStr = "",
 ): string {
   const lines: string[] = [];
-  if (parts.summary) lines.push(...parts.summary.trim().split("\n"));
+  if (parts.summary) lines.push(...escapeCommentText(parts.summary.trim()).split("\n"));
   if (parts.description) {
     if (lines.length) lines.push("");
-    lines.push(...parts.description.trim().split("\n"));
+    lines.push(...escapeCommentText(parts.description.trim()).split("\n"));
   }
   if (parts.deprecated) {
     if (lines.length) lines.push("");

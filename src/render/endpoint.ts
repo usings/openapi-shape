@@ -35,7 +35,7 @@ function renderEndpointEntry(endpoint: EndpointModel, options: RenderEndpointsOp
     lines.push(`    errors: ${renderErrors(endpoint.responses.errors)}`);
   }
 
-  return `${docHeader}  "${endpoint.key}": {\n${lines.join("\n")}\n  }`;
+  return `${docHeader}  ${JSON.stringify(endpoint.key)}: {\n${lines.join("\n")}\n  }`;
 }
 
 function renderParam(group: ParamGroup): string {

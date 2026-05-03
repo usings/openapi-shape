@@ -87,6 +87,11 @@ describe("renderEndpointsInterface: default", () => {
       ]),
     ).toContain("body?: string");
   });
+
+  it("escapes endpoint keys as string literals", () => {
+    const out = renderEndpointsInterface([{ ...baseEndpoint, key: 'GET /quote/"x"' }]);
+    expect(out).toContain('"GET /quote/\\"x\\"": {');
+  });
 });
 
 describe("renderEndpointsInterface: errors option", () => {

@@ -51,6 +51,13 @@ function replacePathParams(path: string, params: Record<string, unknown> | undef
   return url;
 }
 
+function assertNoUnresolvedPathParams(url: string): void {
+  const match = url.match(/\{([^}/]+)\}/);
+  if (match) {
+    throw new Error(`Missing path param: ${match[1]}`);
+  }
+}
+
 function appendQuery(url: string, query: Record<string, unknown> | undefined): string {
   if (!query) return url;
 
@@ -104,10 +111,12 @@ export function createClient<
     const { method, path } = splitEndpoint(endpoint);
 
     const opts = (args[0] ?? {}) as Record<string, unknown>;
-    const url = appendQuery(
-      replacePathParams(path, opts.params as Record<string, unknown> | undefined),
-      opts.query as Record<string, unknown> | undefined,
+    const pathWithParams = replacePathParams(
+      path,
+      opts.params as Record<string, unknown> | undefined,
     );
+    assertNoUnresolvedPathParams(pathWithParams);
+    const url = appendQuery(pathWithParams, opts.query as Record<string, unknown> | undefined);
 
     const { body, headers: bodyHeaders } = serializeBody(opts.body);
     const headers = { ...bodyHeaders, ...(opts.headers as Record<string, string> | undefined) };

@@ -30,6 +30,9 @@ describe("jsdoc", () => {
   it("supports indent prefix", () => {
     expect(jsdoc({ summary: "hi" }, "  ")).toBe("  /** hi */\n");
   });
+  it("escapes comment terminators", () => {
+    expect(jsdoc({ summary: "a */ b" })).toBe("/** a *\\/ b */\n");
+  });
 });
 
 describe("indentContinuation", () => {

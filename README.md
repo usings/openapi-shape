@@ -316,7 +316,7 @@ await generateFromSource("./openapi.json", {
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `formats` | `{}` | Maps OpenAPI `format` values to custom TypeScript types. Applies to schemas with `type: "string" \| "number" \| "integer"` and nullable variants such as `["string", "null"]`. User mappings override the built-in `binary`/`byte` -> `Blob`. |
+| `formats` | `{}` | Maps OpenAPI `format` values to raw TypeScript type expressions. Applies to schemas with `type: "string" \| "number" \| "integer"` and nullable variants such as `["string", "null"]`. User mappings override the built-in `binary`/`byte` -> `Blob`. |
 | `errors` | `false` | Adds an `errors` field to each endpoint type with collected 4xx/5xx response types, including `4XX`/`5XX` wildcards. `default` responses are not collected. The runtime client does not consume this field. |
 | `header` | default | Pass `false` to omit the generated JSDoc header, or a function `(info) => string` to replace it. |
 

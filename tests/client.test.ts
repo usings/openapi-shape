@@ -131,6 +131,23 @@ describe("createClient", () => {
     expect(call.url).toBe("/pets/123");
   });
 
+  it("throws when a path parameter remains unresolved", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined);
+    const api = createClient<{
+      "GET /pets/{petId}/tags/{tagId}": {
+        params: { petId: string };
+        query: void;
+        body: void;
+        response: void;
+      };
+    }>(adapter);
+
+    await expect(api("GET /pets/{petId}/tags/{tagId}", { params: { petId: "1" } })).rejects.toThrow(
+      "Missing path param: tagId",
+    );
+    expect(adapter).not.toHaveBeenCalled();
+  });
+
   it("serializes plain object body as JSON", async () => {
     const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1 });
     const api = createClient<TestAPI>(adapter);
