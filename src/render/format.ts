@@ -15,15 +15,15 @@ export function jsdoc(
   indentStr = "",
 ): string {
   const lines: string[] = [];
-  if (parts.summary) lines.push(...escapeCommentText(parts.summary.trim()).split("\n"));
+  if (parts.summary) {
+    const [first, ...rest] = escapeCommentText(parts.summary.trim()).split("\n");
+    lines.push(`@summary ${first}`, ...rest);
+  }
   if (parts.description) {
-    if (lines.length) lines.push("");
-    lines.push(...escapeCommentText(parts.description.trim()).split("\n"));
+    const [first, ...rest] = escapeCommentText(parts.description.trim()).split("\n");
+    lines.push(`@description ${first}`, ...rest);
   }
-  if (parts.deprecated) {
-    if (lines.length) lines.push("");
-    lines.push("@deprecated");
-  }
+  if (parts.deprecated) lines.push("@deprecated");
   if (lines.length === 0) return "";
   if (lines.length === 1) return `${indentStr}/** ${lines[0]} */\n`;
   return `${indentStr}/**\n${lines

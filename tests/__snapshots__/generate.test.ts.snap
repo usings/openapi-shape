@@ -10,20 +10,19 @@ exports[`generate (integration) > formats maps date-time to Date in petstore 1`]
 
 export interface Endpoints {
   /**
-   * List pets
-   *
-   * Returns all pets, optionally limited.
+   * @summary List pets
+   * @description Returns all pets, optionally limited.
    */
   "GET /pets": {
     params: void
     query: {
-      /** Max number of results */
+      /** @description Max number of results */
       limit?: number
     }
     body: void
     response: Pet[]
   }
-  /** Create a pet */
+  /** @summary Create a pet */
   "POST /pets": {
     params: void
     query: void
@@ -45,14 +44,14 @@ export interface Endpoints {
   }
 }
 
-/** Lifecycle status of a pet */
+/** @description Lifecycle status of a pet */
 export type PetStatus = "available" | "pending" | "sold"
 
-/** A pet in the store */
+/** @description A pet in the store */
 export interface Pet {
-  /** Unique identifier */
+  /** @description Unique identifier */
   id: number
-  /** Display name */
+  /** @description Display name */
   name: string
   tag?: string
   status?: PetStatus
@@ -208,20 +207,19 @@ exports[`generate (integration) > generates correct output for petstore fixture 
 
 export interface Endpoints {
   /**
-   * List pets
-   *
-   * Returns all pets, optionally limited.
+   * @summary List pets
+   * @description Returns all pets, optionally limited.
    */
   "GET /pets": {
     params: void
     query: {
-      /** Max number of results */
+      /** @description Max number of results */
       limit?: number
     }
     body: void
     response: Pet[]
   }
-  /** Create a pet */
+  /** @summary Create a pet */
   "POST /pets": {
     params: void
     query: void
@@ -243,14 +241,14 @@ export interface Endpoints {
   }
 }
 
-/** Lifecycle status of a pet */
+/** @description Lifecycle status of a pet */
 export type PetStatus = "available" | "pending" | "sold"
 
-/** A pet in the store */
+/** @description A pet in the store */
 export interface Pet {
-  /** Unique identifier */
+  /** @description Unique identifier */
   id: number
-  /** Display name */
+  /** @description Display name */
   name: string
   tag?: string
   status?: PetStatus
