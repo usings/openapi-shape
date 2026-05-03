@@ -42,20 +42,12 @@ function splitEndpoint(endpoint: string): { method: string; path: string } {
 }
 
 function replacePathParams(path: string, params: Record<string, unknown> | undefined): string {
-  if (!params) return path;
-
-  let url = path;
-  for (const [name, value] of Object.entries(params)) {
-    url = url.replaceAll(`{${name}}`, encodeURIComponent(String(value)));
-  }
-  return url;
-}
-
-function assertNoUnresolvedPathParams(url: string): void {
-  const match = url.match(/\{([^}/]+)\}/);
-  if (match) {
-    throw new Error(`Missing path param: ${match[1]}`);
-  }
+  return path.replace(/\{([^}/]+)\}/g, (_, name) => {
+    if (!params || !(name in params)) {
+      throw new Error(`Missing path param: ${name}`);
+    }
+    return encodeURIComponent(String(params[name]));
+  });
 }
 
 function appendQuery(url: string, query: Record<string, unknown> | undefined): string {
@@ -115,7 +107,6 @@ export function createClient<
       path,
       opts.params as Record<string, unknown> | undefined,
     );
-    assertNoUnresolvedPathParams(pathWithParams);
     const url = appendQuery(pathWithParams, opts.query as Record<string, unknown> | undefined);
 
     const { body, headers: bodyHeaders } = serializeBody(opts.body);
