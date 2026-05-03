@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildIR } from "../../src/ir";
+import { BuildError } from "../../src/errors";
 
 describe("buildIR: endpoint key/method/path/meta", () => {
   it("METHOD path key, method lowercase, path raw", () => {
@@ -29,6 +30,14 @@ describe("buildIR: endpoint key/method/path/meta", () => {
       tags: ["t1"],
       deprecated: true,
     });
+  });
+
+  it("throws when an operation is missing responses", () => {
+    expect(() =>
+      buildIR({
+        paths: { "/pets": { get: {} } },
+      }),
+    ).toThrow(BuildError);
   });
 });
 

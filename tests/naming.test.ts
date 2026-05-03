@@ -15,6 +15,9 @@ describe("safeIdentifier", () => {
     expect(safeIdentifier("class")).toBe("_class");
     expect(safeIdentifier("interface")).toBe("_interface");
   });
+  it("falls back to _ when name is empty", () => {
+    expect(safeIdentifier("")).toBe("_");
+  });
 });
 
 describe("safeKey", () => {

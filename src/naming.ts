@@ -13,6 +13,7 @@ const RESERVED = new Set(
 
 export function safeIdentifier(name: string): string {
   let out = name.replace(/[^a-zA-Z0-9_$]/g, "_");
+  if (out === "") out = "_";
   if (/^[0-9]/.test(out)) out = "_" + out;
   if (RESERVED.has(out)) out = "_" + out;
   return out;

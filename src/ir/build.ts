@@ -312,7 +312,10 @@ function buildEndpoints(doc: OpenAPIDocument, options: BuildOptions): EndpointMo
     const pathParams = pathItem.parameters ?? [];
     for (const method of HTTP_METHODS) {
       const op = pathItem[method];
-      if (!op || !op.responses) continue;
+      if (!op) continue;
+      if (!op.responses) {
+        throw new BuildError(`Operation is missing required responses`, `/paths/${path}/${method}`);
+      }
       out.push(buildEndpoint(method, path, pathParams, op, options));
     }
   }
