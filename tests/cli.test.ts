@@ -55,7 +55,6 @@ describe("runCli", () => {
   });
 });
 
-// Append at end of tests/cli.test.ts
 describe("cli new flags", () => {
   it("--errors emits without crashing", async () => {
     const fixturePath = join(import.meta.dirname, "fixtures/petstore.json");

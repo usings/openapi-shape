@@ -1,4 +1,3 @@
-// src/loader/index.ts
 import type { OpenAPIDocument } from "../types/openapi";
 import { readSource } from "./source";
 import { normalize } from "./normalize";
@@ -6,26 +5,22 @@ import { resolveRefs } from "./refs";
 import { injectDiscriminators } from "./discriminator";
 
 /**
- * Read + parse + normalize + resolveRefs + injectDiscriminators.
- * Output is ready for buildIR().
+ * Load a source and return an OpenAPI document ready for IR building.
  */
 export async function loadDocument(source: string | URL): Promise<OpenAPIDocument> {
   return prepareDocument(await readSource(source));
 }
 
 /**
- * Synchronous prep pipeline for in-memory inputs.
- * Idempotent; safe to call on already-prepared documents.
+ * Prepare an in-memory OpenAPI value. The pipeline is idempotent, so callers may
+ * pass documents that have already been prepared.
  */
 export function prepareDocument(raw: unknown): OpenAPIDocument {
   return injectDiscriminators(resolveRefs(normalize(raw)));
 }
 
-// Intra-package seams: used by src/loader/index.ts and tests only.
-// NOT re-exported from src/index.ts — the package's public Loader interface
-// is just `loadDocument` and `prepareDocument`. `normalize` / `resolveRefs` /
-// `injectDiscriminators` are internal implementation details and may be
-// rearranged or merged in future versions without notice.
+// Internal loader stages, exported from this module for focused tests only.
+// The package root exposes only `loadDocument` and `prepareDocument`.
 export { readSource } from "./source";
 export { normalize } from "./normalize";
 export { resolveRefs } from "./refs";

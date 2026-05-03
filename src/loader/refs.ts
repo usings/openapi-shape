@@ -1,4 +1,3 @@
-// src/loader/refs.ts
 import type {
   OpenAPIDocument,
   Parameter,

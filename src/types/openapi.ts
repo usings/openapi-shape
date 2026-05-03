@@ -1,13 +1,13 @@
-// src/types/openapi.ts
-
 /**
- * Minimal OpenAPI 3.0/3.1 subset consumed by openapi-shape.
- * After loader/normalize.ts runs, 3.0 nullable on primitives is rewritten
- * to 3.1 type-array form. After loader/refs.ts runs, $ref siblings are gone.
+ * Minimal OpenAPI 3.0/3.1 model consumed by openapi-shape.
+ *
+ * Loader stages prepare this shape before IR building:
+ * - 3.0 primitive `nullable` schemas become 3.1 type arrays.
+ * - Supported component `$ref`s are resolved before rendering.
  *
  * Fields that may carry $ref pre-resolution declare $ref as optional.
- * Other identifying fields (e.g., Parameter.name, Parameter.in) are also
- * optional so $ref-only siblings are type-legal.
+ * Identifying fields such as Parameter.name and Parameter.in stay optional so
+ * pre-resolution `$ref` placeholders remain type-legal.
  */
 
 export interface OpenAPIDocument {
@@ -108,7 +108,7 @@ export interface OpenAPISchema {
 
   discriminator?: Discriminator;
 
-  /** 3.0; rewritten to type-array form by loader/normalize.ts */
+  /** OpenAPI 3.0 nullable marker; normalized to 3.1 type arrays. */
   nullable?: boolean;
 
   description?: string;

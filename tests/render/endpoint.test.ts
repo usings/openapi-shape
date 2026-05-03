@@ -1,4 +1,3 @@
-// tests/render/endpoint.test.ts
 import { describe, expect, it } from "vitest";
 import { renderEndpointsInterface } from "../../src/render/endpoint";
 import type { EndpointModel } from "../../src/ir/types";

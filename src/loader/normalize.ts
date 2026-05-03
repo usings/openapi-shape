@@ -1,11 +1,9 @@
-// src/loader/normalize.ts
 import type { OpenAPIDocument } from "../types/openapi";
 import { LoadError } from "../errors";
 
 /**
- * Read openapi version field; dispatch to per-version normalizer.
- * Missing version → assume 3.1 (passthrough). This file is allowed
- * to use `any` per oxlint override — it's the typed boundary.
+ * Normalize OpenAPI version differences before the rest of the pipeline runs.
+ * Missing versions are treated like 3.1 documents, which need no schema rewrite.
  */
 export function normalize(raw: unknown): OpenAPIDocument {
   if (raw === null || typeof raw !== "object") {

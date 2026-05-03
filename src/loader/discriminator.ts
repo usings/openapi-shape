@@ -1,4 +1,3 @@
-// src/loader/discriminator.ts
 import type { OpenAPIDocument, OpenAPISchema } from "../types/openapi";
 import { BuildError } from "../errors";
 

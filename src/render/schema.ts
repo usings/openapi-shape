@@ -1,4 +1,3 @@
-// src/render/schema.ts
 import type { TypeNode, SchemaModel, FieldModel } from "../ir/types";
 import { indent, interfaceDecl, jsdoc, typeDecl } from "./format";
 import { safeKey } from "../naming";
@@ -80,7 +79,7 @@ export function renderSchemas(schemas: SchemaModel[]): string {
       aliases.push(docHeader + typeDecl(s.name, renderTypeNode(s.type)));
     }
   }
-  // Aliases first, interfaces second — matches current src/schemas.ts:186.
+  // Emit aliases before interfaces so referenced object shapes are declared last.
   return [...aliases, ...interfaces].join("\n\n");
 }
 

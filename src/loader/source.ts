@@ -1,20 +1,18 @@
-// src/loader/source.ts
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { LoadError } from "../errors";
 
 /**
- * Read raw OpenAPI document JSON from a file path, file:// URL, or HTTP(S) URL.
- * Returns parsed JS value (no validation). Throws LoadError on I/O / parse failure.
+ * Read raw OpenAPI JSON from a path, file URL, or HTTP(S) URL.
+ * The parsed value is intentionally unvalidated; validation starts in normalize().
  *
  * Accepted source forms:
- *   - string starting with "http://" or "https://"  → fetch
- *   - string (anything else)                         → readFile (treated as path)
- *   - URL with protocol "http:" or "https:"          → fetch
- *   - URL with protocol "file:"                      → fileURLToPath + readFile
- *   - URL with any other protocol                    → LoadError
+ *   - "http://" or "https://" string: fetch
+ *   - any other string: read as a file path
+ *   - http:, https:, or file: URL: fetch or read file
+ *   - any other URL protocol: LoadError
  *
- * `any` is permitted in this file (oxlint exempt) — this is the typed boundary.
+ * `unknown` stays at the boundary so later stages can narrow the document shape.
  */
 export async function readSource(source: string | URL): Promise<unknown> {
   const label = typeof source === "string" ? source : source.href;

@@ -1,4 +1,3 @@
-// tests/ir/build-endpoints.test.ts
 import { describe, expect, it } from "vitest";
 import { buildIR } from "../../src/ir";
 

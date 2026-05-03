@@ -1,4 +1,3 @@
-// src/ir/build.ts
 import type {
   OpenAPIDocument,
   OpenAPISchema,
@@ -97,7 +96,7 @@ function buildSchemas(doc: OpenAPIDocument, options: BuildOptions): SchemaModel[
   return result;
 }
 
-// ─── Internal: schema → TypeNode ─────────────────────────────────────────
+// Schema conversion
 
 function schemaToTypeNode(schema: OpenAPISchema | undefined, options: BuildOptions): TypeNode {
   if (!schema || isEmptySchema(schema)) return primitive("unknown");
@@ -292,7 +291,7 @@ function docBlock(s: OpenAPISchema | undefined): DocBlock | undefined {
   return Object.keys(out).length === 0 ? undefined : out;
 }
 
-// ─── Endpoint building ────────────────────────────────────────────────────
+// Endpoint building
 
 const HTTP_METHODS: HttpMethod[] = [
   "get",

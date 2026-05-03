@@ -1,4 +1,3 @@
-// src/ir/index.ts
 export type {
   IR,
   EndpointModel,

@@ -1,21 +1,17 @@
-// src/index.ts
+// Public package surface. Modules not exported here are internal and may change
+// without a semver signal.
 //
-// Public package surface. Anything NOT re-exported here is a private
-// implementation detail and may be moved or removed in future versions.
-//
-// Public Loader API: `loadDocument` + `prepareDocument` only. The internal
-// seams `normalize` / `resolveRefs` / `injectDiscriminators` are deliberately
-// not re-exported. The public name `loadDocument` mirrors `prepareDocument`
-// and reads as "load a prepared OpenAPI document"; bare `load` would be too
-// generic at the package boundary.
+// Keep the loader API intentionally small: `loadDocument` for sources and
+// `prepareDocument` for in-memory documents. Normalization, ref resolution, and
+// discriminator injection remain implementation details.
 
-// Top-level
+// Main API
 export { generate, generateFromSource, type GenerateOptions } from "./generate";
 
-// Loader (public surface only)
+// Loader
 export { loadDocument, prepareDocument } from "./loader";
 
-// IR + render (advanced)
+// Advanced pipeline
 export { buildIR, type BuildOptions } from "./ir";
 export { render, type RenderOptions } from "./render";
 

@@ -1,4 +1,3 @@
-// tests/render/schema.test.ts
 import { describe, expect, it } from "vitest";
 import { renderTypeNode, renderSchemas } from "../../src/render/schema";
 import type { SchemaModel } from "../../src/ir/types";

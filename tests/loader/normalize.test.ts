@@ -1,4 +1,3 @@
-// tests/loader/normalize.test.ts
 import { describe, expect, it } from "vitest";
 import { normalize } from "../../src/loader/normalize";
 import { LoadError } from "../../src/errors";

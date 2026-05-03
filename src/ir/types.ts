@@ -1,5 +1,3 @@
-// src/ir/types.ts
-
 export interface IR {
   info: DocumentInfo;
   schemas: SchemaModel[];
@@ -15,7 +13,7 @@ export interface DocumentInfo {
 export type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace";
 
 export interface EndpointModel {
-  /** Default `${method.toUpperCase()} ${path}`; renderer may override per endpointKey option. */
+  /** Stable endpoint key used when renderers do not choose another key strategy. */
   key: string;
   method: HttpMethod;
   path: string;
@@ -50,14 +48,14 @@ export interface BodyModel {
 }
 
 export interface ResponseGroup {
-  /** null → renderer outputs `unknown` */
+  /** Missing success payload; renderers usually emit `unknown`. */
   success: TypeNode | null;
-  /** Always populated by builder; renderer outputs only if `errors: true`. */
+  /** Collected for all builds; renderers may choose whether to emit it. */
   errors: ErrorResponse[];
 }
 
 export interface ErrorResponse {
-  /** "400" / "4XX" / "5XX" / "503". `default` is NOT collected — see spec §3. */
+  /** Explicit 4xx/5xx status or OpenAPI range such as "4XX"; `default` is excluded. */
   status: string;
   type: TypeNode;
 }

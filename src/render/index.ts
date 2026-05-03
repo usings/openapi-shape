@@ -1,4 +1,3 @@
-// src/render/index.ts
 import type { IR } from "../ir/types";
 import { renderHeader, type HeaderOption } from "./header";
 import { renderEndpointsInterface, type RenderEndpointsOptions } from "./endpoint";

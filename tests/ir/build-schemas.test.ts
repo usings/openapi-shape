@@ -1,4 +1,3 @@
-// tests/ir/build-schemas.test.ts
 import { describe, expect, it } from "vitest";
 import { buildIR } from "../../src/ir";
 import { BuildError } from "../../src/errors";

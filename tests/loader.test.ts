@@ -1,4 +1,3 @@
-// tests/loader.test.ts
 import { describe, expect, it } from "vitest";
 import { writeFile, unlink } from "node:fs/promises";
 import { loadDocument, prepareDocument } from "../src/loader";

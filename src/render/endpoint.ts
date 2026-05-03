@@ -1,4 +1,3 @@
-// src/render/endpoint.ts
 import type { EndpointModel, ErrorResponse, ParamGroup, BodyModel, TypeNode } from "../ir/types";
 import { renderTypeNode } from "./schema";
 import { indent, indentContinuation, jsdoc } from "./format";

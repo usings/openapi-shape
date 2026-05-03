@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// src/cli.ts
 import { generateFromSource } from "./index";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";

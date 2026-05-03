@@ -1,4 +1,3 @@
-// src/generate.ts
 import { prepareDocument, loadDocument } from "./loader";
 import { buildIR, type BuildOptions } from "./ir";
 import { render, type RenderOptions } from "./render";
