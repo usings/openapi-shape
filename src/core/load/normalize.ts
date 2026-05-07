@@ -1,5 +1,5 @@
 import type { OpenAPIDocument, OpenAPISchema } from "./openapi";
-import { LoadError } from "../shared/errors";
+import { LoadError } from "./errors";
 import { mapDocumentSchemas } from "./walk";
 
 /**

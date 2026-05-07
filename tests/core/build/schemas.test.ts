@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildIR } from "../../../src/core/build";
-import { BuildError } from "../../../src/core/shared/errors";
+import { BuildError } from "../../../src/core/build/errors";
 
 describe("buildIR: info and empties", () => {
   it("empty doc → empty IR", () => {

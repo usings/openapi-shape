@@ -1,6 +1,6 @@
 import type { OpenAPIDocument } from "../load/openapi";
 import type { SchemaModel, FieldModel } from "./ir";
-import { BuildError } from "../shared/errors";
+import { BuildError } from "./errors";
 import { safeIdentifier } from "../shared/naming";
 import { escapePointerSegment } from "../shared/pointer";
 import { schemaToTypeNode, docBlock } from "./type-node";
@@ -16,8 +16,7 @@ export function buildSchemas(doc: OpenAPIDocument, options: BuildOptions): Schem
     const prior = sanitizedToOriginal.get(sanitized);
     if (prior !== undefined && prior !== name) {
       throw new BuildError(
-        `Schema name collision after sanitization: "${prior}" and "${name}" both → "${sanitized}"`,
-        `/components/schemas`,
+        `Schema name collision after sanitization at /components/schemas: "${prior}" and "${name}" both → "${sanitized}"`,
       );
     }
     sanitizedToOriginal.set(sanitized, name);

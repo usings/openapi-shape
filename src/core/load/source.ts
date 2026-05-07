@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { LoadError } from "../shared/errors";
+import { LoadError } from "./errors";
 
 /**
  * Read raw OpenAPI JSON from a path, file URL, or HTTP(S) URL.
@@ -22,13 +22,13 @@ export async function readSource(source: string | URL): Promise<unknown> {
     text = await readText(source);
   } catch (err) {
     if (err instanceof LoadError) throw err;
-    throw new LoadError(`Failed to read source: ${(err as Error).message}`, label);
+    throw new LoadError(`Failed to read ${label}: ${(err as Error).message}`);
   }
 
   try {
     return JSON.parse(text);
   } catch (err) {
-    throw new LoadError(`Failed to parse source as JSON: ${(err as Error).message}`, label);
+    throw new LoadError(`Failed to parse ${label} as JSON: ${(err as Error).message}`);
   }
 }
 
@@ -41,8 +41,7 @@ async function readText(source: string | URL): Promise<string> {
       return readFile(fileURLToPath(source), "utf-8");
     }
     throw new LoadError(
-      `Unsupported URL protocol: ${source.protocol}. Supported: http:, https:, file:.`,
-      source.href,
+      `Unsupported URL protocol: ${source.protocol} at ${source.href}. Supported: http:, https:, file:.`,
     );
   }
   if (source.startsWith("http://") || source.startsWith("https://")) {
@@ -54,7 +53,7 @@ async function readText(source: string | URL): Promise<string> {
 async function fetchText(href: string): Promise<string> {
   const response = await fetch(href);
   if (!response.ok) {
-    throw new LoadError(`Failed to fetch ${href}: ${response.status} ${response.statusText}`, href);
+    throw new LoadError(`Failed to fetch ${href}: ${response.status} ${response.statusText}`);
   }
   return response.text();
 }

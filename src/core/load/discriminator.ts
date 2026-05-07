@@ -1,5 +1,5 @@
 import type { OpenAPIDocument, OpenAPISchema } from "./openapi";
-import { BuildError } from "../shared/errors";
+import { LoadError } from "./errors";
 import { isObject } from "../shared/object";
 
 type Injection = { value: string; sourceLocation: string };
@@ -41,13 +41,14 @@ function processDiscriminator(
   branches.forEach((branch, index) => {
     const branchLocation = `${location}/${containerKey}[${index}]`;
     if (!isObject(branch) || typeof branch.$ref !== "string") {
-      throw new BuildError(`discriminator branch must be $ref; got inline schema`, branchLocation);
+      throw new LoadError(
+        `discriminator branch must be $ref; got inline schema (at ${branchLocation})`,
+      );
     }
     const ref = branch.$ref;
     if (!ref.startsWith("#/components/schemas/")) {
-      throw new BuildError(
-        `discriminator branch $ref must point to components.schemas; got ${ref}`,
-        branchLocation,
+      throw new LoadError(
+        `discriminator branch $ref must point to components.schemas; got ${ref} (at ${branchLocation})`,
       );
     }
     const schemaName = ref.slice("#/components/schemas/".length);
@@ -81,9 +82,8 @@ function addInjection(
   }
   const existing = perSchema.get(propertyName);
   if (existing && existing.value !== value) {
-    throw new BuildError(
+    throw new LoadError(
       `Discriminator value conflict for "${schemaName}.${propertyName}": "${existing.value}" (at ${existing.sourceLocation}) vs "${value}" (at ${location})`,
-      location,
     );
   }
   perSchema.set(propertyName, { value, sourceLocation: location });
@@ -96,9 +96,8 @@ function applyInjections(doc: OpenAPIDocument, injections: SchemaInjections): Op
 
   for (const name of injections.keys()) {
     if (!(name in schemas)) {
-      throw new BuildError(
-        `Discriminator branch references unknown schema "${name}"`,
-        `/components/schemas/${name}`,
+      throw new LoadError(
+        `Discriminator branch references unknown schema "${name}" (at /components/schemas/${name})`,
       );
     }
   }
@@ -118,9 +117,8 @@ function injectInto(
 ): OpenAPISchema {
   if (schema.allOf) return injectIntoAllOf(schema, perSchema, schemaName);
   if (schema.type !== undefined && schema.type !== "object") {
-    throw new BuildError(
-      `Cannot inject discriminator into "${schemaName}": schema is not an object type (got "${String(schema.type)}")`,
-      `/components/schemas/${schemaName}`,
+    throw new LoadError(
+      `Cannot inject discriminator into "${schemaName}": schema is not an object type (got "${String(schema.type)}") (at /components/schemas/${schemaName})`,
     );
   }
 
@@ -171,11 +169,11 @@ function validateExistingProperty(
   existing: OpenAPISchema,
   value: string,
 ): void {
+  const at = `/components/schemas/${schemaName}/properties/${propertyName}`;
   if ("const" in existing) {
     if (existing.const !== value) {
-      throw new BuildError(
-        `Discriminator conflict in schema "${schemaName}": "${propertyName}" is declared as const "${String(existing.const)}", but discriminator says "${value}"`,
-        `/components/schemas/${schemaName}/properties/${propertyName}`,
+      throw new LoadError(
+        `Discriminator conflict in schema "${schemaName}": "${propertyName}" is declared as const "${String(existing.const)}", but discriminator says "${value}" (at ${at})`,
       );
     }
     return;
@@ -183,17 +181,15 @@ function validateExistingProperty(
   if (Array.isArray(existing.enum)) {
     if (!existing.enum.includes(value)) {
       const printed = existing.enum.map((e) => JSON.stringify(e)).join(", ");
-      throw new BuildError(
-        `Discriminator conflict in schema "${schemaName}": "${propertyName}" is declared as enum [${printed}], but discriminator says "${value}"`,
-        `/components/schemas/${schemaName}/properties/${propertyName}`,
+      throw new LoadError(
+        `Discriminator conflict in schema "${schemaName}": "${propertyName}" is declared as enum [${printed}], but discriminator says "${value}" (at ${at})`,
       );
     }
     return;
   }
   if (existing.type !== undefined && existing.type !== "string") {
-    throw new BuildError(
-      `Discriminator conflict in schema "${schemaName}": "${propertyName}" is declared as type "${String(existing.type)}", but discriminator requires string literal "${value}"`,
-      `/components/schemas/${schemaName}/properties/${propertyName}`,
+    throw new LoadError(
+      `Discriminator conflict in schema "${schemaName}": "${propertyName}" is declared as type "${String(existing.type)}", but discriminator requires string literal "${value}" (at ${at})`,
     );
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadDocument, prepareDocument } from "../../../src/core/load";
-import { LoadError, BuildError } from "../../../src/core/shared/errors";
+import { LoadError } from "../../../src/core/load/errors";
 import { withTmpFile } from "../../_helpers/tmp";
 
 describe("loadDocument: I/O", () => {
@@ -164,7 +164,7 @@ describe("prepareDocument: discriminator", () => {
     expect(out.components?.schemas?.Dog?.properties?.type).toEqual({ const: "dog" });
   });
 
-  it("throws BuildError on inline (non-$ref) branch", () => {
+  it("throws LoadError on inline (non-$ref) branch", () => {
     expect(() =>
       prepareDocument({
         components: {
@@ -176,7 +176,7 @@ describe("prepareDocument: discriminator", () => {
           },
         },
       }),
-    ).toThrow(BuildError);
+    ).toThrow(LoadError);
   });
 });
 

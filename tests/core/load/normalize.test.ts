@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalize } from "../../../src/core/load/normalize";
-import { LoadError } from "../../../src/core/shared/errors";
+import { LoadError } from "../../../src/core/load/errors";
 
 describe("normalize: version handling", () => {
   it.each(["3.2.0", "2.0"])("throws LoadError on unsupported version %s", (version) => {

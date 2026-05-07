@@ -6,7 +6,7 @@ import type {
   MediaType,
 } from "../load/openapi";
 import type { EndpointModel, ParamGroup, BodyModel, HttpMethod, DocBlock } from "./ir";
-import { BuildError } from "../shared/errors";
+import { BuildError } from "./errors";
 import { HTTP_METHODS } from "../load/openapi";
 import { escapePointerSegment } from "../shared/pointer";
 import { schemaToTypeNode } from "./type-node";
@@ -23,7 +23,7 @@ export function buildEndpoints(doc: OpenAPIDocument, options: BuildOptions): End
       const op = pathItem[method];
       if (!op) continue;
       if (!op.responses) {
-        throw new BuildError(`Operation is missing required responses`, `/paths/${path}/${method}`);
+        throw new BuildError(`Operation is missing required responses at /paths/${path}/${method}`);
       }
       out.push(buildEndpoint(method, path, pathParams, op, options));
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildIR } from "../../../src/core/build";
-import { BuildError } from "../../../src/core/shared/errors";
+import { BuildError } from "../../../src/core/build/errors";
 
 describe("buildIR: endpoint key/method/path/meta", () => {
   it("METHOD path key, method lowercase, path raw", () => {

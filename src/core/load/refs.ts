@@ -1,5 +1,5 @@
 import type { OpenAPIDocument, PathItem, Parameter, RequestBody, Response } from "./openapi";
-import { LoadError } from "../shared/errors";
+import { LoadError } from "./errors";
 import { isObject } from "../shared/object";
 import { decodePointerSegment } from "../shared/pointer";
 import { mapDocument } from "./walk";
