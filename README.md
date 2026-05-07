@@ -360,28 +360,6 @@ await generate("./openapi.json", {
 | `errors`  | `false` | Adds an `errors` field to each endpoint type with collected 4xx/5xx response types, including `4XX`/`5XX` wildcards. `default` responses are not collected. The runtime client does not consume this field.                                           |
 | `header`  | default | Pass `false` to omit the generated JSDoc header, or a function `(info) => string` to replace it.                                                                                                                                                      |
 
-### Advanced API
-
-For finer control, use the pipeline directly:
-
-```ts
-import { loadDocument, prepareDocument, buildIR, render } from "openapi-shape";
-
-// File / URL → prepared OpenAPI document
-const doc = await loadDocument("./openapi.json");
-
-// In-memory raw object → prepared document (sync)
-const doc2 = prepareDocument(rawObject);
-
-// Prepared document → intermediate representation
-const ir = buildIR(doc, { formats: { "date-time": "Date" } });
-
-// IR → TypeScript string
-const code = render(ir, { errors: true });
-```
-
-`OpenAPIDocument`, `IR`, `TypeNode`, and the rest of the IR types are exported. `LoadError` and `BuildError` are exported for `instanceof` checks.
-
 ## Supported
 
 OpenAPI 3.0 and 3.1 JSON documents.

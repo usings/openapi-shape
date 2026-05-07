@@ -14,8 +14,7 @@
   "overrides": [
     {
       "files": [
-        "src/loader/source.ts",
-        "src/loader/normalize.ts",
+        "src/core/load/source.ts",
         "tests/client.test.ts"
       ],
       "rules": {

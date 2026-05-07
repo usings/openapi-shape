@@ -1,16 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { runCli } from "../src/cli";
-import { readFile, unlink } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { withTmpPath } from "./_helpers/tmp";
 
 const fixture = join(import.meta.dirname, "fixtures/petstore.json");
 
 describe("runCli", () => {
-  const tmpFiles: string[] = [];
-  afterEach(async () => {
-    await Promise.all(tmpFiles.splice(0).map((f) => unlink(f).catch(() => {})));
-  });
-
   it("prints help and exits 1 when no positional given", async () => {
     const { exitCode, stdout } = await runCli([]);
     expect(exitCode).toBe(1);
@@ -37,13 +33,16 @@ describe("runCli", () => {
   });
 
   it("writes generated code to file when -o is given", async () => {
-    const out = "/tmp/openapi-shape-cli-test.ts";
-    tmpFiles.push(out);
-    const { exitCode, stdout } = await runCli([fixture, "-o", out]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toBe(`Generated ${out}\n`);
-    const written = await readFile(out, "utf-8");
-    expect(written).toContain("export interface Endpoints");
+    await withTmpPath(
+      async (out) => {
+        const { exitCode, stdout } = await runCli([fixture, "-o", out]);
+        expect(exitCode).toBe(0);
+        expect(stdout).toBe(`Generated ${out}\n`);
+        const written = await readFile(out, "utf-8");
+        expect(written).toContain("export interface Endpoints");
+      },
+      { ext: ".ts" },
+    );
   });
 
   it("rejects when -o has no value", async () => {

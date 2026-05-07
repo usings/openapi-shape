@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { generate } from "../src/index";
 import { spawn } from "node:child_process";
-import { writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { withTmpFiles } from "./_helpers/tmp";
 
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -16,17 +16,16 @@ function run(cmd: string, args: string[]): Promise<void> {
 }
 
 async function expectPassesTsc(codes: string[]): Promise<void> {
-  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const tmpFiles = codes.map((_, i) => `/tmp/openapi-dts-test-${stamp}-${i}.d.ts`);
-  await Promise.all(codes.map((code, i) => writeFile(tmpFiles[i], code)));
-  try {
-    const tsc = join(import.meta.dirname, "..", "node_modules", ".bin", "tsc");
-    await expect(
-      run(tsc, ["--ignoreConfig", "--noEmit", "--strict", "--target", "esnext", ...tmpFiles]),
-    ).resolves.toBeUndefined();
-  } finally {
-    await Promise.all(tmpFiles.map((tmp) => unlink(tmp)));
-  }
+  await withTmpFiles(
+    codes,
+    async (paths) => {
+      const tsc = join(import.meta.dirname, "..", "node_modules", ".bin", "tsc");
+      await expect(
+        run(tsc, ["--ignoreConfig", "--noEmit", "--strict", "--target", "esnext", ...paths]),
+      ).resolves.toBeUndefined();
+    },
+    { ext: ".d.ts", prefix: "openapi-dts-test" },
+  );
 }
 
 describe("generate (integration)", () => {
