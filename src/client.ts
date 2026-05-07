@@ -244,10 +244,12 @@ export function createClient<
   TOptions = unknown,
 >(adapter: Adapter<TOptions>, options?: ClientOptions<TOptions>): Client<Endpoints, TOptions> {
   const baseURL = (options?.baseURL ?? "").replace(/\/+$/, "");
-  const defaultHeaders = options?.headers;
-  const defaultAdapterOptions = options?.options;
-  const serializeBodyOption = options?.serializeBody;
-  const serializeQueryOption = options?.serializeQuery;
+  const {
+    headers: defaultHeaders,
+    options: defaultAdapterOptions,
+    serializeBody,
+    serializeQuery,
+  } = options ?? {};
 
   const client = async <K extends keyof Endpoints & string>(
     endpoint: K,
@@ -259,8 +261,8 @@ export function createClient<
     const opts = (args[0] ?? {}) as RuntimeRequestOptions<TOptions>;
 
     const pathWithParams = replacePathParams(path, opts.params);
-    const url = appendQuery(pathWithParams, opts.query, serializeQueryOption);
-    const { body, headers: bodyHeaders } = buildBody(opts.body, serializeBodyOption);
+    const url = appendQuery(pathWithParams, opts.query, serializeQuery);
+    const { body, headers: bodyHeaders } = buildBody(opts.body, serializeBody);
     const adapterOptions = mergeAdapterOptions(defaultAdapterOptions, opts.options);
 
     const result = await adapter({
