@@ -2,6 +2,7 @@ import type { OpenAPIDocument } from "../load/openapi";
 import type { IR } from "./ir";
 import { buildSchemas } from "./schemas";
 import { buildEndpoints } from "./endpoint";
+import { buildWebhooks } from "./webhook";
 
 export interface BuildOptions {
   /** Map OpenAPI `format` values to TypeScript type expressions, e.g. `{ "date-time": "Date", uuid: "string" }`. User mappings override built-ins (e.g. `binary` → `Blob`). */
@@ -13,6 +14,7 @@ export function buildIR(doc: OpenAPIDocument, options: BuildOptions = {}): IR {
     info: buildInfo(doc),
     schemas: buildSchemas(doc, options),
     endpoints: buildEndpoints(doc, options),
+    webhooks: buildWebhooks(doc, options),
   };
 }
 

@@ -5,7 +5,7 @@ import { BuildError } from "../../../src/core/build/errors";
 describe("buildIR: info and empties", () => {
   it("empty doc → empty IR", () => {
     const ir = buildIR({});
-    expect(ir).toEqual({ info: {}, schemas: [], endpoints: [] });
+    expect(ir).toEqual({ info: {}, schemas: [], endpoints: [], webhooks: [] });
   });
 
   it("captures info fields", () => {

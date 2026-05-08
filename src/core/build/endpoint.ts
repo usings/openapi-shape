@@ -2,6 +2,7 @@ import type {
   OpenAPIDocument,
   Operation,
   Parameter,
+  PathItem,
   RequestBody,
   MediaType,
 } from "../load/openapi";
@@ -14,18 +15,27 @@ import { buildResponses, isJsonContentType } from "./response";
 import type { BuildOptions } from "./index";
 
 export function buildEndpoints(doc: OpenAPIDocument, options: BuildOptions): EndpointModel[] {
+  return walkPathItems(doc.paths ?? {}, "/paths", options);
+}
+
+export function walkPathItems(
+  items: Record<string, PathItem>,
+  base: string,
+  options: BuildOptions,
+): EndpointModel[] {
   const out: EndpointModel[] = [];
-  const paths = doc.paths ?? {};
-  for (const [path, pathItem] of Object.entries(paths)) {
+  for (const [path, pathItem] of Object.entries(items)) {
     if (!pathItem || typeof pathItem !== "object") continue;
     const pathParams = pathItem.parameters ?? [];
     for (const method of HTTP_METHODS) {
       const op = pathItem[method];
       if (!op) continue;
       if (!op.responses) {
-        throw new BuildError(`Operation is missing required responses at /paths/${path}/${method}`);
+        throw new BuildError(
+          `Operation is missing required responses at ${base}/${path}/${method}`,
+        );
       }
-      out.push(buildEndpoint(method, path, pathParams, op, options));
+      out.push(buildEndpoint(method, path, pathParams, op, options, base));
     }
   }
   return out;
@@ -37,6 +47,7 @@ function buildEndpoint(
   pathParams: Parameter[],
   op: Operation,
   options: BuildOptions,
+  base: string,
 ): EndpointModel {
   const merged = mergeParameters(pathParams, op.parameters ?? []);
   return {
@@ -53,7 +64,7 @@ function buildEndpoint(
     headers: buildHeaders(merged),
     body: buildBody(op.requestBody, options),
     responses: buildResponses(op.responses ?? {}, options),
-    source: { location: `/paths/${escapePointerSegment(path)}/${method}` },
+    source: { location: `${base}/${escapePointerSegment(path)}/${method}` },
   };
 }
 

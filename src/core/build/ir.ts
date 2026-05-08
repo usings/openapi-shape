@@ -2,6 +2,7 @@ export interface IR {
   info: DocumentInfo;
   schemas: SchemaModel[];
   endpoints: EndpointModel[];
+  webhooks: EndpointModel[];
 }
 
 export interface DocumentInfo {
