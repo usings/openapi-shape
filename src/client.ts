@@ -1,15 +1,25 @@
-export type BodyLike =
+type FetchBodyInit = typeof globalThis extends {
+  fetch: (input: never, init?: infer Init) => unknown;
+}
+  ? Init extends { body?: infer B }
+    ? NonNullable<B>
+    : never
+  : never;
+
+type FallbackBodyInit =
   | string
   | ArrayBuffer
-  | ArrayBufferView
+  | ArrayBufferView<ArrayBuffer>
   | Blob
   | FormData
   | URLSearchParams
-  | ReadableStream<Uint8Array>;
+  | ReadableStream<Uint8Array<ArrayBuffer>>;
 
-export type QuerySerializerResult = string | { toString(): string };
+type BodyLike = [FetchBodyInit] extends [never] ? FallbackBodyInit : FetchBodyInit;
 
-export type AdapterRequest<TOptions = unknown> = {
+type QuerySerializerResult = string | { toString(): string };
+
+type AdapterRequest<TOptions = unknown> = {
   method: string;
   url: string;
   body: BodyLike | undefined;
@@ -17,9 +27,7 @@ export type AdapterRequest<TOptions = unknown> = {
   options: TOptions | undefined;
 };
 
-export type Adapter<TOptions = unknown> = (request: AdapterRequest<TOptions>) => Promise<unknown>;
-
-export type EndpointDefinition = {
+type EndpointDefinition = {
   params: unknown;
   query: unknown;
   body?: unknown;
@@ -53,10 +61,7 @@ type HeadersField<TValue> = TValue extends void
 
 type EndpointHeaders<T extends EndpointDefinition> = T extends { headers: infer H } ? H : void;
 
-export type RequestOptions<T extends EndpointDefinition, TOptions> = RequestField<
-  "params",
-  T["params"]
-> &
+type RequestOptions<T extends EndpointDefinition, TOptions> = RequestField<"params", T["params"]> &
   RequestField<"query", T["query"]> &
   RequestBodyField<T["body"]> &
   HeadersField<EndpointHeaders<T>> & {
@@ -65,6 +70,35 @@ export type RequestOptions<T extends EndpointDefinition, TOptions> = RequestFiel
 
 type HasRequiredOptions<T extends EndpointDefinition> =
   {} extends RequestOptions<T, unknown> ? false : true;
+
+type RuntimeRequestOptions<TOptions> = {
+  params?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+  body?: unknown;
+  headers?: Record<string, string>;
+  options?: TOptions;
+};
+
+interface BodySerializerResult {
+  body: BodyLike | undefined;
+  headers?: Record<string, string>;
+}
+
+export type Adapter<TOptions = unknown> = (request: AdapterRequest<TOptions>) => Promise<unknown>;
+
+export type BodySerializer = (body: unknown) => BodySerializerResult;
+
+export type QuerySerializer = (query: Record<string, unknown>) => QuerySerializerResult;
+
+export type Client<
+  Endpoints extends { [K in keyof Endpoints]: EndpointDefinition },
+  TOptions = unknown,
+> = <K extends keyof Endpoints & string>(
+  endpoint: K,
+  ...args: HasRequiredOptions<Endpoints[K]> extends true
+    ? [options: RequestOptions<Endpoints[K], TOptions>]
+    : [options?: RequestOptions<Endpoints[K], TOptions>]
+) => Promise<Endpoints[K]["response"]>;
 
 export interface ClientOptions<TOptions = unknown> {
   /**
@@ -97,33 +131,6 @@ export interface ClientOptions<TOptions = unknown> {
    */
   serializeQuery?: QuerySerializer;
 }
-
-export interface BodySerializerResult {
-  body: BodyLike | undefined;
-  headers?: Record<string, string>;
-}
-
-export type BodySerializer = (body: unknown) => BodySerializerResult;
-
-export type QuerySerializer = (query: Record<string, unknown>) => QuerySerializerResult;
-
-export type Client<
-  Endpoints extends { [K in keyof Endpoints]: EndpointDefinition },
-  TOptions = unknown,
-> = <K extends keyof Endpoints & string>(
-  endpoint: K,
-  ...args: HasRequiredOptions<Endpoints[K]> extends true
-    ? [options: RequestOptions<Endpoints[K], TOptions>]
-    : [options?: RequestOptions<Endpoints[K], TOptions>]
-) => Promise<Endpoints[K]["response"]>;
-
-type RuntimeRequestOptions<TOptions> = {
-  params?: Record<string, unknown>;
-  query?: Record<string, unknown>;
-  body?: unknown;
-  headers?: Record<string, string>;
-  options?: TOptions;
-};
 
 function splitEndpoint(endpoint: string): { method: string; path: string } {
   const space = endpoint.indexOf(" ");
@@ -188,13 +195,7 @@ function isPassthroughBody(body: unknown): body is BodyLike {
   return false;
 }
 
-function buildBody(
-  body: unknown,
-  serializer: BodySerializer | undefined,
-): {
-  body: BodyLike | undefined;
-  headers: Record<string, string>;
-} {
+function buildBody(body: unknown, serializer: BodySerializer | undefined): BodySerializerResult {
   if (body === undefined) return { body: undefined, headers: {} };
 
   if (serializer) {
