@@ -3,7 +3,7 @@
   "commit-msg": {
     "commands": {
       "commitlint": {
-        "run": "npm exec -- commitlint --edit {1}"
+        "run": "pnpm exec commitlint --edit {1}"
       }
     }
   },
@@ -12,12 +12,12 @@
     "commands": {
       "format": {
         "glob": "*.{ts,tsx,js,mjs,cjs,jsx}",
-        "run": "npm exec -- oxfmt {staged_files} --no-error-on-unmatched-pattern",
+        "run": "pnpm exec oxfmt {staged_files} --no-error-on-unmatched-pattern",
         "stage_fixed": true
       },
       "lint": {
         "glob": "*.{ts,tsx,js,mjs,cjs,jsx}",
-        "run": "npm exec -- oxlint {staged_files}"
+        "run": "pnpm exec oxlint {staged_files}"
       }
     }
   }
