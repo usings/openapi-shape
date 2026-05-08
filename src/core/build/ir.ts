@@ -31,6 +31,7 @@ export interface EndpointModel {
 
   params: ParamGroup;
   query: ParamGroup;
+  headers: ParamGroup;
   body: BodyModel;
   responses: ResponseGroup;
   source?: SourceRef;

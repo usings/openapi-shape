@@ -50,6 +50,7 @@ function buildEndpoint(
     deprecated: op.deprecated === true,
     params: buildParams(merged),
     query: buildQuery(merged, options),
+    headers: buildHeaders(merged),
     body: buildBody(op.requestBody, options),
     responses: buildResponses(op.responses ?? {}, options),
     source: { location: `/paths/${escapePointerSegment(path)}/${method}` },
@@ -86,6 +87,19 @@ function buildQuery(parameters: Parameter[], options: BuildOptions): ParamGroup 
         name: p.name as string,
         required: p.required === true,
         type: schemaToTypeNode(p.schema, options),
+        docs: docBlockFromParameter(p),
+      })),
+  };
+}
+
+function buildHeaders(parameters: Parameter[]): ParamGroup {
+  return {
+    fields: parameters
+      .filter((p) => p.in === "header")
+      .map((p) => ({
+        name: p.name as string,
+        required: p.required === true,
+        type: { kind: "primitive", name: "string" },
         docs: docBlockFromParameter(p),
       })),
   };

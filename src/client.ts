@@ -23,6 +23,7 @@ export type EndpointDefinition = {
   params: unknown;
   query: unknown;
   body?: unknown;
+  headers?: unknown;
   response: unknown;
 };
 
@@ -42,13 +43,23 @@ type RequestBodyField<TValue> = TValue extends void
       ? { body?: TValue | BodyLike }
       : { body: TValue | BodyLike };
 
+type HeadersField<TValue> = TValue extends void
+  ? { headers?: Record<string, string> }
+  : undefined extends TValue
+    ? { headers?: Exclude<TValue, undefined> & Record<string, string> }
+    : {} extends TValue
+      ? { headers?: TValue & Record<string, string> }
+      : { headers: TValue & Record<string, string> };
+
+type EndpointHeaders<T extends EndpointDefinition> = T extends { headers: infer H } ? H : void;
+
 export type RequestOptions<T extends EndpointDefinition, TOptions> = RequestField<
   "params",
   T["params"]
 > &
   RequestField<"query", T["query"]> &
-  RequestBodyField<T["body"]> & {
-    headers?: Record<string, string>;
+  RequestBodyField<T["body"]> &
+  HeadersField<EndpointHeaders<T>> & {
     options?: TOptions;
   };
 

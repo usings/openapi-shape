@@ -6,6 +6,7 @@ import { renderSchemas } from "./schema";
 export interface RenderOptions {
   header?: HeaderOption;
   errors?: boolean;
+  headers?: boolean;
 }
 
 export function render(ir: IR, options: RenderOptions = {}): string {

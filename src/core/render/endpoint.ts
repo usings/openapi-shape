@@ -5,6 +5,12 @@ import { safeKey } from "../shared/naming";
 
 export interface RenderEndpointsOptions {
   errors?: boolean;
+  /**
+   * Emit a typed `headers` field per endpoint from `in: header` parameters.
+   * When false (default), header parameters from the spec are not surfaced
+   * in the endpoint type; callers may still pass arbitrary headers at runtime.
+   */
+  headers?: boolean;
 }
 
 export function renderEndpointsInterface(
@@ -28,6 +34,9 @@ function renderEndpointEntry(endpoint: EndpointModel, options: RenderEndpointsOp
   const lines: string[] = [];
   lines.push(`    params: ${indentContinuation(renderParam(endpoint.params), "    ")}`);
   lines.push(`    query: ${indentContinuation(renderParam(endpoint.query), "    ")}`);
+  if (options.headers) {
+    lines.push(`    headers: ${indentContinuation(renderParam(endpoint.headers), "    ")}`);
+  }
   lines.push(`    ${renderBody(endpoint.body)}`);
   lines.push(`    response: ${renderResponse(endpoint.responses.success)}`);
 

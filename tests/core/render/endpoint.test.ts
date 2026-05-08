@@ -10,6 +10,7 @@ const baseEndpoint: EndpointModel = {
   deprecated: false,
   params: { fields: [] },
   query: { fields: [] },
+  headers: { fields: [] },
   body: { kind: "none" },
   responses: { success: null, errors: [] },
 };

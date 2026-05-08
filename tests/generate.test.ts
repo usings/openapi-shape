@@ -184,6 +184,49 @@ describe("generate (integration)", () => {
     expect(code).toMatchSnapshot();
   });
 
+  it("headers: false (default) omits header parameters from endpoint type", async () => {
+    const { generate } = await import("../src/index");
+    const code = generate({
+      paths: {
+        "/x": {
+          get: {
+            parameters: [
+              { name: "X-API-Key", in: "header", required: true, schema: { type: "string" } },
+            ],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    });
+    expect(code).not.toContain("headers:");
+    expect(code).not.toContain("X-API-Key");
+  });
+
+  it("headers: true emits typed headers field per endpoint", async () => {
+    const { generate } = await import("../src/index");
+    const code = generate(
+      {
+        paths: {
+          "/secure": {
+            get: {
+              parameters: [
+                { name: "X-API-Key", in: "header", required: true, schema: { type: "string" } },
+                { name: "X-Trace-Id", in: "header", schema: { type: "string" } },
+              ],
+              responses: { "200": { description: "ok" } },
+            },
+          },
+          "/public": {
+            get: { responses: { "200": { description: "ok" } } },
+          },
+        },
+      },
+      { headers: true },
+    );
+    expect(code).toContain('headers: { "X-API-Key": string; "X-Trace-Id"?: string }');
+    expect(code).toContain("headers: void");
+  });
+
   it("errors: true adds errors field", async () => {
     const { generate } = await import("../src/index");
     const code = generate(
