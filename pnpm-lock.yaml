@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      citty:
+        specifier: ^0.2.2
+        version: 0.2.2
     devDependencies:
       '@commitlint/cli':
         specifier: ^20.5.3
@@ -737,6 +741,9 @@ packages:
   chai@6.2.2:
     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
     engines: {node: '>=18'}
+
+  citty@0.2.2:
+    resolution: {integrity: sha512-+6vJA3L98yv+IdfKGZHBNiGW5KHn22e/JwID0Strsz8h4S/csAu/OuICwxrg44k5MRiZHWIo8XXuJgQTriRP4w==}
 
   cliui@8.0.1:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
@@ -1913,6 +1920,8 @@ snapshots:
   callsites@3.1.0: {}
 
   chai@6.2.2: {}
+
+  citty@0.2.2: {}
 
   cliui@8.0.1:
     dependencies:

@@ -59,13 +59,22 @@ Add a package script if you regenerate declarations often:
 }
 ```
 
-In CI, use `--check` to verify the committed declarations match the current spec without rewriting the file:
+All flags (see [Options](#options) for `--headers` / `--errors`):
 
-```sh
-pnpm exec openapi-shape ./openapi.json -o src/api.d.ts --check
 ```
+USAGE openapi-shape [OPTIONS] <SOURCE> --output=<output>
 
-Exits `0` when the file is up to date, `1` (with a hint to re-run without `--check`) when it is missing or stale.
+ARGUMENTS
+
+  SOURCE    Path to OpenAPI JSON file or HTTP(S) URL (Required)
+
+OPTIONS
+
+  -o, --output=<output>    Output file path (Required)
+                --check    Exit non-zero if --output is missing or stale (CI)
+              --headers    Emit a typed `headers` field per entry from `in: header` parameters
+               --errors    Emit an `errors` field per entry, keyed by status code
+```
 
 ## What You Get
 

@@ -42,6 +42,9 @@
     "lint": "oxlint",
     "format": "oxfmt"
   },
+  "dependencies": {
+    "citty": "^0.2.2"
+  },
   "devDependencies": {
     "@commitlint/cli": "^20.5.3",
     "@commitlint/config-conventional": "^20.5.3",
