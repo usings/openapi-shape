@@ -4,12 +4,9 @@ import { indent, indentContinuation, jsdoc } from "./format";
 import { safeKey } from "../shared/naming";
 
 export interface RenderEndpointsOptions {
+  /** Emit an `errors` field per endpoint, keyed by status code. */
   errors?: boolean;
-  /**
-   * Emit a typed `headers` field per endpoint from `in: header` parameters.
-   * When false (default), header parameters from the spec are not surfaced
-   * in the endpoint type; callers may still pass arbitrary headers at runtime.
-   */
+  /** Emit a typed `headers` field per endpoint from `in: header` parameters. */
   headers?: boolean;
 }
 

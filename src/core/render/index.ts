@@ -4,8 +4,11 @@ import { renderEndpointsInterface } from "./endpoint";
 import { renderSchemas } from "./schema";
 
 export interface RenderOptions {
+  /** File header. Defaults to a JSDoc banner derived from the spec's `info`; pass `false` to omit, or a function `(info) => string` to fully customize. */
   header?: HeaderOption;
+  /** Emit an `errors` field per endpoint, keyed by status code. */
   errors?: boolean;
+  /** Emit a typed `headers` field per endpoint from `in: header` parameters. */
   headers?: boolean;
 }
 
