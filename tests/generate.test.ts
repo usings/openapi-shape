@@ -221,11 +221,4 @@ describe("generate (integration)", () => {
     );
     expect(code).toContain('errors: { "400": string }');
   });
-
-  it("header: false omits the JSDoc header", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/petstore.json"), {
-      header: false,
-    });
-    expect(code.startsWith("/**\n")).toBe(false);
-  });
 });

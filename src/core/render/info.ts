@@ -1,15 +1,7 @@
 import type { DocumentInfo } from "../build/ir";
 import { escapeCommentText } from "./format";
 
-export type HeaderOption = undefined | false | ((info: DocumentInfo) => string);
-
-export function renderHeader(info: DocumentInfo, option: HeaderOption = undefined): string | null {
-  if (option === false) return null;
-  if (typeof option === "function") return option(info);
-  return defaultHeader(info);
-}
-
-function defaultHeader(info: DocumentInfo): string {
+export function renderInfo(info: DocumentInfo): string {
   const lines: string[] = [];
   if (info.title) lines.push(escapeCommentText(info.title));
 
