@@ -3,7 +3,7 @@ import type { SchemaModel, FieldModel } from "./ir";
 import { BuildError } from "./errors";
 import { safeIdentifier } from "../shared/naming";
 import { escapePointerSegment } from "../shared/pointer";
-import { schemaToTypeNode, docBlock } from "./type-node";
+import { schemaToTypeNode, docBlock, objectIndex } from "./type-node";
 import type { BuildOptions } from "./index";
 
 export function buildSchemas(doc: OpenAPIDocument, options: BuildOptions): SchemaModel[] {
@@ -33,12 +33,14 @@ export function buildSchemas(doc: OpenAPIDocument, options: BuildOptions): Schem
         type: schemaToTypeNode(fschema, options),
         docs: docBlock(fschema),
       }));
+      const index = objectIndex(schema, options);
       result.push({
         name,
         originalName,
         kind: "interface",
         fields,
         type: null,
+        ...(index !== null && { index }),
         docs: docBlock(schema),
         source: { location: `/components/schemas/${escapePointerSegment(originalName)}` },
       });

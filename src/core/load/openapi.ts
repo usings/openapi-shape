@@ -113,6 +113,7 @@ export interface OpenAPISchema {
   allOf?: OpenAPISchema[];
 
   properties?: Record<string, OpenAPISchema>;
+  patternProperties?: Record<string, OpenAPISchema>;
   required?: string[];
   additionalProperties?: boolean | OpenAPISchema;
 

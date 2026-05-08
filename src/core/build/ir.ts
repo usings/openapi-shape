@@ -78,6 +78,8 @@ export interface SchemaModel {
   kind: "interface" | "alias";
   fields: FieldModel[] | null;
   type: TypeNode | null;
+  /** Index signature for interface schemas with patternProperties or additionalProperties. */
+  index?: TypeNode | null;
   docs?: DocBlock;
   source?: SourceRef;
 }

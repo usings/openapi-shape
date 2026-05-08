@@ -75,7 +75,7 @@ export function renderSchemas(schemas: SchemaModel[]): string {
     const docHeader = s.docs ? jsdoc(s.docs) : "";
     if (s.kind === "interface" && s.fields) {
       interfaces.push(
-        `${docHeader}export interface ${s.name} {\n${indent(renderInterfaceBody(s.fields))}\n}`,
+        `${docHeader}export interface ${s.name} {\n${indent(renderInterfaceBody(s.fields, s.index ?? null))}\n}`,
       );
     } else if (s.kind === "alias" && s.type) {
       aliases.push(`${docHeader}export type ${s.name} = ${renderTypeNode(s.type)}`);
@@ -85,12 +85,12 @@ export function renderSchemas(schemas: SchemaModel[]): string {
   return [...aliases, ...interfaces].join("\n\n");
 }
 
-function renderInterfaceBody(fields: FieldModel[]): string {
-  return fields
-    .map((f) => {
-      const docHeader = f.docs ? jsdoc(f.docs) : "";
-      const opt = f.required ? "" : "?";
-      return `${docHeader}${safeKey(f.name)}${opt}: ${renderTypeNode(f.type)}`;
-    })
-    .join("\n");
+function renderInterfaceBody(fields: FieldModel[], index: TypeNode | null): string {
+  const lines = fields.map((f) => {
+    const docHeader = f.docs ? jsdoc(f.docs) : "";
+    const opt = f.required ? "" : "?";
+    return `${docHeader}${safeKey(f.name)}${opt}: ${renderTypeNode(f.type)}`;
+  });
+  if (index) lines.push(`[key: string]: ${renderTypeNode(index)}`);
+  return lines.join("\n");
 }

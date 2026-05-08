@@ -131,11 +131,9 @@ function arrayToNode(schema: OpenAPISchema, options: BuildOptions): TypeNode {
 }
 
 function objectToNode(schema: OpenAPISchema, options: BuildOptions): TypeNode {
-  if (!schema.properties && isObjectAdditional(schema.additionalProperties)) {
-    return { kind: "record", values: schemaToTypeNode(schema.additionalProperties, options) };
-  }
+  const index = objectIndex(schema, options);
   if (!schema.properties) {
-    return { kind: "record", values: primitive("unknown") };
+    return { kind: "record", values: index ?? primitive("unknown") };
   }
   const required = new Set<string>(schema.required ?? []);
   const fields: FieldModel[] = Object.entries(schema.properties).map(([name, value]) => ({
@@ -144,11 +142,22 @@ function objectToNode(schema: OpenAPISchema, options: BuildOptions): TypeNode {
     type: schemaToTypeNode(value, options),
     docs: docBlock(value),
   }));
-  let index: TypeNode | null = null;
-  if (isObjectAdditional(schema.additionalProperties)) {
-    index = schemaToTypeNode(schema.additionalProperties, options);
-  }
   return { kind: "object", fields, index };
+}
+
+export function objectIndex(schema: OpenAPISchema, options: BuildOptions): TypeNode | null {
+  const values: TypeNode[] = [];
+  if (schema.patternProperties) {
+    for (const pattern of Object.values(schema.patternProperties)) {
+      values.push(schemaToTypeNode(pattern, options));
+    }
+  }
+  if (isObjectAdditional(schema.additionalProperties)) {
+    values.push(schemaToTypeNode(schema.additionalProperties, options));
+  }
+  if (values.length === 0) return null;
+  if (values.length === 1) return values[0];
+  return { kind: "union", members: values };
 }
 
 function isObjectAdditional(v: unknown): v is OpenAPISchema {

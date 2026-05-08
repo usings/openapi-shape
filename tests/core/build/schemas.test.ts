@@ -319,6 +319,91 @@ describe("buildIR: TypeNode coverage via schemas", () => {
     });
   });
 
+  it("patternProperties only → record of values", () => {
+    const ir = buildIR({
+      components: {
+        schemas: {
+          A: { type: "object", patternProperties: { "^foo_": { type: "string" } } },
+        },
+      },
+    });
+    expect(ir.schemas[0].type).toEqual({
+      kind: "record",
+      values: { kind: "primitive", name: "string" },
+    });
+  });
+
+  it("multiple patternProperties → record of value union", () => {
+    const ir = buildIR({
+      components: {
+        schemas: {
+          A: {
+            type: "object",
+            patternProperties: {
+              "^s_": { type: "string" },
+              "^n_": { type: "number" },
+            },
+          },
+        },
+      },
+    });
+    expect(ir.schemas[0].type).toEqual({
+      kind: "record",
+      values: {
+        kind: "union",
+        members: [
+          { kind: "primitive", name: "string" },
+          { kind: "primitive", name: "number" },
+        ],
+      },
+    });
+  });
+
+  it("properties + patternProperties → interface with index signature", () => {
+    const ir = buildIR({
+      components: {
+        schemas: {
+          A: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+            patternProperties: { "^x_": { type: "number" } },
+          },
+        },
+      },
+    });
+    const schema = ir.schemas[0];
+    expect(schema.kind).toBe("interface");
+    expect(schema.fields).toEqual([
+      { name: "id", required: true, type: { kind: "primitive", name: "string" } },
+    ]);
+    expect(schema.index).toEqual({ kind: "primitive", name: "number" });
+  });
+
+  it("patternProperties + additionalProperties schema → index is union", () => {
+    const ir = buildIR({
+      components: {
+        schemas: {
+          A: {
+            type: "object",
+            patternProperties: { "^x_": { type: "number" } },
+            additionalProperties: { type: "boolean" },
+          },
+        },
+      },
+    });
+    expect(ir.schemas[0].type).toEqual({
+      kind: "record",
+      values: {
+        kind: "union",
+        members: [
+          { kind: "primitive", name: "number" },
+          { kind: "primitive", name: "boolean" },
+        ],
+      },
+    });
+  });
+
   it("const literal", () => {
     const ir = buildIR({
       components: { schemas: { A: { const: "hello" } } },
