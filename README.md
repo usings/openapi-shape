@@ -59,6 +59,14 @@ Add a package script if you regenerate declarations often:
 }
 ```
 
+In CI, use `--check` to verify the committed declarations match the current spec without rewriting the file:
+
+```sh
+pnpm exec openapi-shape ./openapi.json -o src/api.d.ts --check
+```
+
+Exits `0` when the file is up to date, `1` (with a hint to re-run without `--check`) when it is missing or stale.
+
 ## What You Get
 
 The generated file is plain TypeScript declarations.
@@ -96,6 +104,35 @@ export interface CreatePet {
 ```
 
 `void` means the endpoint has no value for that slot. If you only need a type boundary between your OpenAPI spec and your app, this is the whole workflow.
+
+### Webhooks
+
+OpenAPI 3.1 `webhooks` are emitted as a parallel `Webhooks` interface keyed by `"<METHOD> <name>"`. The entry shape diverges from `Endpoints` because the direction is inverted (your handler receives the request, not sends it):
+
+```ts
+export interface Webhooks {
+  "POST pet.created": {
+    query: void;
+    payload: { id: string; name: string };
+    reply: void;
+  };
+}
+```
+
+- `payload` replaces `body` (incoming request body).
+- `reply` replaces `response` (the handler's outgoing reply).
+- `params` is omitted (no URL templating in webhook names).
+- `query`, `headers`, and `errors` keep their names; their semantics flip — they describe what the third party sends and what the handler returns.
+
+Use it to type your webhook handlers:
+
+```ts
+import type { Webhooks } from "./api";
+
+function onPetCreated(payload: Webhooks["POST pet.created"]["payload"]) {
+  // payload: { id: string; name: string }
+}
+```
 
 ## Optional Typed Client
 
@@ -161,7 +198,7 @@ await api("GET /pets", {
 - Header names are normalized to lowercase before they reach the adapter, so `Content-Type` and `content-type` are treated as the same header.
 - Default `options` are shallow-merged with per-call `options` when both are objects. For non-object options, the per-call value replaces the default.
 - `Adapter<TOptions>` makes `options` typed for axios, ky, ofetch, or your own client.
-- `AdapterRequest.body` is typed as `BodyLike`: `string`, `ArrayBuffer`/typed array, `Blob`, `FormData`, `URLSearchParams`, or `ReadableStream<Uint8Array>`.
+- The `body` passed to your adapter is shaped to match `fetch`'s `BodyInit` (`string`, `ArrayBuffer`/typed array, `Blob`, `FormData`, `URLSearchParams`, `ReadableStream<Uint8Array>`), so adapters wrapping `fetch` can forward it without a cast.
 - `Client<Endpoints, TOptions>` can type your exported client, mocks, or wrapper helpers.
 - Omit fields owned by the adapter (`method`, `url`, `body`/`data`, `headers`) from `TOptions` so callers cannot override them.
 
@@ -259,7 +296,7 @@ export const api = createClient<Endpoints>(adapter, {
 - `serializeBody` receives each non-`undefined` body and returns the adapter body plus optional headers.
 - Per-call headers still override headers returned by `serializeBody`. Header names are normalized to lowercase after merging.
 
-For multipart requests, `body` accepts `BodyLike` values in addition to the generated endpoint schema type. That lets a small wrapper send `FormData` even when the OpenAPI request body schema was rendered as a JSON-shaped type:
+For multipart requests, `body` also accepts the raw shapes `fetch` accepts (`FormData`, `Blob`, `URLSearchParams`, `ArrayBuffer`/typed array, `ReadableStream<Uint8Array>`, `string`) in addition to the generated endpoint schema type. That lets a small wrapper send `FormData` even when the OpenAPI request body schema was rendered as a JSON-shaped type:
 
 ```ts
 import { api } from "./api-client";
@@ -350,7 +387,7 @@ Both forms accept options:
 await generate("./openapi.json", {
   formats: { "date-time": "Date", uuid: "UUID" },
   errors: true,
-  header: false,
+  headers: true,
 });
 ```
 
@@ -358,7 +395,7 @@ await generate("./openapi.json", {
 | --------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `formats` | `{}`    | Maps OpenAPI `format` values to raw TypeScript type expressions. Applies to schemas with `type: "string" \| "number" \| "integer"` and nullable variants such as `["string", "null"]`. User mappings override the built-in `binary`/`byte` -> `Blob`. |
 | `errors`  | `false` | Adds an `errors` field to each endpoint type with collected 4xx/5xx response types, including `4XX`/`5XX` wildcards. `default` responses are not collected. The runtime client does not consume this field.                                           |
-| `header`  | default | Pass `false` to omit the generated JSDoc header, or a function `(info) => string` to replace it.                                                                                                                                                      |
+| `headers` | `false` | Adds a typed `headers` field to each endpoint type from `in: header` parameters. When `false`, header parameters from the spec are not surfaced; callers may still pass arbitrary headers at runtime.                                                 |
 
 ## Supported
 
@@ -376,6 +413,8 @@ OpenAPI 3.0 and 3.1 JSON documents.
 | OpenAPI 3.1 `type: ["T", "null"]`                        | Adds `null`.                                                                                                         |
 | `prefixItems`                                            | Tuple types, with optional rest from `items`.                                                                        |
 | `additionalProperties`                                   | `Record<string, T>` or explicit properties plus an index signature.                                                  |
+| `patternProperties`                                      | Folded into the same index signature; multiple patterns become a union of value types.                              |
+| OpenAPI 3.1 `webhooks`                                   | A parallel `Webhooks` interface with diverged entry shape (`payload` / `reply`, no `params`). See below.             |
 | `requestBody.required`                                   | Missing or `false` means `body?: T`; `true` means `body: T`.                                                         |
 | 2xx responses                                            | JSON schema -> typed response, `text/*` -> `string`, binary -> `Blob`, empty success -> `void`, otherwise `unknown`. |
 
