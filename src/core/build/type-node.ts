@@ -83,7 +83,7 @@ function typeArrayToNode(schema: OpenAPISchema, options: BuildOptions): TypeNode
     return includesNull ? { kind: "union", members: [mapped, primitive("null")] } : mapped;
   }
 
-  const inner: TypeNode[] = nonNull.map((t) => primitiveStringToNode(t));
+  const inner: TypeNode[] = nonNull.map((t) => convertSingleType({ ...schema, type: t }, options));
   if (includesNull) inner.push(primitive("null"));
   if (inner.length === 1) return inner[0];
   return { kind: "union", members: inner };

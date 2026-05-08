@@ -120,6 +120,46 @@ describe("buildIR: TypeNode coverage via schemas", () => {
     });
   });
 
+  it("type [array, null] resolves items instead of collapsing to unknown", () => {
+    const ir = buildIR({
+      components: {
+        schemas: { N: { type: ["array", "null"], items: { type: "string" } } },
+      },
+    });
+    expect(ir.schemas[0].type).toEqual({
+      kind: "union",
+      members: [
+        { kind: "array", items: { kind: "primitive", name: "string" } },
+        { kind: "primitive", name: "null" },
+      ],
+    });
+  });
+
+  it("type [object, null] resolves properties instead of collapsing to unknown", () => {
+    const ir = buildIR({
+      components: {
+        schemas: {
+          N: {
+            type: ["object", "null"],
+            properties: { x: { type: "string" } },
+            required: ["x"],
+          },
+        },
+      },
+    });
+    expect(ir.schemas[0].type).toEqual({
+      kind: "union",
+      members: [
+        {
+          kind: "object",
+          fields: [{ name: "x", required: true, type: { kind: "primitive", name: "string" } }],
+          index: null,
+        },
+        { kind: "primitive", name: "null" },
+      ],
+    });
+  });
+
   it("$ref → ref TypeNode with sanitized name", () => {
     const ir = buildIR({
       components: {
