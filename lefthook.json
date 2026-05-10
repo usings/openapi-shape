@@ -18,6 +18,10 @@
       "lint": {
         "glob": "*.{ts,tsx,js,mjs,cjs,jsx}",
         "run": "pnpm exec oxlint {staged_files}"
+      },
+      "typecheck": {
+        "glob": "*.{ts,tsx}",
+        "run": "pnpm exec tsc --noEmit"
       }
     }
   }
