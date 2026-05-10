@@ -1,8 +1,31 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { styleText } from "node:util";
 import { defineCommand, runMain } from "citty";
 import { generate } from "./index";
+
+function info(msg: string): void {
+  process.stdout.write(`${styleText("cyan", "ℹ")} ${msg}\n`);
+}
+
+function ok(msg: string): void {
+  process.stdout.write(`${styleText("green", "✔")} ${msg}\n`);
+}
+
+function fail(msg: string): void {
+  process.stderr.write(`${styleText("red", "✘")} ${msg}\n`);
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(2)} kB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function formatDuration(start: number): string {
+  return `${Math.round(performance.now() - start)}ms`;
+}
 
 const main = defineCommand({
   meta: {
@@ -35,6 +58,11 @@ const main = defineCommand({
     },
   },
   async run({ args }) {
+    const start = performance.now();
+
+    info(`source: ${args.source}`);
+    info(`output: ${args.output}${args.check ? " (check)" : ""}`);
+
     const code = await generate(args.source, { headers: args.headers, errors: args.errors });
 
     if (args.check) {
@@ -42,7 +70,7 @@ const main = defineCommand({
       const existing = await readFile(target, "utf8").catch(() => null);
 
       if (existing === code) {
-        process.stdout.write(`${args.output} is up to date\n`);
+        ok(`${args.output} is up to date in ${formatDuration(start)}`);
         return;
       }
 
@@ -52,13 +80,14 @@ const main = defineCommand({
     }
 
     await writeFile(resolve(args.output), code, "utf8");
-    process.stdout.write(`Generated ${args.output}\n`);
+    const size = formatBytes(Buffer.byteLength(code, "utf8"));
+    ok(`Generated ${args.output} (${size}) in ${formatDuration(start)}`);
   },
 });
 
-function reportStale(output: string, expected: string, actual: string | null) {
+function reportStale(output: string, expected: string, actual: string | null): void {
   if (actual === null) {
-    process.stderr.write(`${output}: missing — file does not exist\n`);
+    fail(`${output}: file does not exist`);
     return;
   }
 
@@ -67,11 +96,9 @@ function reportStale(output: string, expected: string, actual: string | null) {
   const delta = expectedLines.length - actualLines.length;
   const sign = delta > 0 ? `+${delta}` : `${delta}`;
 
-  process.stderr.write(
-    `${output}: out of date\n` +
-      `  current:    ${actualLines.length} lines\n` +
-      `  expected:   ${expectedLines.length} lines (${sign})\n`,
-  );
+  fail(`${output} is out of date`);
+  info(`  current:  ${actualLines.length} lines`);
+  info(`  expected: ${expectedLines.length} lines (${sign})`);
 }
 
 runMain(main);
