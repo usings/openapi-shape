@@ -46,9 +46,10 @@ export function mapDocumentSchemas(doc: OpenAPIDocument, mapSchema: SchemaMapper
 
 function mapComponents(components: Components, visitor: DocumentVisitor): Components {
   let out = components;
-  if (components.schemas && visitor.schema) {
+  const schemaVisitor = visitor.schema;
+  if (components.schemas && schemaVisitor) {
     const next = mapValuesIdentity(components.schemas, (s, name) =>
-      visitor.schema!(s, `/components/schemas/${name}`),
+      schemaVisitor(s, `/components/schemas/${name}`),
     );
     if (next !== components.schemas) out = { ...out, schemas: next };
   }
@@ -157,10 +158,11 @@ function mapMediaContent(
   visitor: DocumentVisitor,
   location: string,
 ): Record<string, MediaType> {
-  if (!visitor.schema) return content;
+  const schemaVisitor = visitor.schema;
+  if (!schemaVisitor) return content;
   return mapValuesIdentity(content, (media, ct) => {
     if (!media.schema) return media;
-    const next = visitor.schema!(media.schema, `${location}/${ct}/schema`);
+    const next = schemaVisitor(media.schema, `${location}/${ct}/schema`);
     return next === media.schema ? media : { ...media, schema: next };
   });
 }

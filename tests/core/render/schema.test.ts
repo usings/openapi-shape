@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderTypeNode, renderSchemas } from "../../../src/core/render/schema";
 import type { SchemaModel } from "../../../src/core/build/ir";
+import { renderTypeNode, renderSchemas } from "../../../src/core/render/schema";
 
 describe("renderTypeNode: primitives/literals/refs", () => {
   it("primitive name", () => {

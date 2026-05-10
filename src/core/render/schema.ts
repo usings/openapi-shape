@@ -1,6 +1,6 @@
 import type { TypeNode, SchemaModel, FieldModel } from "../build/ir";
-import { indent, jsdoc } from "./format";
 import { safeKey } from "../shared/naming";
+import { indent, jsdoc } from "./format";
 
 export function renderTypeNode(node: TypeNode): string {
   switch (node.kind) {

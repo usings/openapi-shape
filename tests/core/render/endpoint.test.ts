@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderEndpointsInterface } from "../../../src/core/render/endpoint";
 import type { EndpointModel } from "../../../src/core/build/ir";
+import { renderEndpointsInterface } from "../../../src/core/render/endpoint";
 
 const baseEndpoint: EndpointModel = {
   key: "GET /pets",

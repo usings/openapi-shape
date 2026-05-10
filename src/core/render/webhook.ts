@@ -1,14 +1,8 @@
 import type { EndpointModel } from "../build/ir";
-import { indentContinuation } from "./format";
 import { safeKey } from "../shared/naming";
-import {
-  type RenderEntryOptions,
-  entryDocHeader,
-  renderBody,
-  renderErrors,
-  renderParam,
-  renderResponse,
-} from "./entry";
+import { entryDocHeader, renderBody, renderErrors, renderParam, renderResponse } from "./entry";
+import type { RenderEntryOptions } from "./entry";
+import { indentContinuation } from "./format";
 
 export function renderWebhooksInterface(
   webhooks: EndpointModel[],

@@ -1,10 +1,10 @@
 import type { OpenAPIDocument } from "../load/openapi";
-import type { SchemaModel, FieldModel } from "./ir";
-import { BuildError } from "./errors";
 import { safeIdentifier } from "../shared/naming";
 import { escapePointerSegment } from "../shared/pointer";
-import { schemaToTypeNode, docBlock, objectIndex } from "./type-node";
+import { BuildError } from "./errors";
 import type { BuildOptions } from "./index";
+import type { SchemaModel, FieldModel } from "./ir";
+import { schemaToTypeNode, docBlock, objectIndex } from "./type-node";
 
 export function buildSchemas(doc: OpenAPIDocument, options: BuildOptions): SchemaModel[] {
   const raw = doc.components?.schemas;

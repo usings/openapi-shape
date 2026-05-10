@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { createClient, type Adapter, type Client } from "../src/client";
+import { createClient } from "../src/client";
+import type { Adapter, Client } from "../src/client";
 
 interface TestAPI {
   "GET /pets": {
     params: void;
     query: { limit?: number };
     body: void;
-    response: { id: number; name: string }[];
+    response: Array<{ id: number; name: string }>;
   };
   "POST /pets": {
     params: void;
@@ -214,7 +215,7 @@ describe("createClient", () => {
     const call = adapter.mock.calls[0][0];
     expect(call.method).toBe("POST");
     expect(call.body).toBe('{"name":"Buddy"}');
-    expect(call.headers).toEqual({ "content-type": "application/json" });
+    expect(call.headers).toStrictEqual({ "content-type": "application/json" });
   });
 
   it("supports custom body serialization", async () => {
@@ -232,7 +233,7 @@ describe("createClient", () => {
 
     const call = adapter.mock.calls[0][0];
     expect(call.body).toBe("Buddy");
-    expect(call.headers).toEqual({ "content-type": "text/plain" });
+    expect(call.headers).toStrictEqual({ "content-type": "text/plain" });
   });
 
   it("merges per-call headers on top of custom body headers", async () => {
@@ -252,7 +253,7 @@ describe("createClient", () => {
     });
 
     const call = adapter.mock.calls[0][0];
-    expect(call.headers).toEqual({
+    expect(call.headers).toStrictEqual({
       "content-type": "application/custom",
       "x-body": "1",
     });
@@ -290,7 +291,7 @@ describe("createClient", () => {
 
     const call = adapter.mock.calls[0][0];
     expect(call.body).toBe(body);
-    expect(call.headers).toEqual({});
+    expect(call.headers).toStrictEqual({});
   });
 
   it("passes string body through with content-type: text/plain", async () => {
@@ -308,7 +309,7 @@ describe("createClient", () => {
 
     const call = adapter.mock.calls[0][0];
     expect(call.body).toBe("hello world");
-    expect(call.headers).toEqual({ "content-type": "text/plain" });
+    expect(call.headers).toStrictEqual({ "content-type": "text/plain" });
   });
 
   it("omits body and headers for no body", async () => {
@@ -319,7 +320,7 @@ describe("createClient", () => {
 
     const call = adapter.mock.calls[0][0];
     expect(call.body).toBeUndefined();
-    expect(call.headers).toEqual({});
+    expect(call.headers).toStrictEqual({});
   });
 
   it("skips undefined query params", async () => {
@@ -347,7 +348,7 @@ describe("createClient", () => {
     const api = createClient<TestAPI>(adapter);
 
     const result = await api("GET /pets");
-    expect(result).toEqual([{ id: 1, name: "Buddy" }]);
+    expect(result).toStrictEqual([{ id: 1, name: "Buddy" }]);
   });
 
   it("supports baseURL option", async () => {
@@ -453,7 +454,7 @@ describe("createClient", () => {
     });
 
     const call = adapter.mock.calls[0][0];
-    expect(call.headers).toEqual({
+    expect(call.headers).toStrictEqual({
       "content-type": "application/json",
       "x-trace-id": "abc",
     });
@@ -469,7 +470,7 @@ describe("createClient", () => {
     });
 
     const call = adapter.mock.calls[0][0];
-    expect(call.headers).toEqual({ "content-type": "text/plain" });
+    expect(call.headers).toStrictEqual({ "content-type": "text/plain" });
   });
 
   it("merges default headers before body and per-call headers", async () => {
@@ -488,7 +489,7 @@ describe("createClient", () => {
     });
 
     const call = adapter.mock.calls[0][0];
-    expect(call.headers).toEqual({
+    expect(call.headers).toStrictEqual({
       "content-type": "application/json",
       "x-app": "docs",
       "x-trace-id": "call",
@@ -510,7 +511,7 @@ describe("createClient", () => {
     });
 
     const call = adapter.mock.calls[0][0];
-    expect(call.headers).toEqual({
+    expect(call.headers).toStrictEqual({
       "x-app": "docs",
       "x-trace-id": "abc",
     });
@@ -539,7 +540,10 @@ describe("createClient", () => {
   });
 
   it("passes per-call options through to the adapter", async () => {
-    type CustomOptions = { timeout?: number; tag?: string };
+    interface CustomOptions {
+      timeout?: number;
+      tag?: string;
+    }
     const adapter = vi.fn<Adapter<CustomOptions>>().mockResolvedValue([]);
     const api = createClient<TestAPI, CustomOptions>(adapter);
 
@@ -549,11 +553,14 @@ describe("createClient", () => {
     });
 
     const call = adapter.mock.calls[0][0];
-    expect(call.options).toEqual({ timeout: 5000, tag: "v1" });
+    expect(call.options).toStrictEqual({ timeout: 5000, tag: "v1" });
   });
 
   it("passes default options through to the adapter", async () => {
-    type CustomOptions = { timeout?: number; tag?: string };
+    interface CustomOptions {
+      timeout?: number;
+      tag?: string;
+    }
     const adapter = vi.fn<Adapter<CustomOptions>>().mockResolvedValue([]);
     const api = createClient<TestAPI, CustomOptions>(adapter, {
       options: { timeout: 5000, tag: "default" },
@@ -562,11 +569,15 @@ describe("createClient", () => {
     await api("GET /pets");
 
     const call = adapter.mock.calls[0][0];
-    expect(call.options).toEqual({ timeout: 5000, tag: "default" });
+    expect(call.options).toStrictEqual({ timeout: 5000, tag: "default" });
   });
 
   it("merges per-call options on top of default options", async () => {
-    type CustomOptions = { timeout?: number; tag?: string; retry?: number };
+    interface CustomOptions {
+      timeout?: number;
+      tag?: string;
+      retry?: number;
+    }
     const adapter = vi.fn<Adapter<CustomOptions>>().mockResolvedValue([]);
     const api = createClient<TestAPI, CustomOptions>(adapter, {
       options: { timeout: 5000, tag: "default" },
@@ -577,7 +588,7 @@ describe("createClient", () => {
     });
 
     const call = adapter.mock.calls[0][0];
-    expect(call.options).toEqual({ timeout: 5000, tag: "call", retry: 2 });
+    expect(call.options).toStrictEqual({ timeout: 5000, tag: "call", retry: 2 });
   });
 
   it("uses per-call options when options are not objects", async () => {

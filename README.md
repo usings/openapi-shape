@@ -422,7 +422,7 @@ OpenAPI 3.0 and 3.1 JSON documents.
 | OpenAPI 3.1 `type: ["T", "null"]`                        | Adds `null`.                                                                                                         |
 | `prefixItems`                                            | Tuple types, with optional rest from `items`.                                                                        |
 | `additionalProperties`                                   | `Record<string, T>` or explicit properties plus an index signature.                                                  |
-| `patternProperties`                                      | Folded into the same index signature; multiple patterns become a union of value types.                              |
+| `patternProperties`                                      | Folded into the same index signature; multiple patterns become a union of value types.                               |
 | OpenAPI 3.1 `webhooks`                                   | A parallel `Webhooks` interface with diverged entry shape (`payload` / `reply`, no `params`). See below.             |
 | `requestBody.required`                                   | Missing or `false` means `body?: T`; `true` means `body: T`.                                                         |
 | 2xx responses                                            | JSON schema -> typed response, `text/*` -> `string`, binary -> `Blob`, empty success -> `void`, otherwise `unknown`. |

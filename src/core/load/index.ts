@@ -1,8 +1,8 @@
-import type { OpenAPIDocument } from "./openapi";
-import { readSource } from "./source";
-import { normalize } from "./normalize";
-import { resolveRefs } from "./refs";
 import { injectDiscriminators } from "./discriminator";
+import { normalize } from "./normalize";
+import type { OpenAPIDocument } from "./openapi";
+import { resolveRefs } from "./refs";
+import { readSource } from "./source";
 
 /**
  * Load a source and return an OpenAPI document ready for IR building.

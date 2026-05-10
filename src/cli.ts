@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { defineCommand, runMain } from "citty";
-import { generate } from "./index";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { defineCommand, runMain } from "citty";
+import { generate } from "./index";
 
 const main = defineCommand({
   meta: {
@@ -39,7 +39,7 @@ const main = defineCommand({
 
     if (args.check) {
       const target = resolve(args.output);
-      const existing = await readFile(target, "utf-8").catch(() => null);
+      const existing = await readFile(target, "utf8").catch(() => null);
 
       if (existing === code) {
         process.stdout.write(`${args.output} is up to date\n`);
@@ -51,7 +51,7 @@ const main = defineCommand({
       return;
     }
 
-    await writeFile(resolve(args.output), code, "utf-8");
+    await writeFile(resolve(args.output), code, "utf8");
     process.stdout.write(`Generated ${args.output}\n`);
   },
 });

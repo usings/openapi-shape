@@ -27,8 +27,8 @@ describe("loadDocument: I/O", () => {
       }),
       async (path) => {
         const doc = await loadDocument(path);
-        expect(doc.components?.schemas?.X).toEqual({ type: ["string", "null"] });
-        expect(doc.paths?.["/x"]?.get?.parameters?.[0]).toEqual({
+        expect(doc.components?.schemas?.X).toStrictEqual({ type: ["string", "null"] });
+        expect(doc.paths?.["/x"]?.get?.parameters?.[0]).toStrictEqual({
           name: "limit",
           in: "query",
           schema: { type: "integer" },
@@ -78,7 +78,7 @@ describe("prepareDocument: refs", () => {
         },
       },
     });
-    expect(out.paths?.["/x"]?.get?.parameters?.[0]).toEqual({
+    expect(out.paths?.["/x"]?.get?.parameters?.[0]).toStrictEqual({
       name: "limit",
       in: "query",
       schema: { type: "integer" },
@@ -101,7 +101,7 @@ describe("prepareDocument: refs", () => {
         },
       },
     });
-    expect(out.paths?.["/x"]?.post?.requestBody).toEqual({
+    expect(out.paths?.["/x"]?.post?.requestBody).toStrictEqual({
       content: { "application/json": { schema: { type: "string" } } },
     });
   });
@@ -160,8 +160,8 @@ describe("prepareDocument: discriminator", () => {
         },
       },
     });
-    expect(out.components?.schemas?.Cat?.properties?.type).toEqual({ const: "cat" });
-    expect(out.components?.schemas?.Dog?.properties?.type).toEqual({ const: "dog" });
+    expect(out.components?.schemas?.Cat?.properties?.type).toStrictEqual({ const: "cat" });
+    expect(out.components?.schemas?.Dog?.properties?.type).toStrictEqual({ const: "dog" });
   });
 
   it("throws LoadError on inline (non-$ref) branch", () => {
@@ -191,12 +191,12 @@ describe("prepareDocument: idempotence", () => {
     };
     const once = prepareDocument(input);
     const twice = prepareDocument(once);
-    expect(twice).toEqual(once);
+    expect(twice).toStrictEqual(once);
   });
 
   it("accepts in-memory doc with no openapi field", () => {
-    expect(prepareDocument({})).toEqual({});
-    expect(prepareDocument({ info: { title: "T", version: "1" } })).toEqual({
+    expect(prepareDocument({})).toStrictEqual({});
+    expect(prepareDocument({ info: { title: "T", version: "1" } })).toStrictEqual({
       info: { title: "T", version: "1" },
     });
   });
@@ -219,7 +219,9 @@ describe("prepareDocument: idempotence", () => {
         },
       },
     });
-    expect(out.webhooks?.event?.post?.requestBody?.content?.["application/json"]?.schema).toEqual({
+    expect(
+      out.webhooks?.event?.post?.requestBody?.content?.["application/json"]?.schema,
+    ).toStrictEqual({
       type: ["string", "null"],
     });
   });

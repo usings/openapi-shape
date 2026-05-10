@@ -20,25 +20,25 @@ export async function readSource(source: string | URL): Promise<unknown> {
 
   try {
     text = await readText(source);
-  } catch (err) {
-    if (err instanceof LoadError) throw err;
-    throw new LoadError(`Failed to read ${label}: ${(err as Error).message}`);
+  } catch (error) {
+    if (error instanceof LoadError) throw error;
+    throw new LoadError(`Failed to read ${label}: ${(error as Error).message}`);
   }
 
   try {
     return JSON.parse(text);
-  } catch (err) {
-    throw new LoadError(`Failed to parse ${label} as JSON: ${(err as Error).message}`);
+  } catch (error) {
+    throw new LoadError(`Failed to parse ${label} as JSON: ${(error as Error).message}`);
   }
 }
 
-async function readText(source: string | URL): Promise<string> {
+function readText(source: string | URL): Promise<string> {
   if (source instanceof URL) {
     if (source.protocol === "http:" || source.protocol === "https:") {
       return fetchText(source.href);
     }
     if (source.protocol === "file:") {
-      return readFile(fileURLToPath(source), "utf-8");
+      return readFile(fileURLToPath(source), "utf8");
     }
     throw new LoadError(
       `Unsupported URL protocol: ${source.protocol} at ${source.href}. Supported: http:, https:, file:.`,
@@ -47,7 +47,7 @@ async function readText(source: string | URL): Promise<string> {
   if (source.startsWith("http://") || source.startsWith("https://")) {
     return fetchText(source);
   }
-  return readFile(source, "utf-8");
+  return readFile(source, "utf8");
 }
 
 async function fetchText(href: string): Promise<string> {

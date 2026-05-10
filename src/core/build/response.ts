@@ -1,7 +1,7 @@
 import type { OpenAPISchema, MediaType, Response } from "../load/openapi";
+import type { BuildOptions } from "./index";
 import type { TypeNode, ResponseGroup, ErrorResponse } from "./ir";
 import { schemaToTypeNode, primitive } from "./type-node";
-import type { BuildOptions } from "./index";
 
 export function buildResponses(
   responses: Record<string, Response>,
@@ -56,7 +56,7 @@ function collectErrors(
   const out: ErrorResponse[] = [];
   const codes = Object.keys(responses)
     .filter((code) => /^4\d{2}$|^5\d{2}$|^4XX$|^5XX$/.test(code))
-    .sort((a, b) => errorCodeSortKey(a) - errorCodeSortKey(b));
+    .toSorted((a, b) => errorCodeSortKey(a) - errorCodeSortKey(b));
   for (const code of codes) {
     const r = responses[code];
     if (!r?.content) continue;
@@ -120,5 +120,5 @@ function isBinaryContentType(ct: string): boolean {
 }
 
 function isBinarySchema(s: OpenAPISchema | undefined): boolean {
-  return !!s && (s.format === "binary" || s.format === "byte");
+  return s !== undefined && (s.format === "binary" || s.format === "byte");
 }

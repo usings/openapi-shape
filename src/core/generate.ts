@@ -1,6 +1,8 @@
+import { buildIR } from "./build";
+import type { BuildOptions } from "./build";
 import { prepareDocument, loadDocument } from "./load";
-import { buildIR, type BuildOptions } from "./build";
-import { render, type RenderOptions } from "./render";
+import { render } from "./render";
+import type { RenderOptions } from "./render";
 
 export interface GenerateOptions extends BuildOptions, RenderOptions {}
 

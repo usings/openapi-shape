@@ -1,3 +1,5 @@
+// ----- Building blocks -----
+
 type FetchBodyInit = typeof globalThis extends {
   fetch: (input: never, init?: infer Init) => unknown;
 }
@@ -17,37 +19,48 @@ type FallbackBodyInit =
 
 type BodyLike = [FetchBodyInit] extends [never] ? FallbackBodyInit : FetchBodyInit;
 
-type QuerySerializerResult = string | { toString(): string };
+type NonNullish = NonNullable<unknown>;
 
-type AdapterRequest<TOptions = unknown> = {
-  method: string;
-  url: string;
-  body: BodyLike | undefined;
-  headers: Record<string, string>;
-  options: TOptions | undefined;
-};
+// ----- Contracts -----
 
-type EndpointDefinition = {
+interface EndpointDefinition {
   params: unknown;
   query: unknown;
   body?: unknown;
   headers?: unknown;
   response: unknown;
-};
+}
+
+interface AdapterRequest<TOptions = unknown> {
+  method: string;
+  url: string;
+  body: BodyLike | undefined;
+  headers: Record<string, string>;
+  options: TOptions | undefined;
+}
+
+interface BodySerializerResult {
+  body: BodyLike | undefined;
+  headers?: Record<string, string>;
+}
+
+type QuerySerializerResult = string | { toString(): string };
+
+// ----- Type-level call signature derivation -----
 
 type RequestField<TKey extends string, TValue> = TValue extends void
-  ? { [Property in TKey]?: never }
+  ? Partial<Record<TKey, never>>
   : undefined extends TValue
-    ? { [Property in TKey]?: Exclude<TValue, undefined> }
-    : {} extends TValue
-      ? { [Property in TKey]?: TValue }
-      : { [Property in TKey]: TValue };
+    ? Partial<Record<TKey, Exclude<TValue, undefined>>>
+    : NonNullish extends TValue
+      ? Partial<Record<TKey, TValue>>
+      : Record<TKey, TValue>;
 
 type RequestBodyField<TValue> = TValue extends void
   ? { body?: never }
   : undefined extends TValue
     ? { body?: Exclude<TValue, undefined> | BodyLike }
-    : {} extends TValue
+    : NonNullish extends TValue
       ? { body?: TValue | BodyLike }
       : { body: TValue | BodyLike };
 
@@ -55,7 +68,7 @@ type HeadersField<TValue> = TValue extends void
   ? { headers?: Record<string, string> }
   : undefined extends TValue
     ? { headers?: Exclude<TValue, undefined> & Record<string, string> }
-    : {} extends TValue
+    : NonNullish extends TValue
       ? { headers?: TValue & Record<string, string> }
       : { headers: TValue & Record<string, string> };
 
@@ -69,20 +82,19 @@ type RequestOptions<T extends EndpointDefinition, TOptions> = RequestField<"para
   };
 
 type HasRequiredOptions<T extends EndpointDefinition> =
-  {} extends RequestOptions<T, unknown> ? false : true;
+  NonNullish extends RequestOptions<T, unknown> ? false : true;
 
-type RuntimeRequestOptions<TOptions> = {
+// ----- Runtime helper -----
+
+interface RuntimeRequestOptions<TOptions> {
   params?: Record<string, unknown>;
   query?: Record<string, unknown>;
   body?: unknown;
   headers?: Record<string, string>;
   options?: TOptions;
-};
-
-interface BodySerializerResult {
-  body: BodyLike | undefined;
-  headers?: Record<string, string>;
 }
+
+// ----- Public API -----
 
 export type Adapter<TOptions = unknown> = (request: AdapterRequest<TOptions>) => Promise<unknown>;
 
@@ -141,7 +153,7 @@ function splitEndpoint(endpoint: string): { method: string; path: string } {
 }
 
 function replacePathParams(path: string, params: Record<string, unknown> | undefined): string {
-  return path.replace(/\{([^}/]+)\}/g, (_, name) => {
+  return path.replaceAll(/\{([^}/]+)\}/g, (_, name) => {
     if (!params || !Object.hasOwn(params, name) || params[name] == null) {
       throw new Error(`Missing path param: ${name}`);
     }

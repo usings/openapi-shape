@@ -13,7 +13,7 @@ describe("buildIR: webhooks", () => {
     expect(ir.webhooks[0].key).toBe("POST pet.created");
     expect(ir.webhooks[0].method).toBe("post");
     expect(ir.webhooks[0].path).toBe("pet.created");
-    expect(ir.webhooks[0].source).toEqual({ location: "/webhooks/pet.created/post" });
+    expect(ir.webhooks[0].source).toStrictEqual({ location: "/webhooks/pet.created/post" });
   });
 
   it("webhook with multiple methods produces an entry per method in HTTP_METHODS order", () => {
@@ -25,7 +25,7 @@ describe("buildIR: webhooks", () => {
         },
       },
     });
-    expect(ir.webhooks.map((e) => e.key)).toEqual(["GET ping", "POST ping"]);
+    expect(ir.webhooks.map((e) => e.key)).toStrictEqual(["GET ping", "POST ping"]);
   });
 
   it("webhook body and response mirror endpoint shape", () => {
@@ -44,12 +44,12 @@ describe("buildIR: webhooks", () => {
         },
       },
     });
-    expect(ir.webhooks[0].body).toEqual({
+    expect(ir.webhooks[0].body).toStrictEqual({
       kind: "json",
       required: true,
       type: { kind: "primitive", name: "string" },
     });
-    expect(ir.webhooks[0].responses.success).toEqual({ kind: "primitive", name: "boolean" });
+    expect(ir.webhooks[0].responses.success).toStrictEqual({ kind: "primitive", name: "boolean" });
   });
 
   it("source location escapes slashes in webhook names", () => {
@@ -58,7 +58,7 @@ describe("buildIR: webhooks", () => {
         "pet/created": { post: { responses: { "200": { description: "ok" } } } },
       },
     });
-    expect(ir.webhooks[0].source).toEqual({ location: "/webhooks/pet~1created/post" });
+    expect(ir.webhooks[0].source).toStrictEqual({ location: "/webhooks/pet~1created/post" });
   });
 
   it("throws when a webhook operation is missing responses", () => {
@@ -74,7 +74,7 @@ describe("buildIR: webhooks", () => {
       paths: { "/x": { get: { responses: { "200": { description: "ok" } } } } },
       webhooks: { ping: { post: { responses: { "200": { description: "ok" } } } } },
     });
-    expect(ir.endpoints.map((e) => e.key)).toEqual(["GET /x"]);
-    expect(ir.webhooks.map((e) => e.key)).toEqual(["POST ping"]);
+    expect(ir.endpoints.map((e) => e.key)).toStrictEqual(["GET /x"]);
+    expect(ir.webhooks.map((e) => e.key)).toStrictEqual(["POST ping"]);
   });
 });

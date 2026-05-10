@@ -1,8 +1,8 @@
 import type { OpenAPISchema } from "../load/openapi";
-import type { TypeNode, PrimitiveName, FieldModel, DocBlock } from "./ir";
 import { safeIdentifier } from "../shared/naming";
 import { isObject } from "../shared/object";
 import type { BuildOptions } from "./index";
+import type { TypeNode, PrimitiveName, FieldModel, DocBlock } from "./ir";
 
 export function schemaToTypeNode(
   schema: OpenAPISchema | undefined,
@@ -12,14 +12,16 @@ export function schemaToTypeNode(
 
   if ("const" in schema) return constToTypeNode(schema.const);
 
+  if (Array.isArray(schema.type)) return typeArrayToNode(schema, options);
+
   if (Array.isArray(schema.enum)) {
     if (schema.enum.length === 0) return primitive("never");
     return uniqueUnion(schema.enum.map((v) => constToTypeNode(v)));
   }
 
   if (schema.$ref) {
-    const parts = schema.$ref.split("/");
-    return { kind: "ref", name: safeIdentifier(parts[parts.length - 1]) };
+    const last = schema.$ref.split("/").at(-1) ?? schema.$ref;
+    return { kind: "ref", name: safeIdentifier(last) };
   }
 
   if (schema.oneOf) {
@@ -36,8 +38,6 @@ export function schemaToTypeNode(
       members: schema.allOf.map((b) => schemaToTypeNode(b, options)),
     };
   }
-
-  if (Array.isArray(schema.type)) return typeArrayToNode(schema, options);
 
   return convertSingleType(schema, options);
 }
@@ -75,7 +75,7 @@ function typeArrayToNode(schema: OpenAPISchema, options: BuildOptions): TypeNode
   if (
     schema.format !== undefined &&
     options.formats &&
-    Object.prototype.hasOwnProperty.call(options.formats, schema.format) &&
+    Object.hasOwn(options.formats, schema.format) &&
     nonNull.length === 1 &&
     isFormatMappablePrimitive(nonNull[0])
   ) {
@@ -95,7 +95,7 @@ function convertSingleType(schema: OpenAPISchema, options: BuildOptions): TypeNo
   if (
     schema.format !== undefined &&
     options.formats &&
-    Object.prototype.hasOwnProperty.call(options.formats, schema.format) &&
+    Object.hasOwn(options.formats, schema.format) &&
     (t === undefined || isFormatMappablePrimitive(t))
   ) {
     return { kind: "raw", text: options.formats[schema.format] };

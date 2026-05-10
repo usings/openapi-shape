@@ -1,7 +1,7 @@
-import type { OpenAPIDocument, PathItem, Parameter, RequestBody, Response } from "./openapi";
-import { LoadError } from "./errors";
 import { isObject } from "../shared/object";
 import { decodePointerSegment } from "../shared/pointer";
+import { LoadError } from "./errors";
+import type { OpenAPIDocument, PathItem, Parameter, RequestBody, Response } from "./openapi";
 import { mapDocument } from "./walk";
 
 const REF_BUCKETS = {
@@ -63,7 +63,10 @@ class RefResolver {
 
   private lookup(ref: string): unknown {
     if (!ref.startsWith("#/")) return undefined;
-    const segments = ref.slice(2).split("/").map(decodePointerSegment);
+    const segments = ref
+      .slice(2)
+      .split("/")
+      .map((s) => decodePointerSegment(s));
     let current: unknown = this.doc;
     for (const segment of segments) {
       if (!isObject(current)) return undefined;

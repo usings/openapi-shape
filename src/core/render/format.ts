@@ -27,7 +27,7 @@ export function jsdoc(
   if (lines.length === 0) return "";
   if (lines.length === 1) return `${indentStr}/** ${lines[0]} */\n`;
   return `${indentStr}/**\n${lines
-    .map((line) => `${indentStr} *${line ? " " + line : ""}`)
+    .map((line) => `${indentStr} *${line ? ` ${line}` : ""}`)
     .join("\n")}\n${indentStr} */\n`;
 }
 

@@ -5,12 +5,12 @@ import { BuildError } from "../../../src/core/build/errors";
 describe("buildIR: info and empties", () => {
   it("empty doc → empty IR", () => {
     const ir = buildIR({});
-    expect(ir).toEqual({ info: {}, schemas: [], endpoints: [], webhooks: [] });
+    expect(ir).toStrictEqual({ info: {}, schemas: [], endpoints: [], webhooks: [] });
   });
 
   it("captures info fields", () => {
     const ir = buildIR({ info: { title: "T", version: "1.0", description: "D" } });
-    expect(ir.info).toEqual({ title: "T", version: "1.0", description: "D" });
+    expect(ir.info).toStrictEqual({ title: "T", version: "1.0", description: "D" });
   });
 });
 
@@ -27,16 +27,27 @@ describe("buildIR: schema kinds", () => {
         },
       },
     });
-    expect(ir.schemas).toEqual([
+    expect(ir.schemas).toStrictEqual([
       {
         name: "User",
         originalName: "User",
         kind: "interface",
         type: null,
         source: { location: "/components/schemas/User" },
+        docs: undefined,
         fields: [
-          { name: "id", required: true, type: { kind: "primitive", name: "number" } },
-          { name: "name", required: false, type: { kind: "primitive", name: "string" } },
+          {
+            name: "id",
+            required: true,
+            type: { kind: "primitive", name: "number" },
+            docs: undefined,
+          },
+          {
+            name: "name",
+            required: false,
+            type: { kind: "primitive", name: "string" },
+            docs: undefined,
+          },
         ],
       },
     ]);
@@ -46,12 +57,13 @@ describe("buildIR: schema kinds", () => {
     const ir = buildIR({
       components: { schemas: { Status: { enum: ["a", "b"] } } },
     });
-    expect(ir.schemas[0]).toEqual({
+    expect(ir.schemas[0]).toStrictEqual({
       name: "Status",
       originalName: "Status",
       kind: "alias",
       fields: null,
       source: { location: "/components/schemas/Status" },
+      docs: undefined,
       type: {
         kind: "union",
         members: [
@@ -74,7 +86,7 @@ describe("buildIR: schema kinds", () => {
     const ir = buildIR({
       components: { schemas: { "Folder/User": { type: "object" } } },
     });
-    expect(ir.schemas[0].source).toEqual({ location: "/components/schemas/Folder~1User" });
+    expect(ir.schemas[0].source).toStrictEqual({ location: "/components/schemas/Folder~1User" });
   });
 
   it("throws BuildError on schema name collision after sanitization", () => {
@@ -102,16 +114,16 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         },
       },
     });
-    expect(ir.schemas[0].type).toEqual({ kind: "primitive", name: "string" });
-    expect(ir.schemas[1].type).toEqual({ kind: "primitive", name: "number" });
-    expect(ir.schemas[2].type).toEqual({ kind: "primitive", name: "boolean" });
+    expect(ir.schemas[0].type).toStrictEqual({ kind: "primitive", name: "string" });
+    expect(ir.schemas[1].type).toStrictEqual({ kind: "primitive", name: "number" });
+    expect(ir.schemas[2].type).toStrictEqual({ kind: "primitive", name: "boolean" });
   });
 
   it("type array with null → union", () => {
     const ir = buildIR({
       components: { schemas: { N: { type: ["string", "null"] } } },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "union",
       members: [
         { kind: "primitive", name: "string" },
@@ -126,7 +138,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         schemas: { N: { type: ["array", "null"], items: { type: "string" } } },
       },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "union",
       members: [
         { kind: "array", items: { kind: "primitive", name: "string" } },
@@ -147,12 +159,19 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         },
       },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "union",
       members: [
         {
           kind: "object",
-          fields: [{ name: "x", required: true, type: { kind: "primitive", name: "string" } }],
+          fields: [
+            {
+              name: "x",
+              required: true,
+              type: { kind: "primitive", name: "string" },
+              docs: undefined,
+            },
+          ],
           index: null,
         },
         { kind: "primitive", name: "null" },
@@ -169,14 +188,14 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         },
       },
     });
-    expect(ir.schemas[1].type).toEqual({ kind: "ref", name: "A" });
+    expect(ir.schemas[1].type).toStrictEqual({ kind: "ref", name: "A" });
   });
 
   it("array → array TypeNode", () => {
     const ir = buildIR({
       components: { schemas: { A: { type: "array", items: { type: "string" } } } },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "array",
       items: { kind: "primitive", name: "string" },
     });
@@ -193,7 +212,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         },
       },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "tuple",
       items: [
         { kind: "primitive", name: "string" },
@@ -209,7 +228,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         schemas: { A: { oneOf: [{ type: "string" }, { type: "number" }] } },
       },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "union",
       members: [
         { kind: "primitive", name: "string" },
@@ -232,13 +251,20 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         },
       },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "intersection",
       members: [
         { kind: "ref", name: "B" },
         {
           kind: "object",
-          fields: [{ name: "x", required: false, type: { kind: "primitive", name: "string" } }],
+          fields: [
+            {
+              name: "x",
+              required: false,
+              type: { kind: "primitive", name: "string" },
+              docs: undefined,
+            },
+          ],
           index: null,
         },
       ],
@@ -249,7 +275,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
     const ir = buildIR({
       components: { schemas: { A: { type: "string", format: "binary" } } },
     });
-    expect(ir.schemas[0].type).toEqual({ kind: "primitive", name: "Blob" });
+    expect(ir.schemas[0].type).toStrictEqual({ kind: "primitive", name: "Blob" });
   });
 
   it("formats: date-time → raw('Date')", () => {
@@ -257,7 +283,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
       { components: { schemas: { A: { type: "string", format: "date-time" } } } },
       { formats: { "date-time": "Date" } },
     );
-    expect(ir.schemas[0].type).toEqual({ kind: "raw", text: "Date" });
+    expect(ir.schemas[0].type).toStrictEqual({ kind: "raw", text: "Date" });
   });
 
   it("formats: user mapping wins over builtin binary→Blob", () => {
@@ -265,7 +291,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
       { components: { schemas: { A: { type: "string", format: "binary" } } } },
       { formats: { binary: "Buffer" } },
     );
-    expect(ir.schemas[0].type).toEqual({ kind: "raw", text: "Buffer" });
+    expect(ir.schemas[0].type).toStrictEqual({ kind: "raw", text: "Buffer" });
   });
 
   it("formats: triggers on [string, null] + format", () => {
@@ -277,7 +303,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
       },
       { formats: { "date-time": "Date" } },
     );
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "union",
       members: [
         { kind: "raw", text: "Date" },
@@ -299,7 +325,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
       { formats: { anything: "Foo" } },
     );
     expect(ir.schemas[0].kind).toBe("interface");
-    expect(ir.schemas[1].type).toEqual({
+    expect(ir.schemas[1].type).toStrictEqual({
       kind: "array",
       items: { kind: "primitive", name: "string" },
     });
@@ -313,7 +339,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         },
       },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "record",
       values: { kind: "primitive", name: "number" },
     });
@@ -327,7 +353,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         },
       },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "record",
       values: { kind: "primitive", name: "string" },
     });
@@ -347,7 +373,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         },
       },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "record",
       values: {
         kind: "union",
@@ -374,10 +400,10 @@ describe("buildIR: TypeNode coverage via schemas", () => {
     });
     const schema = ir.schemas[0];
     expect(schema.kind).toBe("interface");
-    expect(schema.fields).toEqual([
-      { name: "id", required: true, type: { kind: "primitive", name: "string" } },
+    expect(schema.fields).toStrictEqual([
+      { name: "id", required: true, type: { kind: "primitive", name: "string" }, docs: undefined },
     ]);
-    expect(schema.index).toEqual({ kind: "primitive", name: "number" });
+    expect(schema.index).toStrictEqual({ kind: "primitive", name: "number" });
   });
 
   it("patternProperties + additionalProperties schema → index is union", () => {
@@ -392,7 +418,7 @@ describe("buildIR: TypeNode coverage via schemas", () => {
         },
       },
     });
-    expect(ir.schemas[0].type).toEqual({
+    expect(ir.schemas[0].type).toStrictEqual({
       kind: "record",
       values: {
         kind: "union",
@@ -408,6 +434,6 @@ describe("buildIR: TypeNode coverage via schemas", () => {
     const ir = buildIR({
       components: { schemas: { A: { const: "hello" } } },
     });
-    expect(ir.schemas[0].type).toEqual({ kind: "literal", value: "hello" });
+    expect(ir.schemas[0].type).toStrictEqual({ kind: "literal", value: "hello" });
   });
 });

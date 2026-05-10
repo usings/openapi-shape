@@ -1,3 +1,5 @@
+import type { HttpMethod } from "../load/openapi";
+
 export interface IR {
   info: DocumentInfo;
   schemas: SchemaModel[];
@@ -14,9 +16,6 @@ export interface DocumentInfo {
 export interface SourceRef {
   location: string;
 }
-
-import type { HttpMethod } from "../load/openapi";
-export type { HttpMethod };
 
 export interface EndpointModel {
   /** Stable endpoint key used when renderers do not choose another key strategy. */

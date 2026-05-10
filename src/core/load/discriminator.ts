@@ -1,8 +1,11 @@
-import type { OpenAPIDocument, OpenAPISchema } from "./openapi";
-import { LoadError } from "./errors";
 import { isObject } from "../shared/object";
+import { LoadError } from "./errors";
+import type { OpenAPIDocument, OpenAPISchema } from "./openapi";
 
-type Injection = { value: string; sourceLocation: string };
+interface Injection {
+  value: string;
+  sourceLocation: string;
+}
 type SchemaInjections = Map<string, Map<string, Injection>>;
 
 export function injectDiscriminators(doc: OpenAPIDocument): OpenAPIDocument {
@@ -138,8 +141,8 @@ function injectIntoAllOf(
   perSchema: Map<string, Injection>,
   schemaName: string,
 ): OpenAPISchema {
-  const allOf = (schema.allOf ?? []).map((m) => ({ ...m }));
-  const targetIndex = allOf.findIndex(canReceiveDiscriminator);
+  const allOf = [...(schema.allOf ?? [])];
+  const targetIndex = allOf.findIndex((m) => canReceiveDiscriminator(m));
   if (targetIndex === -1) {
     allOf.push(createDiscriminatorMember(perSchema));
   } else {

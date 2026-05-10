@@ -1,7 +1,7 @@
 import type { BodyModel, EndpointModel, ErrorResponse, ParamGroup, TypeNode } from "../build/ir";
-import { renderTypeNode } from "./schema";
-import { indent, indentContinuation, jsdoc } from "./format";
 import { safeKey } from "../shared/naming";
+import { indent, indentContinuation, jsdoc } from "./format";
+import { renderTypeNode } from "./schema";
 
 export interface RenderEntryOptions {
   /** Emit an `errors` field per entry, keyed by status code. For endpoints these are received error responses; for webhooks they are error replies the handler returns. */

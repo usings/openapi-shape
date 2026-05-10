@@ -1,6 +1,6 @@
-import { expect } from "vitest";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { expect } from "vitest";
 import { withTmpFiles } from "./tmp";
 
 function run(cmd: string, args: string[]): Promise<void> {

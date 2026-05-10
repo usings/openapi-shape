@@ -5,14 +5,15 @@ import type {
   PathItem,
   RequestBody,
   MediaType,
+  HttpMethod,
 } from "../load/openapi";
-import type { EndpointModel, ParamGroup, BodyModel, HttpMethod, DocBlock } from "./ir";
-import { BuildError } from "./errors";
 import { HTTP_METHODS } from "../load/openapi";
 import { escapePointerSegment } from "../shared/pointer";
-import { schemaToTypeNode } from "./type-node";
-import { buildResponses, isJsonContentType } from "./response";
+import { BuildError } from "./errors";
 import type { BuildOptions } from "./index";
+import type { EndpointModel, ParamGroup, BodyModel, DocBlock } from "./ir";
+import { buildResponses, isJsonContentType } from "./response";
+import { schemaToTypeNode } from "./type-node";
 
 export function buildEndpoints(doc: OpenAPIDocument, options: BuildOptions): EndpointModel[] {
   return walkPathItems(doc.paths ?? {}, "/paths", options);

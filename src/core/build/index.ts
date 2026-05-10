@@ -1,7 +1,7 @@
 import type { OpenAPIDocument } from "../load/openapi";
+import { buildEndpoints } from "./endpoint";
 import type { IR } from "./ir";
 import { buildSchemas } from "./schemas";
-import { buildEndpoints } from "./endpoint";
 import { buildWebhooks } from "./webhook";
 
 export interface BuildOptions {

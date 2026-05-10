@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderWebhooksInterface } from "../../../src/core/render/webhook";
 import type { EndpointModel } from "../../../src/core/build/ir";
+import { renderWebhooksInterface } from "../../../src/core/render/webhook";
 
 const baseWebhook: EndpointModel = {
   key: "POST pet.created",

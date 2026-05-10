@@ -7,12 +7,12 @@ interface TmpOpts {
   prefix?: string;
 }
 
-export async function withTmpFile<T>(
+export function withTmpFile<T>(
   content: string,
   fn: (path: string) => Promise<T>,
   opts?: TmpOpts,
 ): Promise<T> {
-  return withTmpFiles([content], async ([p]) => fn(p), opts);
+  return withTmpFiles([content], ([p]) => fn(p), opts);
 }
 
 export async function withTmpFiles<T>(
@@ -25,7 +25,7 @@ export async function withTmpFiles<T>(
   try {
     return await fn(paths);
   } finally {
-    await Promise.all(paths.map((p) => unlink(p).catch(() => {})));
+    await Promise.all(paths.map((p) => unlink(p).catch(() => undefined)));
   }
 }
 
@@ -34,7 +34,7 @@ export async function withTmpPath<T>(fn: (path: string) => Promise<T>, opts?: Tm
   try {
     return await fn(path);
   } finally {
-    await unlink(path).catch(() => {});
+    await unlink(path).catch(() => undefined);
   }
 }
 

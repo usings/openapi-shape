@@ -10,7 +10,7 @@ describe("buildIR: endpoint key/method/path/meta", () => {
     expect(ir.endpoints[0].key).toBe("GET /pets");
     expect(ir.endpoints[0].method).toBe("get");
     expect(ir.endpoints[0].path).toBe("/pets");
-    expect(ir.endpoints[0].source).toEqual({ location: "/paths/~1pets/get" });
+    expect(ir.endpoints[0].source).toStrictEqual({ location: "/paths/~1pets/get" });
   });
 
   it("captures operationId/tags/deprecated", () => {
@@ -54,8 +54,8 @@ describe("buildIR: params", () => {
         },
       },
     });
-    expect(ir.endpoints[0].params.fields).toEqual([
-      { name: "id", required: true, type: { kind: "primitive", name: "string" } },
+    expect(ir.endpoints[0].params.fields).toStrictEqual([
+      { name: "id", required: true, type: { kind: "primitive", name: "string" }, docs: undefined },
     ]);
   });
 
@@ -73,9 +73,19 @@ describe("buildIR: params", () => {
         },
       },
     });
-    expect(ir.endpoints[0].query.fields).toEqual([
-      { name: "limit", required: true, type: { kind: "primitive", name: "number" } },
-      { name: "tag", required: false, type: { kind: "primitive", name: "string" } },
+    expect(ir.endpoints[0].query.fields).toStrictEqual([
+      {
+        name: "limit",
+        required: true,
+        type: { kind: "primitive", name: "number" },
+        docs: undefined,
+      },
+      {
+        name: "tag",
+        required: false,
+        type: { kind: "primitive", name: "string" },
+        docs: undefined,
+      },
     ]);
   });
 
@@ -91,10 +101,11 @@ describe("buildIR: params", () => {
         },
       },
     });
-    expect(ir.endpoints[0].query.fields[0]).toEqual({
+    expect(ir.endpoints[0].query.fields[0]).toStrictEqual({
       name: "q",
       required: true,
       type: { kind: "primitive", name: "number" },
+      docs: undefined,
     });
   });
 });
@@ -104,7 +115,7 @@ describe("buildIR: body", () => {
     const ir = buildIR({
       paths: { "/p": { post: { responses: { "200": { description: "ok" } } } } },
     });
-    expect(ir.endpoints[0].body).toEqual({ kind: "none" });
+    expect(ir.endpoints[0].body).toStrictEqual({ kind: "none" });
   });
 
   it("json body required true", () => {
@@ -121,7 +132,7 @@ describe("buildIR: body", () => {
         },
       },
     });
-    expect(ir.endpoints[0].body).toEqual({
+    expect(ir.endpoints[0].body).toStrictEqual({
       kind: "json",
       required: true,
       type: { kind: "primitive", name: "string" },
@@ -176,7 +187,7 @@ describe("buildIR: success response", () => {
         },
       },
     });
-    expect(ir.endpoints[0].responses.success).toEqual({ kind: "primitive", name: "string" });
+    expect(ir.endpoints[0].responses.success).toStrictEqual({ kind: "primitive", name: "string" });
     expect(ir.endpoints[0].responses.successStatus).toBe("200");
     expect(ir.endpoints[0].responses.successContentType).toBe("application/json");
   });
@@ -194,14 +205,14 @@ describe("buildIR: success response", () => {
         },
       },
     });
-    expect(ir.endpoints[0].responses.success).toEqual({ kind: "primitive", name: "Blob" });
+    expect(ir.endpoints[0].responses.success).toStrictEqual({ kind: "primitive", name: "Blob" });
   });
 
   it("2xx no-content → void", () => {
     const ir = buildIR({
       paths: { "/p": { delete: { responses: { "204": { description: "ok" } } } } },
     });
-    expect(ir.endpoints[0].responses.success).toEqual({ kind: "primitive", name: "void" });
+    expect(ir.endpoints[0].responses.success).toStrictEqual({ kind: "primitive", name: "void" });
   });
 
   it("falls back to default when no 2xx", () => {
@@ -216,12 +227,12 @@ describe("buildIR: success response", () => {
         },
       },
     });
-    expect(ir.endpoints[0].responses.success).toEqual({ kind: "primitive", name: "string" });
+    expect(ir.endpoints[0].responses.success).toStrictEqual({ kind: "primitive", name: "string" });
   });
 
   it("null when nothing matches", () => {
     const ir = buildIR({ paths: { "/p": { get: { responses: {} } } } });
-    expect(ir.endpoints[0].responses.success).toBe(null);
+    expect(ir.endpoints[0].responses.success).toBeNull();
   });
 });
 
@@ -245,7 +256,11 @@ describe("buildIR: error collection", () => {
         },
       },
     });
-    expect(ir.endpoints[0].responses.errors.map((e) => e.status)).toEqual(["400", "4XX", "500"]);
+    expect(ir.endpoints[0].responses.errors.map((e) => e.status)).toStrictEqual([
+      "400",
+      "4XX",
+      "500",
+    ]);
     expect(ir.endpoints[0].responses.errors[0]).toMatchObject({
       contentType: "application/json",
       source: { location: "/responses/400" },
