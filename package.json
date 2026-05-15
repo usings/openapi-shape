@@ -1,7 +1,7 @@
 {
   "name": "openapi-shape",
   "version": "0.7.0",
-  "description": "Generate TypeScript declarations and API shapes from OpenAPI JSON",
+  "description": "Generate TypeScript API contract types from OpenAPI 3.x JSON",
   "keywords": [
     "api-client",
     "codegen",
