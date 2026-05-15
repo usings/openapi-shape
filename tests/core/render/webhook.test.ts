@@ -128,7 +128,7 @@ describe("renderWebhooksInterface: errors option", () => {
   });
   it("emits errors field when option is true", () => {
     expect(renderWebhooksInterface([wh], { errors: true })).toContain(
-      'errors: { "400": BadRequest }',
+      'errors: { "400": Schemas.BadRequest }',
     );
   });
   it("omits errors field when no error responses", () => {

@@ -10,6 +10,8 @@ export interface RenderEntryOptions {
   headers?: boolean;
 }
 
+const schemaRefOptions = { refPrefix: "Schemas." };
+
 export function entryDocHeader(entry: EndpointModel): string {
   return jsdoc(
     {
@@ -26,7 +28,7 @@ export function renderParam(group: ParamGroup): string {
   const hasDocs = group.fields.some((f) => f.docs?.description || f.docs?.deprecated);
   const renderField = (f: { name: string; required: boolean; type: TypeNode }) => {
     const opt = f.required ? "" : "?";
-    return `${safeKey(f.name)}${opt}: ${renderTypeNode(f.type)}`;
+    return `${safeKey(f.name)}${opt}: ${renderTypeNode(f.type, schemaRefOptions)}`;
   };
   if (!hasDocs) return `{ ${group.fields.map(renderField).join("; ")} }`;
   const body = group.fields.map((f) => `${jsdoc(f.docs ?? {})}${renderField(f)}`).join("\n");
@@ -35,15 +37,15 @@ export function renderParam(group: ParamGroup): string {
 
 export function renderBody(body: BodyModel, key: string): string {
   if (body.kind === "none") return `${key}: void`;
-  const t = indentContinuation(renderTypeNode(body.type), "    ");
+  const t = indentContinuation(renderTypeNode(body.type, schemaRefOptions), "    ");
   return body.required ? `${key}: ${t}` : `${key}?: ${t}`;
 }
 
 export function renderResponse(success: TypeNode | null): string {
   if (!success) return "unknown";
-  return indentContinuation(renderTypeNode(success), "    ");
+  return indentContinuation(renderTypeNode(success, schemaRefOptions), "    ");
 }
 
 export function renderErrors(errors: ErrorResponse[]): string {
-  return `{ ${errors.map((e) => `"${e.status}": ${renderTypeNode(e.type)}`).join("; ")} }`;
+  return `{ ${errors.map((e) => `"${e.status}": ${renderTypeNode(e.type, schemaRefOptions)}`).join("; ")} }`;
 }

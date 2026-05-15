@@ -111,7 +111,7 @@ describe("renderEndpointsInterface: errors option", () => {
   });
   it("emits errors field when option is true", () => {
     expect(renderEndpointsInterface([ep], { errors: true })).toContain(
-      'errors: { "400": Validation; "5XX": ServerError }',
+      'errors: { "400": Schemas.Validation; "5XX": Schemas.ServerError }',
     );
   });
   it("omits errors field when no error responses", () => {

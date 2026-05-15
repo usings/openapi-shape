@@ -163,7 +163,8 @@ describe("generate: webhooks (integration)", () => {
         },
       },
     });
-    expect(code).toContain("payload: Pet");
+    expect(code).toContain("payload: Schemas.Pet");
+    expect(code).toContain("export namespace Schemas");
     expect(code).toContain("export interface Pet");
   });
 

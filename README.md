@@ -7,7 +7,7 @@
 
 Generate TypeScript declarations and typed endpoint shapes from OpenAPI JSON.
 
-`openapi-shape` turns an OpenAPI 3.x JSON document into plain TypeScript declarations: named schema types plus an `Endpoints` map for each route's params, query, request body, and response.
+`openapi-shape` turns an OpenAPI 3.x JSON document into plain TypeScript declarations: schema types grouped under `Schemas` plus an `Endpoints` map for each route's params, query, request body, and response.
 
 Use it when OpenAPI is your type contract, but your app should still own the HTTP layer.
 
@@ -86,29 +86,31 @@ export interface Endpoints {
     params: void;
     query: { limit?: number };
     body: void;
-    response: Pet[];
+    response: Schemas.Pet[];
   };
   "POST /pets": {
     params: void;
     query: void;
-    body: CreatePet;
-    response: Pet;
+    body: Schemas.CreatePet;
+    response: Schemas.Pet;
   };
   "GET /pets/{petId}": {
     params: { petId: string };
     query: void;
     body: void;
-    response: Pet;
+    response: Schemas.Pet;
   };
 }
 
-export interface Pet {
-  id: number;
-  name: string;
-}
+export namespace Schemas {
+  export interface Pet {
+    id: number;
+    name: string;
+  }
 
-export interface CreatePet {
-  name: string;
+  export interface CreatePet {
+    name: string;
+  }
 }
 ```
 

@@ -2,7 +2,7 @@ export function indent(text: string, depth: number = 1): string {
   const prefix = "  ".repeat(depth);
   return text
     .split("\n")
-    .map((line) => prefix + line)
+    .map((line) => (line ? prefix + line : line))
     .join("\n");
 }
 

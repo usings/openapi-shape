@@ -98,7 +98,9 @@ describe("generate (integration)", () => {
         },
       },
     });
-    expect(code).toContain('export type Cat = BaseAnimal & {\n  purr?: string\n  type: "cat"\n}');
+    expect(code).toContain(
+      'export type Cat = BaseAnimal & {\n    purr?: string\n    type: "cat"\n  }',
+    );
     expect(code).toContain("export type Animal = Cat");
   });
 
