@@ -317,6 +317,77 @@ export const api = createClient<Endpoints, AdapterOptions>(adapter);
 
 </details>
 
+### Query Key Factories
+
+The generated `Endpoints` map can also type cache keys for libraries such as TanStack Query.
+`openapi-shape` does not generate hooks; keep cache policy, invalidation, and optimistic updates in
+your app.
+
+<details>
+<summary>TanStack Query example</summary>
+
+```ts
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { Endpoints } from "./api";
+import { api } from "./client";
+
+type NonNullish = NonNullable<unknown>;
+type EmptyObject = Record<PropertyKey, never>;
+type HasOnlyOptionalProps<T> = T extends object ? (NonNullish extends T ? true : false) : false;
+
+type QueryKeyEndpoint = keyof Endpoints & string;
+
+type QueryKeyParamsPart<K extends QueryKeyEndpoint> = Endpoints[K]["params"] extends void
+  ? NonNullish
+  : { params: Endpoints[K]["params"] };
+
+type QueryKeyQueryPart<K extends QueryKeyEndpoint> = Endpoints[K]["query"] extends void
+  ? NonNullish
+  : HasOnlyOptionalProps<Endpoints[K]["query"]> extends true
+    ? { query?: Endpoints[K]["query"] }
+    : { query: Endpoints[K]["query"] };
+
+type QueryKeyInput<K extends QueryKeyEndpoint> = QueryKeyParamsPart<K> & QueryKeyQueryPart<K>;
+
+type QueryKeyArgs<K extends QueryKeyEndpoint> = keyof QueryKeyInput<K> extends never
+  ? [input?: EmptyObject]
+  : NonNullish extends QueryKeyInput<K>
+    ? [input?: QueryKeyInput<K>]
+    : [input: QueryKeyInput<K>];
+
+export const apiKeys = {
+  /** Endpoint-level key for broad invalidation, e.g. all GET /pets queries. */
+  endpoint: <K extends QueryKeyEndpoint>(endpoint: K) => [endpoint] as const,
+  /** Request-level key including params/query input for exact query caching. */
+  request: <K extends QueryKeyEndpoint>(endpoint: K, ...[input]: QueryKeyArgs<K>) =>
+    input === undefined ? ([endpoint] as const) : ([endpoint, input] as const),
+};
+
+export function usePets(limit?: number) {
+  const query = limit === undefined ? {} : { limit };
+
+  return useQuery({
+    queryKey: apiKeys.request("GET /pets", { query }),
+    queryFn: () => api("GET /pets", { query }),
+  });
+}
+
+export function useCreatePet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (body: Endpoints["POST /pets"]["body"]) => api("POST /pets", { body }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: apiKeys.endpoint("GET /pets"),
+      });
+    },
+  });
+}
+```
+
+</details>
+
 ## Request Building
 
 The optional client builds adapter input with these rules:
