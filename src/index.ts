@@ -1,6 +1,6 @@
 import { loadContract, prepareContract } from "./core/contract";
 import type { DeclarationOptions } from "./core/declarations";
-import { render } from "./core/declarations";
+import { renderDeclarations } from "./core/declarations";
 
 export type GenerateOptions = DeclarationOptions;
 
@@ -8,7 +8,7 @@ async function generateFromSource(
   source: string | URL,
   options: GenerateOptions = {},
 ): Promise<string> {
-  return render(await loadContract(source), options);
+  return renderDeclarations(await loadContract(source), options);
 }
 
 export function generate(source: string | URL, options?: GenerateOptions): Promise<string>;
@@ -20,5 +20,5 @@ export function generate(
   if (typeof input === "string" || input instanceof URL) {
     return generateFromSource(input, options);
   }
-  return render(prepareContract(input), options);
+  return renderDeclarations(prepareContract(input), options);
 }

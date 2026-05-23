@@ -7,7 +7,7 @@ import { renderWebhooksInterface } from "./webhook";
 
 export type { DeclarationOptions } from "./options";
 
-export function render(contract: Contract, options: DeclarationOptions = {}): string {
+export function renderDeclarations(contract: Contract, options: DeclarationOptions = {}): string {
   const parts: string[] = [];
   const endpoints = contract.operations.filter(
     (op): op is EndpointOperation => op.kind === "endpoint",
