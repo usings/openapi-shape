@@ -1,6 +1,6 @@
 {
   "name": "openapi-shape",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Generate TypeScript API contract types from OpenAPI 3.x JSON",
   "keywords": [
     "api-client",
