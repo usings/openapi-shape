@@ -7,6 +7,19 @@ import {
 import type { Injection, SchemaInjections } from "../../../src/core/contract/discriminators";
 import { LoadError } from "../../../src/core/contract/errors";
 
+function injectionsOf(entries: Array<[string, string, string]>): SchemaInjections {
+  const map: SchemaInjections = new Map();
+  for (const [schemaName, propertyName, value] of entries) {
+    let perSchema = map.get(schemaName);
+    if (!perSchema) {
+      perSchema = new Map();
+      map.set(schemaName, perSchema);
+    }
+    perSchema.set(propertyName, { value, sourceLocation: "L" });
+  }
+  return map;
+}
+
 describe("discover: walks the document for discriminator branches", () => {
   it("emits one injection per oneOf branch with explicit mapping value", () => {
     const found = discoverInjections({
@@ -135,19 +148,6 @@ describe("reduce: folds Injection[] into a schema-keyed accumulator", () => {
 });
 
 describe("apply: produces a new document with literals injected", () => {
-  function injectionsOf(entries: Array<[string, string, string]>): SchemaInjections {
-    const map: SchemaInjections = new Map();
-    for (const [schemaName, propertyName, value] of entries) {
-      let perSchema = map.get(schemaName);
-      if (!perSchema) {
-        perSchema = new Map();
-        map.set(schemaName, perSchema);
-      }
-      perSchema.set(propertyName, { value, sourceLocation: "L" });
-    }
-    return map;
-  }
-
   it("returns the same doc when there are no injections", () => {
     const doc = { components: { schemas: { A: { type: "object" } } } };
     expect(applyInjections(doc, new Map())).toBe(doc);
