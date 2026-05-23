@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { loadDocument, prepareDocument } from "../../../src/core/contract/document";
-import { LoadError } from "../../../src/core/contract/errors";
-import { withTmpFile } from "../../_helpers/tmp";
+import { describe, expect, it } from "vitest"
+import { loadDocument, prepareDocument } from "../../../src/core/contract/document"
+import { LoadError } from "../../../src/core/contract/errors"
+import { withTmpFile } from "../../_helpers/tmp"
 
 describe("loadDocument: I/O", () => {
   it("reads, normalizes, resolves refs, and injects discriminators end-to-end", async () => {
@@ -26,40 +26,40 @@ describe("loadDocument: I/O", () => {
         },
       }),
       async (path) => {
-        const doc = await loadDocument(path);
-        expect(doc.components?.schemas?.X).toStrictEqual({ type: ["string", "null"] });
+        const doc = await loadDocument(path)
+        expect(doc.components?.schemas?.X).toStrictEqual({ type: ["string", "null"] })
         expect(doc.paths?.["/x"]?.get?.parameters?.[0]).toStrictEqual({
           name: "limit",
           in: "query",
           schema: { type: "integer" },
-        });
+        })
       },
-    );
-  });
+    )
+  })
 
   it("throws LoadError when file is missing", async () => {
-    await expect(loadDocument("/tmp/does-not-exist-xyz.json")).rejects.toBeInstanceOf(LoadError);
-  });
+    await expect(loadDocument("/tmp/does-not-exist-xyz.json")).rejects.toBeInstanceOf(LoadError)
+  })
 
   it("throws LoadError on invalid JSON", async () => {
     await withTmpFile("{ not json }", async (path) => {
-      await expect(loadDocument(path)).rejects.toBeInstanceOf(LoadError);
-    });
-  });
+      await expect(loadDocument(path)).rejects.toBeInstanceOf(LoadError)
+    })
+  })
 
   it("accepts a file:// URL", async () => {
     await withTmpFile(JSON.stringify({ openapi: "3.1.0", info: { title: "U" } }), async (path) => {
-      const doc = await loadDocument(new URL(`file://${path}`));
-      expect(doc.info?.title).toBe("U");
-    });
-  });
+      const doc = await loadDocument(new URL(`file://${path}`))
+      expect(doc.info?.title).toBe("U")
+    })
+  })
 
   it("throws LoadError on unsupported URL protocol (e.g. ftp:)", async () => {
     await expect(loadDocument(new URL("ftp://example.com/openapi.json"))).rejects.toBeInstanceOf(
       LoadError,
-    );
-  });
-});
+    )
+  })
+})
 
 describe("prepareDocument: refs", () => {
   it("resolves component parameter ref at operation level", () => {
@@ -77,13 +77,13 @@ describe("prepareDocument: refs", () => {
           },
         },
       },
-    });
+    })
     expect(out.paths?.["/x"]?.get?.parameters?.[0]).toStrictEqual({
       name: "limit",
       in: "query",
       schema: { type: "integer" },
-    });
-  });
+    })
+  })
 
   it("resolves requestBody ref", () => {
     const out = prepareDocument({
@@ -100,11 +100,11 @@ describe("prepareDocument: refs", () => {
           },
         },
       },
-    });
+    })
     expect(out.paths?.["/x"]?.post?.requestBody).toStrictEqual({
       content: { "application/json": { schema: { type: "string" } } },
-    });
-  });
+    })
+  })
 
   it("throws LoadError on missing ref target", () => {
     expect(() =>
@@ -118,8 +118,8 @@ describe("prepareDocument: refs", () => {
           },
         },
       }),
-    ).toThrow(LoadError);
-  });
+    ).toThrow(LoadError)
+  })
 
   it("throws LoadError on circular ref", () => {
     expect(() =>
@@ -139,9 +139,9 @@ describe("prepareDocument: refs", () => {
           },
         },
       }),
-    ).toThrow(LoadError);
-  });
-});
+    ).toThrow(LoadError)
+  })
+})
 
 describe("prepareDocument: discriminator", () => {
   it("injects literals into oneOf branches", () => {
@@ -159,10 +159,10 @@ describe("prepareDocument: discriminator", () => {
           },
         },
       },
-    });
-    expect(out.components?.schemas?.Cat?.properties?.type).toStrictEqual({ const: "cat" });
-    expect(out.components?.schemas?.Dog?.properties?.type).toStrictEqual({ const: "dog" });
-  });
+    })
+    expect(out.components?.schemas?.Cat?.properties?.type).toStrictEqual({ const: "cat" })
+    expect(out.components?.schemas?.Dog?.properties?.type).toStrictEqual({ const: "dog" })
+  })
 
   it("throws LoadError on inline (non-$ref) branch", () => {
     expect(() =>
@@ -176,9 +176,9 @@ describe("prepareDocument: discriminator", () => {
           },
         },
       }),
-    ).toThrow(LoadError);
-  });
-});
+    ).toThrow(LoadError)
+  })
+})
 
 describe("prepareDocument: idempotence", () => {
   it("running twice yields equal result", () => {
@@ -188,18 +188,18 @@ describe("prepareDocument: idempotence", () => {
           X: { type: "string", nullable: true },
         },
       },
-    };
-    const once = prepareDocument(input);
-    const twice = prepareDocument(once);
-    expect(twice).toStrictEqual(once);
-  });
+    }
+    const once = prepareDocument(input)
+    const twice = prepareDocument(once)
+    expect(twice).toStrictEqual(once)
+  })
 
   it("accepts in-memory doc with no openapi field", () => {
-    expect(prepareDocument({})).toStrictEqual({});
+    expect(prepareDocument({})).toStrictEqual({})
     expect(prepareDocument({ info: { title: "T", version: "1" } })).toStrictEqual({
       info: { title: "T", version: "1" },
-    });
-  });
+    })
+  })
 
   it("normalizes webhook operation schemas through the public loader pipeline", () => {
     const out = prepareDocument({
@@ -218,11 +218,11 @@ describe("prepareDocument: idempotence", () => {
           },
         },
       },
-    });
+    })
     expect(
       out.webhooks?.event?.post?.requestBody?.content?.["application/json"]?.schema,
     ).toStrictEqual({
       type: ["string", "null"],
-    });
-  });
-});
+    })
+  })
+})

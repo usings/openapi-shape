@@ -1,4 +1,4 @@
-import type { HttpMethod, OpenAPISchema } from "./openapi";
+import type { HttpMethod, OpenAPISchema } from "./openapi"
 
 /**
  * Normalized contract intermediate representation.
@@ -10,11 +10,11 @@ import type { HttpMethod, OpenAPISchema } from "./openapi";
  */
 export interface Contract {
   /** Sanitized document metadata from the OpenAPI `info` object. */
-  info: DocumentInfo;
+  info: DocumentInfo
   /** Named schemas collected from `components.schemas`, in source order. */
-  schemas: ContractSchema[];
+  schemas: ContractSchema[]
   /** Endpoint and webhook operations collected from `paths` and `webhooks`. */
-  operations: ContractOperation[];
+  operations: ContractOperation[]
 }
 
 /**
@@ -23,9 +23,9 @@ export interface Contract {
  * Empty and whitespace-only values are omitted during contract building.
  */
 export interface DocumentInfo {
-  title?: string;
-  version?: string;
-  description?: string;
+  title?: string
+  version?: string
+  description?: string
 }
 
 /**
@@ -35,7 +35,7 @@ export interface DocumentInfo {
  * or source-aware rendering later.
  */
 export interface SourceRef {
-  location: string;
+  location: string
 }
 
 /** Common operation metadata shared by endpoints and webhooks. */
@@ -46,38 +46,38 @@ interface OperationBase {
    * The default shape is `${METHOD} ${pathOrWebhookName}`, for example
    * `"GET /pets"` or `"POST pet.created"`.
    */
-  key: string;
+  key: string
   /** Lowercase HTTP method as declared by the OpenAPI path item. */
-  method: HttpMethod;
+  method: HttpMethod
   /** Optional OpenAPI `operationId`, preserved for adapters that prefer it. */
-  operationId?: string;
+  operationId?: string
   /** OpenAPI operation tags, normalized to an empty array when absent. */
-  tags: string[];
+  tags: string[]
   /** Short operation summary copied from OpenAPI. */
-  summary?: string;
+  summary?: string
   /** Long operation description copied from OpenAPI. */
-  description?: string;
+  description?: string
   /** True only when OpenAPI marks the operation as deprecated. */
-  deprecated: boolean;
+  deprecated: boolean
   /** Query-string parameters after path-level and operation-level merge. */
-  query: ContractField[];
+  query: ContractField[]
   /** Header parameters after path-level and operation-level merge. */
-  headers: ContractField[];
+  headers: ContractField[]
   /** Request payload selected from the operation request body. */
-  body: ContractPayload;
+  body: ContractPayload
   /** Declared responses, preserving OpenAPI response key order. */
-  responses: ContractOutcome[];
+  responses: ContractOutcome[]
   /** Source location of the operation object. */
-  source?: SourceRef;
+  source?: SourceRef
 }
 
 /** Operation reachable through an HTTP path declared under OpenAPI `paths`. */
 export interface EndpointOperation extends OperationBase {
-  kind: "endpoint";
+  kind: "endpoint"
   /** OpenAPI path template, for example `/pets/{petId}`. */
-  path: string;
+  path: string
   /** Path parameters. They are rendered as strings regardless of schema type. */
-  params: ContractField[];
+  params: ContractField[]
 }
 
 /**
@@ -87,13 +87,13 @@ export interface EndpointOperation extends OperationBase {
  * they do not carry path parameters.
  */
 export interface WebhookOperation extends OperationBase {
-  kind: "webhook";
+  kind: "webhook"
   /** OpenAPI webhook map key, for example `pet.created`. */
-  name: string;
+  name: string
 }
 
 /** Endpoint or webhook operation. Narrow with the `kind` discriminator. */
-export type ContractOperation = EndpointOperation | WebhookOperation;
+export type ContractOperation = EndpointOperation | WebhookOperation
 
 /**
  * Named field used for parameters and object properties.
@@ -104,13 +104,13 @@ export type ContractOperation = EndpointOperation | WebhookOperation;
  */
 export interface ContractField {
   /** Original parameter or property name before TypeScript key escaping. */
-  name: string;
+  name: string
   /** Whether callers must provide this field. */
-  required: boolean;
+  required: boolean
   /** Deferred type information for declaration rendering. */
-  shape: ContractShape;
+  shape: ContractShape
   /** Documentation attached to the parameter or property. */
-  docs?: DocBlock;
+  docs?: DocBlock
 }
 
 /**
@@ -126,7 +126,7 @@ export type ContractPayload =
   /** JSON-family request body, such as `application/json` or `application/problem+json`. */
   | { kind: "json"; required: boolean; shape: ContractShape }
   /** Non-JSON request body kept as its selected schema shape. */
-  | { kind: "passthrough"; required: boolean; shape: ContractShape };
+  | { kind: "passthrough"; required: boolean; shape: ContractShape }
 
 /**
  * One OpenAPI response entry after media-type selection.
@@ -135,13 +135,13 @@ export type ContractPayload =
  */
 export interface ContractOutcome {
   /** OpenAPI response key, for example `"200"`, `"4XX"`, or `"default"`. */
-  status: string;
+  status: string
   /** Selected response type, or `void` when no usable content schema exists. */
-  shape: ContractShape;
+  shape: ContractShape
   /** Media type that produced `shape`, when a content entry was selected. */
-  contentType?: string;
+  contentType?: string
   /** Source location of this response entry. */
-  source?: SourceRef;
+  source?: SourceRef
 }
 
 /**
@@ -152,24 +152,24 @@ export interface ContractOutcome {
  */
 export interface ContractSchema {
   /** Safe TypeScript identifier used in generated declarations. */
-  name: string;
+  name: string
   /** Original OpenAPI schema name. */
-  originalName: string;
+  originalName: string
   /** Rendering strategy for this schema. */
-  kind: "interface" | "alias";
+  kind: "interface" | "alias"
   /** Interface fields when `kind` is `"interface"`; otherwise `null`. */
-  fields: ContractField[] | null;
+  fields: ContractField[] | null
   /** Alias target when `kind` is `"alias"`; otherwise `null`. */
-  shape: ContractShape | null;
+  shape: ContractShape | null
   /**
    * Index-signature value type for interface schemas with `patternProperties` or
    * schema-valued `additionalProperties`.
    */
-  index?: ContractShape | null;
+  index?: ContractShape | null
   /** Documentation attached to the source schema. */
-  docs?: DocBlock;
+  docs?: DocBlock
   /** Source location of the schema in `components.schemas`. */
-  source?: SourceRef;
+  source?: SourceRef
 }
 
 /**
@@ -183,7 +183,7 @@ export type ContractShape =
   /** Type derived from an OpenAPI schema. `undefined` renders as `unknown`. */
   | { kind: "schema"; schema: OpenAPISchema | undefined }
   /** Type chosen directly by the contract builder. */
-  | { kind: "primitive"; name: PrimitiveName };
+  | { kind: "primitive"; name: PrimitiveName }
 
 /** TypeScript primitive or built-in names emitted verbatim by renderers. */
 export type PrimitiveName =
@@ -194,14 +194,14 @@ export type PrimitiveName =
   | "void"
   | "unknown"
   | "never"
-  | "Blob";
+  | "Blob"
 
 /** Documentation that can be rendered as a TypeScript JSDoc block. */
 export interface DocBlock {
   /** Short human-readable summary. */
-  summary?: string;
+  summary?: string
   /** Longer markdown-capable description. */
-  description?: string;
+  description?: string
   /** Whether to emit an `@deprecated` tag. */
-  deprecated?: boolean;
+  deprecated?: boolean
 }

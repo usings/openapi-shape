@@ -1,26 +1,26 @@
-import { describe, expect, it } from "vitest";
-import { buildContract } from "../../../src/core/contract/build";
-import type { Contract } from "../../../src/core/contract/contract";
-import { BuildError } from "../../../src/core/contract/errors";
+import { describe, expect, it } from "vitest"
+import { buildContract } from "../../../src/core/contract/build"
+import type { Contract } from "../../../src/core/contract/contract"
+import { BuildError } from "../../../src/core/contract/errors"
 
 function endpointOperations(contract: Contract) {
-  return contract.operations.filter((operation) => operation.kind === "endpoint");
+  return contract.operations.filter((operation) => operation.kind === "endpoint")
 }
 
 function webhookOperations(contract: Contract) {
-  return contract.operations.filter((operation) => operation.kind === "webhook");
+  return contract.operations.filter((operation) => operation.kind === "webhook")
 }
 
 describe("contract: endpoint key/method/path/meta", () => {
   it("METHOD path key, method lowercase, path raw", () => {
     const contract = buildContract({
       paths: { "/pets": { get: { responses: { "200": { description: "ok" } } } } },
-    });
-    expect(endpointOperations(contract)[0].key).toBe("GET /pets");
-    expect(endpointOperations(contract)[0].method).toBe("get");
-    expect(endpointOperations(contract)[0].path).toBe("/pets");
-    expect(endpointOperations(contract)[0].source).toStrictEqual({ location: "/paths/~1pets/get" });
-  });
+    })
+    expect(endpointOperations(contract)[0].key).toBe("GET /pets")
+    expect(endpointOperations(contract)[0].method).toBe("get")
+    expect(endpointOperations(contract)[0].path).toBe("/pets")
+    expect(endpointOperations(contract)[0].source).toStrictEqual({ location: "/paths/~1pets/get" })
+  })
 
   it("captures operationId/tags/deprecated", () => {
     const contract = buildContract({
@@ -34,22 +34,22 @@ describe("contract: endpoint key/method/path/meta", () => {
           },
         },
       },
-    });
+    })
     expect(endpointOperations(contract)[0]).toMatchObject({
       operationId: "list",
       tags: ["t1"],
       deprecated: true,
-    });
-  });
+    })
+  })
 
   it("throws when an operation is missing responses", () => {
     expect(() =>
       buildContract({
         paths: { "/pets": { get: {} } },
       }),
-    ).toThrow(BuildError);
-  });
-});
+    ).toThrow(BuildError)
+  })
+})
 
 describe("contract: params", () => {
   it("path params always typed string regardless of declared schema", () => {
@@ -62,11 +62,11 @@ describe("contract: params", () => {
           },
         },
       },
-    });
+    })
     expect(endpointOperations(contract)[0].params).toStrictEqual([
       { name: "id", required: true, shape: { kind: "primitive", name: "string" }, docs: undefined },
-    ]);
-  });
+    ])
+  })
 
   it("query params from schema, required from parameter.required", () => {
     const contract = buildContract({
@@ -81,7 +81,7 @@ describe("contract: params", () => {
           },
         },
       },
-    });
+    })
     expect(endpointOperations(contract)[0].query).toStrictEqual([
       {
         name: "limit",
@@ -95,8 +95,8 @@ describe("contract: params", () => {
         shape: { kind: "schema", schema: { type: "string" } },
         docs: undefined,
       },
-    ]);
-  });
+    ])
+  })
 
   it("operation params override path-item params on same in:name", () => {
     const contract = buildContract({
@@ -109,23 +109,23 @@ describe("contract: params", () => {
           },
         },
       },
-    });
+    })
     expect(endpointOperations(contract)[0].query[0]).toStrictEqual({
       name: "q",
       required: true,
       shape: { kind: "schema", schema: { type: "integer" } },
       docs: undefined,
-    });
-  });
-});
+    })
+  })
+})
 
 describe("contract: body", () => {
   it("none when no requestBody", () => {
     const contract = buildContract({
       paths: { "/p": { post: { responses: { "200": { description: "ok" } } } } },
-    });
-    expect(endpointOperations(contract)[0].body).toStrictEqual({ kind: "none" });
-  });
+    })
+    expect(endpointOperations(contract)[0].body).toStrictEqual({ kind: "none" })
+  })
 
   it("json body required true", () => {
     const contract = buildContract({
@@ -140,13 +140,13 @@ describe("contract: body", () => {
           },
         },
       },
-    });
+    })
     expect(endpointOperations(contract)[0].body).toStrictEqual({
       kind: "json",
       required: true,
       shape: { kind: "schema", schema: { type: "string" } },
-    });
-  });
+    })
+  })
 
   it("body required defaults to false when omitted", () => {
     const contract = buildContract({
@@ -160,9 +160,9 @@ describe("contract: body", () => {
           },
         },
       },
-    });
-    expect(endpointOperations(contract)[0].body).toMatchObject({ kind: "json", required: false });
-  });
+    })
+    expect(endpointOperations(contract)[0].body).toMatchObject({ kind: "json", required: false })
+  })
 
   it("passthrough body for non-json content-type", () => {
     const contract = buildContract({
@@ -178,10 +178,10 @@ describe("contract: body", () => {
           },
         },
       },
-    });
-    expect(endpointOperations(contract)[0].body.kind).toBe("passthrough");
-  });
-});
+    })
+    expect(endpointOperations(contract)[0].body.kind).toBe("passthrough")
+  })
+})
 
 describe("contract: response map", () => {
   it("emits one entry per declared status, preserving OpenAPI order", () => {
@@ -193,19 +193,19 @@ describe("contract: response map", () => {
               "200": { content: { "application/json": { schema: { type: "string" } } } },
               "400": { content: { "application/json": { schema: { type: "string" } } } },
               "5XX": { description: "no content" },
-              default: { content: { "application/json": { schema: { type: "string" } } } },
+              "default": { content: { "application/json": { schema: { type: "string" } } } },
             },
           },
         },
       },
-    });
+    })
     expect(endpointOperations(contract)[0].responses.map((r) => r.status)).toStrictEqual([
       "200",
       "400",
       "5XX",
       "default",
-    ]);
-  });
+    ])
+  })
 
   it("picks JSON content type and records it on the entry", () => {
     const contract = buildContract({
@@ -218,14 +218,14 @@ describe("contract: response map", () => {
           },
         },
       },
-    });
+    })
     expect(endpointOperations(contract)[0].responses[0]).toStrictEqual({
       status: "200",
       shape: { kind: "schema", schema: { type: "string" } },
       contentType: "application/json",
       source: { location: "/responses/200" },
-    });
-  });
+    })
+  })
 
   it("binary content type produces a Blob shape", () => {
     const contract = buildContract({
@@ -238,28 +238,28 @@ describe("contract: response map", () => {
           },
         },
       },
-    });
+    })
     expect(endpointOperations(contract)[0].responses[0].shape).toStrictEqual({
       kind: "primitive",
       name: "Blob",
-    });
-  });
+    })
+  })
 
   it("no-content response becomes a void shape", () => {
     const contract = buildContract({
       paths: { "/p": { delete: { responses: { "204": { description: "ok" } } } } },
-    });
+    })
     expect(endpointOperations(contract)[0].responses[0].shape).toStrictEqual({
       kind: "primitive",
       name: "void",
-    });
-  });
+    })
+  })
 
   it("empty responses map produces an empty entry list", () => {
-    const contract = buildContract({ paths: { "/p": { get: { responses: {} } } } });
-    expect(endpointOperations(contract)[0].responses).toStrictEqual([]);
-  });
-});
+    const contract = buildContract({ paths: { "/p": { get: { responses: {} } } } })
+    expect(endpointOperations(contract)[0].responses).toStrictEqual([])
+  })
+})
 
 describe("contract: webhooks", () => {
   it("webhook key uses METHOD <name> and source location uses /webhooks", () => {
@@ -267,15 +267,15 @@ describe("contract: webhooks", () => {
       webhooks: {
         "pet.created": { post: { responses: { "200": { description: "ok" } } } },
       },
-    });
-    expect(webhookOperations(contract)).toHaveLength(1);
-    expect(webhookOperations(contract)[0].key).toBe("POST pet.created");
-    expect(webhookOperations(contract)[0].method).toBe("post");
-    expect(webhookOperations(contract)[0].name).toBe("pet.created");
+    })
+    expect(webhookOperations(contract)).toHaveLength(1)
+    expect(webhookOperations(contract)[0].key).toBe("POST pet.created")
+    expect(webhookOperations(contract)[0].method).toBe("post")
+    expect(webhookOperations(contract)[0].name).toBe("pet.created")
     expect(webhookOperations(contract)[0].source).toStrictEqual({
       location: "/webhooks/pet.created/post",
-    });
-  });
+    })
+  })
 
   it("webhook with multiple methods produces an entry per method in HTTP_METHODS order", () => {
     const contract = buildContract({
@@ -285,9 +285,9 @@ describe("contract: webhooks", () => {
           get: { responses: { "200": { description: "ok" } } },
         },
       },
-    });
-    expect(webhookOperations(contract).map((e) => e.key)).toStrictEqual(["GET ping", "POST ping"]);
-  });
+    })
+    expect(webhookOperations(contract).map((e) => e.key)).toStrictEqual(["GET ping", "POST ping"])
+  })
 
   it("webhook body and response mirror endpoint shape", () => {
     const contract = buildContract({
@@ -304,45 +304,45 @@ describe("contract: webhooks", () => {
           },
         },
       },
-    });
+    })
     expect(webhookOperations(contract)[0].body).toStrictEqual({
       kind: "json",
       required: true,
       shape: { kind: "schema", schema: { type: "string" } },
-    });
+    })
     expect(webhookOperations(contract)[0].responses[0]).toMatchObject({
       status: "200",
       shape: { kind: "schema", schema: { type: "boolean" } },
-    });
-  });
+    })
+  })
 
   it("source location escapes slashes in webhook names", () => {
     const contract = buildContract({
       webhooks: {
         "pet/created": { post: { responses: { "200": { description: "ok" } } } },
       },
-    });
+    })
     expect(webhookOperations(contract)[0].source).toStrictEqual({
       location: "/webhooks/pet~1created/post",
-    });
-  });
+    })
+  })
 
   it("throws when a webhook operation is missing responses", () => {
     expect(() =>
       buildContract({
         webhooks: { ping: { post: {} } },
       }),
-    ).toThrow(BuildError);
-  });
+    ).toThrow(BuildError)
+  })
 
   it("paths and webhooks build independently into one operations collection", () => {
     const contract = buildContract({
       paths: { "/x": { get: { responses: { "200": { description: "ok" } } } } },
       webhooks: { ping: { post: { responses: { "200": { description: "ok" } } } } },
-    });
+    })
     expect(contract.operations.map((op) => `${op.kind}:${op.key}`)).toStrictEqual([
       "endpoint:GET /x",
       "webhook:POST ping",
-    ]);
-  });
-});
+    ])
+  })
+})

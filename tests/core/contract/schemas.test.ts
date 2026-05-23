@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { buildContract } from "../../../src/core/contract/build";
-import { BuildError } from "../../../src/core/contract/errors";
+import { describe, expect, it } from "vitest"
+import { buildContract } from "../../../src/core/contract/build"
+import { BuildError } from "../../../src/core/contract/errors"
 
 describe("contract: schema models", () => {
   it("object schema becomes interface model with raw schema shapes", () => {
@@ -14,7 +14,7 @@ describe("contract: schema models", () => {
           },
         },
       },
-    });
+    })
 
     expect(contract.schemas).toStrictEqual([
       {
@@ -39,13 +39,13 @@ describe("contract: schema models", () => {
           },
         ],
       },
-    ]);
-  });
+    ])
+  })
 
   it("non-object schema becomes alias model with raw schema shape", () => {
     const contract = buildContract({
       components: { schemas: { Status: { enum: ["a", "b"] } } },
-    });
+    })
 
     expect(contract.schemas[0]).toMatchObject({
       name: "Status",
@@ -53,18 +53,18 @@ describe("contract: schema models", () => {
       kind: "alias",
       fields: null,
       shape: { kind: "schema", schema: { enum: ["a", "b"] } },
-    });
-  });
+    })
+  })
 
   it("sanitizes names and preserves originalName", () => {
     const contract = buildContract({
       components: { schemas: { "Folder/User": { type: "object" } } },
-    });
+    })
     expect(contract.schemas[0]).toMatchObject({
       name: "Folder_User",
       originalName: "Folder/User",
-    });
-  });
+    })
+  })
 
   it("throws BuildError on schema name collision after sanitization", () => {
     expect(() =>
@@ -72,12 +72,12 @@ describe("contract: schema models", () => {
         components: {
           schemas: {
             "User-Profile": { type: "object" },
-            User_Profile: { type: "object" },
+            "User_Profile": { type: "object" },
           },
         },
       }),
-    ).toThrow(BuildError);
-  });
+    ).toThrow(BuildError)
+  })
 
   it("interface schema carries index shape for patternProperties and additionalProperties", () => {
     const contract = buildContract({
@@ -92,7 +92,7 @@ describe("contract: schema models", () => {
           },
         },
       },
-    });
+    })
 
     expect(contract.schemas[0]).toMatchObject({
       kind: "interface",
@@ -108,6 +108,6 @@ describe("contract: schema models", () => {
         kind: "schema",
         schema: { anyOf: [{ type: "number" }, { type: "boolean" }] },
       },
-    });
-  });
-});
+    })
+  })
+})

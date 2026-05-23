@@ -1,24 +1,24 @@
-import { loadContract, prepareContract } from "./core/contract";
-import type { DeclarationOptions } from "./core/declarations";
-import { renderDeclarations } from "./core/declarations";
+import { loadContract, prepareContract } from "./core/contract"
+import type { DeclarationOptions } from "./core/declarations"
+import { renderDeclarations } from "./core/declarations"
 
-export type GenerateOptions = DeclarationOptions;
+export type GenerateOptions = DeclarationOptions
 
 async function generateFromSource(
   source: string | URL,
   options: GenerateOptions = {},
 ): Promise<string> {
-  return renderDeclarations(await loadContract(source), options);
+  return renderDeclarations(await loadContract(source), options)
 }
 
-export function generate(source: string | URL, options?: GenerateOptions): Promise<string>;
-export function generate(doc: object, options?: GenerateOptions): string;
+export function generate(source: string | URL, options?: GenerateOptions): Promise<string>
+export function generate(doc: object, options?: GenerateOptions): string
 export function generate(
   input: object | string | URL,
   options: GenerateOptions = {},
 ): string | Promise<string> {
   if (typeof input === "string" || input instanceof URL) {
-    return generateFromSource(input, options);
+    return generateFromSource(input, options)
   }
-  return renderDeclarations(prepareContract(input), options);
+  return renderDeclarations(prepareContract(input), options)
 }

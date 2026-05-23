@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import type { EndpointOperation } from "../../../src/core/contract/contract";
-import { renderEndpointsInterface } from "../../../src/core/declarations/endpoint";
+import { describe, expect, it } from "vitest"
+import type { EndpointOperation } from "../../../src/core/contract/contract"
+import { renderEndpointsInterface } from "../../../src/core/declarations/endpoint"
 
 const baseEndpoint: EndpointOperation = {
   kind: "endpoint",
@@ -14,14 +14,14 @@ const baseEndpoint: EndpointOperation = {
   headers: [],
   body: { kind: "none" },
   responses: [],
-};
+}
 
 describe("renderEndpointsInterface: default", () => {
   it("void params/query/body, unknown response when no responses declared", () => {
     expect(renderEndpointsInterface([baseEndpoint])).toBe(
       `export interface Endpoints {\n  "GET /pets": {\n    params: void\n    query: void\n    body: void\n    response: unknown\n  }\n}`,
-    );
-  });
+    )
+  })
 
   it("renders query fields", () => {
     expect(
@@ -32,8 +32,8 @@ describe("renderEndpointsInterface: default", () => {
           responses: [{ status: "200", shape: { kind: "primitive", name: "string" } }],
         },
       ]),
-    ).toContain("query: { limit?: number }");
-  });
+    ).toContain("query: { limit?: number }")
+  })
 
   it("query params with invalid identifier names are JSON-quoted (uses safeKey)", () => {
     const out = renderEndpointsInterface([
@@ -45,10 +45,10 @@ describe("renderEndpointsInterface: default", () => {
         ],
         responses: [{ status: "200", shape: { kind: "primitive", name: "string" } }],
       },
-    ]);
-    expect(out).toContain('"user-id"?: string');
-    expect(out).toContain('"x-request-id": string');
-  });
+    ])
+    expect(out).toContain('"user-id"?: string')
+    expect(out).toContain('"x-request-id": string')
+  })
 
   it("path params with invalid identifier names are JSON-quoted (uses safeKey)", () => {
     const out = renderEndpointsInterface([
@@ -57,9 +57,9 @@ describe("renderEndpointsInterface: default", () => {
         params: [{ name: "user-id", required: true, shape: { kind: "primitive", name: "string" } }],
         responses: [{ status: "200", shape: { kind: "primitive", name: "string" } }],
       },
-    ]);
-    expect(out).toContain('"user-id": string');
-  });
+    ])
+    expect(out).toContain('"user-id": string')
+  })
 
   it("body required vs optional", () => {
     expect(
@@ -69,7 +69,7 @@ describe("renderEndpointsInterface: default", () => {
           body: { kind: "json", required: true, shape: { kind: "primitive", name: "string" } },
         },
       ]),
-    ).toContain("body: string");
+    ).toContain("body: string")
     expect(
       renderEndpointsInterface([
         {
@@ -77,14 +77,14 @@ describe("renderEndpointsInterface: default", () => {
           body: { kind: "json", required: false, shape: { kind: "primitive", name: "string" } },
         },
       ]),
-    ).toContain("body?: string");
-  });
+    ).toContain("body?: string")
+  })
 
   it("escapes endpoint keys as string literals", () => {
-    const out = renderEndpointsInterface([{ ...baseEndpoint, key: 'GET /quote/"x"' }]);
-    expect(out).toContain('"GET /quote/\\"x\\"": {');
-  });
-});
+    const out = renderEndpointsInterface([{ ...baseEndpoint, key: 'GET /quote/"x"' }])
+    expect(out).toContain('"GET /quote/\\"x\\"": {')
+  })
+})
 
 describe("renderEndpointsInterface: response map", () => {
   it("emits every declared response keyed by status", () => {
@@ -103,11 +103,11 @@ describe("renderEndpointsInterface: response map", () => {
           },
         ],
       },
-    ]);
+    ])
     expect(out).toContain(
       'response: { "200": string; "400": Schemas.Validation; "5XX": Schemas.ServerError }',
-    );
-  });
+    )
+  })
 
   it("renders the `default` status as a literal key", () => {
     const out = renderEndpointsInterface([
@@ -115,7 +115,7 @@ describe("renderEndpointsInterface: response map", () => {
         ...baseEndpoint,
         responses: [{ status: "default", shape: { kind: "primitive", name: "string" } }],
       },
-    ]);
-    expect(out).toContain('response: { "default": string }');
-  });
-});
+    ])
+    expect(out).toContain('response: { "default": string }')
+  })
+})

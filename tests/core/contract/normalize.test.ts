@@ -1,27 +1,27 @@
-import { describe, expect, it } from "vitest";
-import { LoadError } from "../../../src/core/contract/errors";
-import { normalize } from "../../../src/core/contract/normalize";
+import { describe, expect, it } from "vitest"
+import { LoadError } from "../../../src/core/contract/errors"
+import { normalize } from "../../../src/core/contract/normalize"
 
 describe("normalize: version handling", () => {
   it.each(["3.2.0", "2.0"])("throws LoadError on unsupported version %s", (version) => {
-    expect(() => normalize({ openapi: version })).toThrow(LoadError);
-  });
+    expect(() => normalize({ openapi: version })).toThrow(LoadError)
+  })
 
   it("throws LoadError when input is not an object", () => {
-    expect(() => normalize(null)).toThrow(LoadError);
-    expect(() => normalize("hi")).toThrow(LoadError);
-    expect(() => normalize(42)).toThrow(LoadError);
-  });
-});
+    expect(() => normalize(null)).toThrow(LoadError)
+    expect(() => normalize("hi")).toThrow(LoadError)
+    expect(() => normalize(42)).toThrow(LoadError)
+  })
+})
 
 describe("normalize: 3.0 nullable rewrite", () => {
   it("rewrites nullable: true on string", () => {
     const out = normalize({
       openapi: "3.0.3",
       components: { schemas: { X: { type: "string", nullable: true } } },
-    });
-    expect(out.components?.schemas?.X).toStrictEqual({ type: ["string", "null"] });
-  });
+    })
+    expect(out.components?.schemas?.X).toStrictEqual({ type: ["string", "null"] })
+  })
 
   it("rewrites nested nullable inside properties", () => {
     const out = normalize({
@@ -34,11 +34,11 @@ describe("normalize: 3.0 nullable rewrite", () => {
           },
         },
       },
-    });
+    })
     expect(out.components?.schemas?.X?.properties?.a).toStrictEqual({
       type: ["integer", "null"],
-    });
-  });
+    })
+  })
 
   it("walks into oneOf/anyOf/allOf branches", () => {
     const out = normalize({
@@ -50,11 +50,11 @@ describe("normalize: 3.0 nullable rewrite", () => {
           },
         },
       },
-    });
+    })
     expect(out.components?.schemas?.X?.oneOf?.[0]).toStrictEqual({
       type: ["string", "null"],
-    });
-  });
+    })
+  })
 
   it("walks into items and prefixItems", () => {
     const out = normalize({
@@ -68,34 +68,34 @@ describe("normalize: 3.0 nullable rewrite", () => {
           },
         },
       },
-    });
-    expect(out.components?.schemas?.X?.items).toStrictEqual({ type: ["string", "null"] });
+    })
+    expect(out.components?.schemas?.X?.items).toStrictEqual({ type: ["string", "null"] })
     expect(out.components?.schemas?.Y?.prefixItems?.[0]).toStrictEqual({
       type: ["string", "null"],
-    });
-  });
+    })
+  })
 
   it("does NOT rewrite nullable on object/array (out of scope)", () => {
     const input = {
       openapi: "3.0.3",
       components: { schemas: { X: { type: "object", nullable: true, properties: {} } } },
-    };
-    const out = normalize(input);
+    }
+    const out = normalize(input)
     expect(out.components?.schemas?.X).toStrictEqual({
       type: "object",
       nullable: true,
       properties: {},
-    });
-  });
+    })
+  })
 
   it("structural sharing: untouched subtree preserved by reference", () => {
-    const inner = { type: "object", properties: { a: { type: "string" } } };
+    const inner = { type: "object", properties: { a: { type: "string" } } }
     const out = normalize({
       openapi: "3.0.3",
       components: { schemas: { X: inner } },
-    });
-    expect(out.components?.schemas?.X).toBe(inner);
-  });
+    })
+    expect(out.components?.schemas?.X).toBe(inner)
+  })
 
   it("rewrites nullable in parameter schemas (path/query)", () => {
     const out = normalize({
@@ -108,11 +108,11 @@ describe("normalize: 3.0 nullable rewrite", () => {
           },
         },
       },
-    });
+    })
     expect(out.paths?.["/x"]?.get?.parameters?.[0]?.schema).toStrictEqual({
       type: ["string", "null"],
-    });
-  });
+    })
+  })
 
   it("rewrites nullable in request body schemas", () => {
     const out = normalize({
@@ -131,11 +131,11 @@ describe("normalize: 3.0 nullable rewrite", () => {
           },
         },
       },
-    });
+    })
     expect(
       out.paths?.["/x"]?.post?.requestBody?.content?.["application/json"]?.schema,
     ).toStrictEqual({
       type: ["string", "null"],
-    });
-  });
-});
+    })
+  })
+})

@@ -1,6 +1,6 @@
-import { LoadError } from "./errors";
-import type { OpenAPIDocument, OpenAPISchema } from "./openapi";
-import { mapDocumentSchemas } from "./walk";
+import { LoadError } from "./errors"
+import type { OpenAPIDocument, OpenAPISchema } from "./openapi"
+import { mapDocumentSchemas } from "./walk"
 
 /**
  * Normalize OpenAPI version differences before the rest of the pipeline runs.
@@ -8,27 +8,27 @@ import { mapDocumentSchemas } from "./walk";
  */
 export function normalize(raw: unknown): OpenAPIDocument {
   if (raw === null || typeof raw !== "object") {
-    throw new LoadError("OpenAPI document must be an object");
+    throw new LoadError("OpenAPI document must be an object")
   }
-  const doc = raw as OpenAPIDocument;
-  const version = typeof doc.openapi === "string" ? doc.openapi : "";
+  const doc = raw as OpenAPIDocument
+  const version = typeof doc.openapi === "string" ? doc.openapi : ""
 
   if (version === "" || /^3\.1\.\d+$/.test(version)) {
-    return mapDocumentSchemas(doc, (s) => s);
+    return mapDocumentSchemas(doc, (s) => s)
   }
   if (/^3\.0\.\d+$/.test(version)) {
-    return mapDocumentSchemas(doc, rewrite30Schema);
+    return mapDocumentSchemas(doc, rewrite30Schema)
   }
-  throw new LoadError(`Unsupported OpenAPI version: ${version}. Supported: 3.0.x, 3.1.x.`);
+  throw new LoadError(`Unsupported OpenAPI version: ${version}. Supported: 3.0.x, 3.1.x.`)
 }
 
 function rewrite30Schema(schema: OpenAPISchema): OpenAPISchema {
-  if (!schema.nullable) return schema;
-  if (typeof schema.type !== "string") return schema;
-  const t = schema.type;
+  if (!schema.nullable) return schema
+  if (typeof schema.type !== "string") return schema
+  const t = schema.type
   if (t === "string" || t === "number" || t === "integer" || t === "boolean") {
-    const { nullable: _n, ...rest } = schema;
-    return { ...rest, type: [t, "null"] };
+    const { nullable: _n, ...rest } = schema
+    return { ...rest, type: [t, "null"] }
   }
-  return schema;
+  return schema
 }

@@ -1,6 +1,8 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": ["dist", "node_modules"],
+  "semi": false,
+  "quoteProps": "consistent",
   "sortImports": {
     "newlinesBetween": false
   }

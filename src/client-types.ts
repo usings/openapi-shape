@@ -1,12 +1,12 @@
 // ----- Building blocks -----
 
 type FetchBodyInit = typeof globalThis extends {
-  fetch: (input: never, init?: infer Init) => unknown;
+  fetch: (input: never, init?: infer Init) => unknown
 }
   ? Init extends { body?: infer B }
     ? NonNullable<B>
     : never
-  : never;
+  : never
 
 type FallbackBodyInit =
   | string
@@ -15,36 +15,36 @@ type FallbackBodyInit =
   | Blob
   | FormData
   | URLSearchParams
-  | ReadableStream<Uint8Array<ArrayBuffer>>;
+  | ReadableStream<Uint8Array<ArrayBuffer>>
 
-export type BodyLike = [FetchBodyInit] extends [never] ? FallbackBodyInit : FetchBodyInit;
+export type BodyLike = [FetchBodyInit] extends [never] ? FallbackBodyInit : FetchBodyInit
 
-type NonNullish = NonNullable<unknown>;
+type NonNullish = NonNullable<unknown>
 
 // ----- Contracts -----
 
 export interface EndpointDefinition {
-  params: unknown;
-  query: unknown;
-  body?: unknown;
-  headers?: unknown;
-  response: unknown;
+  params: unknown
+  query: unknown
+  body?: unknown
+  headers?: unknown
+  response: unknown
 }
 
 interface AdapterRequest<TOptions = unknown> {
-  method: string;
-  url: string;
-  body: BodyLike | undefined;
-  headers: Record<string, string>;
-  options: TOptions | undefined;
+  method: string
+  url: string
+  body: BodyLike | undefined
+  headers: Record<string, string>
+  options: TOptions | undefined
 }
 
 export interface BodySerializerResult {
-  body: BodyLike | undefined;
-  headers?: Record<string, string>;
+  body: BodyLike | undefined
+  headers?: Record<string, string>
 }
 
-type QuerySerializerResult = string | { toString(): string };
+type QuerySerializerResult = string | { toString(): string }
 
 // ----- Type-level call signature derivation -----
 
@@ -56,7 +56,7 @@ type RequestField<TKey extends string, TValue> = TValue extends void
     ? Partial<Record<TKey, Exclude<TValue, undefined>>>
     : NonNullish extends TValue
       ? Partial<Record<TKey, TValue>>
-      : Record<TKey, TValue>;
+      : Record<TKey, TValue>
 
 type RequestBodyField<TValue> = TValue extends void
   ? { body?: never }
@@ -64,7 +64,7 @@ type RequestBodyField<TValue> = TValue extends void
     ? { body?: Exclude<TValue, undefined> | BodyLike }
     : NonNullish extends TValue
       ? { body?: TValue | BodyLike }
-      : { body: TValue | BodyLike };
+      : { body: TValue | BodyLike }
 
 type HeadersField<TValue> = TValue extends void
   ? { headers?: Record<string, string> }
@@ -72,9 +72,9 @@ type HeadersField<TValue> = TValue extends void
     ? { headers?: Exclude<TValue, undefined> & Record<string, string> }
     : NonNullish extends TValue
       ? { headers?: TValue & Record<string, string> }
-      : { headers: TValue & Record<string, string> };
+      : { headers: TValue & Record<string, string> }
 
-type EndpointHeaders<T extends EndpointDefinition> = T extends { headers: infer H } ? H : void;
+type EndpointHeaders<T extends EndpointDefinition> = T extends { headers: infer H } ? H : void
 
 export type RequestOptions<T extends EndpointDefinition, TOptions> = RequestField<
   "params",
@@ -83,42 +83,42 @@ export type RequestOptions<T extends EndpointDefinition, TOptions> = RequestFiel
   RequestField<"query", T["query"]> &
   RequestBodyField<T["body"]> &
   HeadersField<EndpointHeaders<T>> & {
-    options?: TOptions;
-  };
+    options?: TOptions
+  }
 
 export type HasRequiredOptions<T extends EndpointDefinition> =
-  NonNullish extends RequestOptions<T, unknown> ? false : true;
+  NonNullish extends RequestOptions<T, unknown> ? false : true
 
 type ResponseMapOf<T extends { response: unknown }> =
-  T["response"] extends Record<string, unknown> ? T["response"] : never;
+  T["response"] extends Record<string, unknown> ? T["response"] : never
 
 type ResponseStatusKey<T extends { response: unknown }> = Extract<
   keyof ResponseMapOf<T>,
   `${number}${string}` | "default"
->;
+>
 
-type SuccessKey<T extends { response: unknown }> = Extract<ResponseStatusKey<T>, `2${string}`>;
+type SuccessKey<T extends { response: unknown }> = Extract<ResponseStatusKey<T>, `2${string}`>
 
 type OnlyDefaultKey<T extends { response: unknown }> =
   Exclude<keyof ResponseMapOf<T>, "default"> extends never
     ? Extract<keyof ResponseMapOf<T>, "default">
-    : never;
+    : never
 
 export interface RuntimeRequestOptions<TOptions> {
-  params?: Record<string, unknown>;
-  query?: Record<string, unknown>;
-  body?: unknown;
-  headers?: Record<string, string>;
-  options?: TOptions;
+  params?: Record<string, unknown>
+  query?: Record<string, unknown>
+  body?: unknown
+  headers?: Record<string, string>
+  options?: TOptions
 }
 
 // ----- Public types -----
 
-export type Adapter<TOptions = unknown> = (request: AdapterRequest<TOptions>) => Promise<unknown>;
+export type Adapter<TOptions = unknown> = (request: AdapterRequest<TOptions>) => Promise<unknown>
 
-export type BodySerializer = (body: unknown) => BodySerializerResult;
+export type BodySerializer = (body: unknown) => BodySerializerResult
 
-export type QuerySerializer = (query: Record<string, unknown>) => QuerySerializerResult;
+export type QuerySerializer = (query: Record<string, unknown>) => QuerySerializerResult
 
 /**
  * Extract a response type by exact status key.
@@ -134,7 +134,7 @@ export type ResultOf<
     ? TStatus extends keyof R
       ? R[TStatus]
       : unknown
-    : unknown;
+    : unknown
 
 /**
  * Extract the client return type for an endpoint definition.
@@ -152,7 +152,7 @@ export type SuccessOf<T extends { response: unknown }> =
           ? R[OnlyDefaultKey<T>]
           : unknown
       : R[SuccessKey<T>]
-    : unknown;
+    : unknown
 
 export type Client<
   Endpoints extends { [K in keyof Endpoints]: EndpointDefinition },
@@ -162,36 +162,36 @@ export type Client<
   ...args: HasRequiredOptions<Endpoints[K]> extends true
     ? [options: RequestOptions<Endpoints[K], TOptions>]
     : [options?: RequestOptions<Endpoints[K], TOptions>]
-) => Promise<SuccessOf<Endpoints[K]>>;
+) => Promise<SuccessOf<Endpoints[K]>>
 
 export interface ClientOptions<TOptions = unknown> {
   /**
    * Prefix for relative endpoint paths. Trailing slashes are removed.
    * Absolute `http://` and `https://` endpoint paths bypass this value.
    */
-  baseURL?: string;
+  baseURL?: string
 
   /**
    * Default headers for every request. Header names are lowercased.
    * Merge order is defaults, body-derived headers, then per-call headers.
    */
-  headers?: Record<string, string>;
+  headers?: Record<string, string>
 
   /**
    * Default adapter-specific options. Plain objects are shallow-merged with
    * per-call options; other values are replaced by the per-call value.
    */
-  options?: TOptions;
+  options?: TOptions
 
   /**
    * Custom body serializer. When set, it receives every defined body and
    * replaces the default string, passthrough, and JSON handling.
    */
-  serializeBody?: BodySerializer;
+  serializeBody?: BodySerializer
 
   /**
    * Custom query serializer. The default skips `null`/`undefined`, keeps
    * falsy values, and serializes arrays as repeated keys.
    */
-  serializeQuery?: QuerySerializer;
+  serializeQuery?: QuerySerializer
 }

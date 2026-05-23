@@ -1,10 +1,10 @@
-import { writeFile, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { writeFile, unlink } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 interface TmpOpts {
-  ext?: string;
-  prefix?: string;
+  ext?: string
+  prefix?: string
 }
 
 export function withTmpFile<T>(
@@ -12,7 +12,7 @@ export function withTmpFile<T>(
   fn: (path: string) => Promise<T>,
   opts?: TmpOpts,
 ): Promise<T> {
-  return withTmpFiles([content], ([p]) => fn(p), opts);
+  return withTmpFiles([content], ([p]) => fn(p), opts)
 }
 
 export async function withTmpFiles<T>(
@@ -20,27 +20,27 @@ export async function withTmpFiles<T>(
   fn: (paths: string[]) => Promise<T>,
   opts?: TmpOpts,
 ): Promise<T> {
-  const paths = contents.map((_, i) => makeTmpPath(opts, i));
-  await Promise.all(contents.map((c, i) => writeFile(paths[i], c)));
+  const paths = contents.map((_, i) => makeTmpPath(opts, i))
+  await Promise.all(contents.map((c, i) => writeFile(paths[i], c)))
   try {
-    return await fn(paths);
+    return await fn(paths)
   } finally {
-    await Promise.all(paths.map((p) => unlink(p).catch(() => undefined)));
+    await Promise.all(paths.map((p) => unlink(p).catch(() => undefined)))
   }
 }
 
 export async function withTmpPath<T>(fn: (path: string) => Promise<T>, opts?: TmpOpts): Promise<T> {
-  const path = makeTmpPath(opts);
+  const path = makeTmpPath(opts)
   try {
-    return await fn(path);
+    return await fn(path)
   } finally {
-    await unlink(path).catch(() => undefined);
+    await unlink(path).catch(() => undefined)
   }
 }
 
 function makeTmpPath(opts: TmpOpts | undefined, index = 0): string {
-  const ext = opts?.ext ?? ".json";
-  const prefix = opts?.prefix ?? "openapi-shape";
-  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  return join(tmpdir(), `${prefix}-${stamp}-${index}${ext}`);
+  const ext = opts?.ext ?? ".json"
+  const prefix = opts?.prefix ?? "openapi-shape"
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  return join(tmpdir(), `${prefix}-${stamp}-${index}${ext}`)
 }

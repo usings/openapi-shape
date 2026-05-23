@@ -1,4 +1,4 @@
-const VALID_IDENT = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
+const VALID_IDENT = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/
 
 const RESERVED = new Set(
   (
@@ -9,16 +9,16 @@ const RESERVED = new Set(
     "set static string super switch symbol this throw true try type typeof undefined unique unknown " +
     "var void while with yield"
   ).split(" "),
-);
+)
 
 export function safeIdentifier(name: string): string {
-  let out = name.replaceAll(/[^a-zA-Z0-9_$]/g, "_");
-  if (out === "") out = "_";
-  if (/^[0-9]/.test(out)) out = `_${out}`;
-  if (RESERVED.has(out)) out = `_${out}`;
-  return out;
+  let out = name.replaceAll(/[^a-zA-Z0-9_$]/g, "_")
+  if (out === "") out = "_"
+  if (/^[0-9]/.test(out)) out = `_${out}`
+  if (RESERVED.has(out)) out = `_${out}`
+  return out
 }
 
 export function safeKey(name: string): string {
-  return VALID_IDENT.test(name) ? name : JSON.stringify(name);
+  return VALID_IDENT.test(name) ? name : JSON.stringify(name)
 }

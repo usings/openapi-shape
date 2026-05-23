@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { styleText } from "node:util";
-import { defineCommand, runMain } from "citty";
-import { generate } from ".";
+import { readFile, writeFile } from "node:fs/promises"
+import { resolve } from "node:path"
+import { styleText } from "node:util"
+import { defineCommand, runMain } from "citty"
+import { generate } from "."
 
 // --- CLI command definition
 
@@ -34,97 +34,97 @@ const main = defineCommand({
     },
   },
   async run({ args }) {
-    const start = performance.now();
+    const start = performance.now()
 
-    info(`source: ${args.source}`);
-    info(`output: ${args.output}${args.check ? " (check)" : ""}`);
+    info(`source: ${args.source}`)
+    info(`output: ${args.output}${args.check ? " (check)" : ""}`)
 
-    const target = resolve(args.output);
-    const generateOptions = { headers: args.headers };
+    const target = resolve(args.output)
+    const generateOptions = { headers: args.headers }
 
     if (args.check) {
       const [code, existing] = await Promise.all([
         generate(args.source, generateOptions),
         readFile(target, "utf8").catch(() => null),
-      ]);
-      const result = compareOutput(code, existing);
+      ])
+      const result = compareOutput(code, existing)
       if (result.kind === "fresh") {
-        ok(`${args.output} is up to date in ${formatDuration(start)}`);
-        return;
+        ok(`${args.output} is up to date in ${formatDuration(start)}`)
+        return
       }
-      reportStale(args.output, result);
-      process.exitCode = 1;
-      return;
+      reportStale(args.output, result)
+      process.exitCode = 1
+      return
     }
 
-    const code = await generate(args.source, generateOptions);
-    const { bytes } = await writeOutput(target, code);
-    ok(`Generated ${args.output} (${formatBytes(bytes)}) in ${formatDuration(start)}`);
+    const code = await generate(args.source, generateOptions)
+    const { bytes } = await writeOutput(target, code)
+    ok(`Generated ${args.output} (${formatBytes(bytes)}) in ${formatDuration(start)}`)
   },
-});
+})
 
-runMain(main);
+runMain(main)
 
 // --- Utility functions and types
 
 interface StaleReport {
-  kind: "stale";
-  existing: string | null;
-  currentLines: number;
-  expectedLines: number;
-  lineDelta: number;
+  kind: "stale"
+  existing: string | null
+  currentLines: number
+  expectedLines: number
+  lineDelta: number
 }
 
-type CheckResult = { kind: "fresh" } | StaleReport;
+type CheckResult = { kind: "fresh" } | StaleReport
 
 function compareOutput(code: string, existing: string | null): CheckResult {
-  if (existing === code) return { kind: "fresh" };
+  if (existing === code) return { kind: "fresh" }
 
-  const expectedLines = code.split("\n").length;
-  const currentLines = existing === null ? 0 : existing.split("\n").length;
+  const expectedLines = code.split("\n").length
+  const currentLines = existing === null ? 0 : existing.split("\n").length
   return {
     kind: "stale",
     existing,
     currentLines,
     expectedLines,
     lineDelta: expectedLines - currentLines,
-  };
+  }
 }
 
 async function writeOutput(target: string, code: string): Promise<{ bytes: number }> {
-  await writeFile(target, code, "utf8");
-  return { bytes: Buffer.byteLength(code, "utf8") };
+  await writeFile(target, code, "utf8")
+  return { bytes: Buffer.byteLength(code, "utf8") }
 }
 
 function reportStale(output: string, result: StaleReport): void {
   if (result.existing === null) {
-    fail(`${output}: file does not exist`);
-    return;
+    fail(`${output}: file does not exist`)
+    return
   }
-  const sign = result.lineDelta > 0 ? `+${result.lineDelta}` : `${result.lineDelta}`;
-  fail(`${output} is out of date`);
-  info(`  current:  ${result.currentLines} lines`);
-  info(`  expected: ${result.expectedLines} lines (${sign})`);
+  const sign = result.lineDelta > 0 ? `+${result.lineDelta}` : `${result.lineDelta}`
+  fail(`${output} is out of date`)
+  info(`  current:  ${result.currentLines} lines`)
+  info(`  expected: ${result.expectedLines} lines (${sign})`)
 }
 
 function info(msg: string): void {
-  process.stdout.write(`${styleText("cyan", "ℹ")} ${msg}\n`);
+  process.stdout.write(`${styleText("cyan", "ℹ")} ${msg}\n`)
 }
 
 function ok(msg: string): void {
-  process.stdout.write(`${styleText("green", "✔")} ${msg}\n`);
+  process.stdout.write(`${styleText("green", "✔")} ${msg}\n`)
 }
 
 function fail(msg: string): void {
-  process.stderr.write(`${styleText("red", "✘")} ${msg}\n`);
+  process.stderr.write(`${styleText("red", "✘")} ${msg}\n`)
 }
 
 function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(2)} kB`;
-  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(2)} kB`
+  return `${(n / 1024 / 1024).toFixed(2)} MB`
 }
 
 function formatDuration(start: number): string {
-  return `${Math.round(performance.now() - start)}ms`;
+  return `${Math.round(performance.now() - start)}ms`
 }

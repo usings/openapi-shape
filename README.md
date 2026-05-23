@@ -45,33 +45,33 @@ The generated file is plain TypeScript declarations:
 ```ts
 export interface Endpoints {
   "GET /pets": {
-    params: void;
-    query: { limit?: number };
-    body: void;
-    response: { "200": Schemas.Pet[] };
-  };
+    params: void
+    query: { limit?: number }
+    body: void
+    response: { "200": Schemas.Pet[] }
+  }
   "POST /pets": {
-    params: void;
-    query: void;
-    body: Schemas.CreatePet;
-    response: { "201": Schemas.Pet };
-  };
+    params: void
+    query: void
+    body: Schemas.CreatePet
+    response: { "201": Schemas.Pet }
+  }
   "GET /pets/{petId}": {
-    params: { petId: string };
-    query: void;
-    body: void;
-    response: { "200": Schemas.Pet };
-  };
+    params: { petId: string }
+    query: void
+    body: void
+    response: { "200": Schemas.Pet }
+  }
 }
 
 export namespace Schemas {
   export interface Pet {
-    id: number;
-    name: string;
+    id: number
+    name: string
   }
 
   export interface CreatePet {
-    name: string;
+    name: string
   }
 }
 ```
@@ -92,10 +92,10 @@ OpenAPI 3.1 `webhooks` are emitted as a parallel `Webhooks` interface:
 ```ts
 export interface Webhooks {
   "POST pet.created": {
-    query: void;
-    payload: Schemas.Pet;
-    reply: void;
-  };
+    query: void
+    payload: Schemas.Pet
+    reply: void
+  }
 }
 ```
 
@@ -109,10 +109,10 @@ Webhook entries use the receiving side's vocabulary:
 Example handler type:
 
 ```ts
-import type { Webhooks } from "./api";
+import type { Webhooks } from "./api"
 
 function onPetCreated(payload: Webhooks["POST pet.created"]["payload"]) {
-  payload.id;
+  payload.id
 }
 ```
 
@@ -148,19 +148,19 @@ Typical package script:
 `openapi-shape/client` gives you one typed request function over the generated `Endpoints` map. It builds adapter input; your adapter owns the HTTP call and response parsing.
 
 ```ts
-import { createClient, type Adapter } from "openapi-shape/client";
-import type { Endpoints } from "./api";
+import { createClient, type Adapter } from "openapi-shape/client"
+import type { Endpoints } from "./api"
 
 const adapter: Adapter = async ({ method, url, body, headers }) => {
-  const response = await fetch(url, { method, body, headers });
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  if (response.status === 204) return undefined;
-  return response.json();
-};
+  const response = await fetch(url, { method, body, headers })
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  if (response.status === 204) return undefined
+  return response.json()
+}
 
 export const api = createClient<Endpoints>(adapter, {
   baseURL: "https://api.example.com",
-});
+})
 ```
 
 Calls are checked at compile time:
@@ -168,11 +168,11 @@ Calls are checked at compile time:
 ```ts
 const pets = await api("GET /pets", {
   query: { limit: 10 },
-});
+})
 
 const created = await api("POST /pets", {
   body: { name: "Buddy" },
-});
+})
 ```
 
 Client return types are inferred from response maps:
@@ -182,37 +182,37 @@ Client return types are inferred from response maps:
 - `ResultOf<T, Status>` extracts one exact status key.
 
 ```ts
-import type { ResultOf, SuccessOf } from "openapi-shape/client";
-import type { Endpoints } from "./api";
+import type { ResultOf, SuccessOf } from "openapi-shape/client"
+import type { Endpoints } from "./api"
 
-type ListPets = SuccessOf<Endpoints["GET /pets"]>;
-type NotFound = ResultOf<Endpoints["GET /pets/{petId}"], "404">;
+type ListPets = SuccessOf<Endpoints["GET /pets"]>
+type NotFound = ResultOf<Endpoints["GET /pets/{petId}"], "404">
 ```
 
 Adapter-specific options stay typed:
 
 ```ts
-type AdapterOptions = { timeout?: number };
+type AdapterOptions = { timeout?: number }
 
 const adapter: Adapter<AdapterOptions> = async ({ method, url, body, headers, options }) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options?.timeout ?? 30_000);
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), options?.timeout ?? 30_000)
   try {
-    const response = await fetch(url, { method, body, headers, signal: controller.signal });
-    return response.status === 204 ? undefined : response.json();
+    const response = await fetch(url, { method, body, headers, signal: controller.signal })
+    return response.status === 204 ? undefined : response.json()
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timeout)
   }
-};
+}
 
 export const api = createClient<Endpoints, AdapterOptions>(adapter, {
   options: { timeout: 5000 },
-});
+})
 
 await api("GET /pets", {
   query: { limit: 10 },
   options: { timeout: 1000 },
-});
+})
 ```
 
 ## Request Building
@@ -233,24 +233,24 @@ Customize serialization when your API does not use the defaults:
 export const api = createClient<Endpoints>(adapter, {
   baseURL: "https://api.example.com",
   serializeQuery(query) {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams()
     for (const [name, value] of Object.entries(query)) {
-      if (value == null) continue;
-      params.set(name, Array.isArray(value) ? value.join(",") : String(value));
+      if (value == null) continue
+      params.set(name, Array.isArray(value) ? value.join(",") : String(value))
     }
-    return params;
+    return params
   },
   serializeBody(body) {
     if (typeof body === "string") {
-      return { body, headers: { "Content-Type": "text/plain" } };
+      return { body, headers: { "Content-Type": "text/plain" } }
     }
 
     return {
       body: JSON.stringify(body),
       headers: { "Content-Type": "application/json" },
-    };
+    }
   },
-});
+})
 ```
 
 - `serializeQuery` receives the raw query object and returns a query string or `URLSearchParams`.
@@ -267,8 +267,8 @@ These examples are recipes. They map the same adapter input to fetch or third-pa
 This version handles auth headers, typed HTTP errors, empty responses, and content-type based parsing:
 
 ```ts
-import { createClient, type Adapter } from "openapi-shape/client";
-import type { Endpoints } from "./api";
+import { createClient, type Adapter } from "openapi-shape/client"
+import type { Endpoints } from "./api"
 
 class HttpError extends Error {
   constructor(
@@ -276,39 +276,39 @@ class HttpError extends Error {
     public readonly body: string,
     public readonly response: Response,
   ) {
-    super(`HTTP ${status} ${response.statusText}: ${body.slice(0, 200)}`);
-    this.name = "HttpError";
+    super(`HTTP ${status} ${response.statusText}: ${body.slice(0, 200)}`)
+    this.name = "HttpError"
   }
 }
 
-declare function getToken(): string;
+declare function getToken(): string
 
 const adapter: Adapter = async ({ method, url, body, headers }) => {
   const response = await fetch(url, {
     method,
     body,
     headers: { ...headers, authorization: `Bearer ${getToken()}` },
-  });
+  })
 
   if (!response.ok) {
-    const errorBody = await response.text();
-    throw new HttpError(response.status, errorBody, response);
+    const errorBody = await response.text()
+    throw new HttpError(response.status, errorBody, response)
   }
 
-  const contentLength = response.headers.get("content-length");
+  const contentLength = response.headers.get("content-length")
   if (response.status === 204 || contentLength === "0") {
-    return undefined;
+    return undefined
   }
 
-  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-  if (/^application\/(.*\+)?json/.test(contentType)) return response.json();
-  if (contentType.startsWith("text/")) return response.text();
-  return response.blob();
-};
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
+  if (/^application\/(.*\+)?json/.test(contentType)) return response.json()
+  if (contentType.startsWith("text/")) return response.text()
+  return response.blob()
+}
 
 export const api = createClient<Endpoints>(adapter, {
   baseURL: "https://api.example.com",
-});
+})
 ```
 
 </details>
@@ -319,18 +319,18 @@ For third-party adapters, use `Omit<...>` so callers cannot override fields owne
 <summary>axios adapter</summary>
 
 ```ts
-import axios, { type AxiosRequestConfig } from "axios";
-import { createClient, type Adapter } from "openapi-shape/client";
-import type { Endpoints } from "./api";
+import axios, { type AxiosRequestConfig } from "axios"
+import { createClient, type Adapter } from "openapi-shape/client"
+import type { Endpoints } from "./api"
 
-type AdapterOptions = Omit<AxiosRequestConfig, "method" | "url" | "data" | "headers">;
+type AdapterOptions = Omit<AxiosRequestConfig, "method" | "url" | "data" | "headers">
 
 const adapter: Adapter<AdapterOptions> = async ({ method, url, body, headers, options }) => {
-  const response = await axios.request({ ...options, method, url, data: body, headers });
-  return response.data;
-};
+  const response = await axios.request({ ...options, method, url, data: body, headers })
+  return response.data
+}
 
-export const api = createClient<Endpoints, AdapterOptions>(adapter);
+export const api = createClient<Endpoints, AdapterOptions>(adapter)
 ```
 
 </details>
@@ -339,17 +339,17 @@ export const api = createClient<Endpoints, AdapterOptions>(adapter);
 <summary>ky adapter</summary>
 
 ```ts
-import ky, { type Options as KyOptions } from "ky";
-import { createClient, type Adapter } from "openapi-shape/client";
-import type { Endpoints } from "./api";
+import ky, { type Options as KyOptions } from "ky"
+import { createClient, type Adapter } from "openapi-shape/client"
+import type { Endpoints } from "./api"
 
-type AdapterOptions = Omit<KyOptions, "method" | "body" | "headers">;
+type AdapterOptions = Omit<KyOptions, "method" | "body" | "headers">
 
 const adapter: Adapter<AdapterOptions> = async ({ method, url, body, headers, options }) => {
-  return ky(url, { ...options, method, body, headers }).json();
-};
+  return ky(url, { ...options, method, body, headers }).json()
+}
 
-export const api = createClient<Endpoints, AdapterOptions>(adapter);
+export const api = createClient<Endpoints, AdapterOptions>(adapter)
 ```
 
 </details>
@@ -358,17 +358,17 @@ export const api = createClient<Endpoints, AdapterOptions>(adapter);
 <summary>ofetch adapter</summary>
 
 ```ts
-import { ofetch, type FetchOptions } from "ofetch";
-import { createClient, type Adapter } from "openapi-shape/client";
-import type { Endpoints } from "./api";
+import { ofetch, type FetchOptions } from "ofetch"
+import { createClient, type Adapter } from "openapi-shape/client"
+import type { Endpoints } from "./api"
 
-type AdapterOptions = Omit<FetchOptions, "method" | "body" | "headers">;
+type AdapterOptions = Omit<FetchOptions, "method" | "body" | "headers">
 
 const adapter: Adapter<AdapterOptions> = async ({ method, url, body, headers, options }) => {
-  return ofetch(url, { ...options, method, body, headers });
-};
+  return ofetch(url, { ...options, method, body, headers })
+}
 
-export const api = createClient<Endpoints, AdapterOptions>(adapter);
+export const api = createClient<Endpoints, AdapterOptions>(adapter)
 ```
 
 </details>
@@ -381,33 +381,33 @@ The generated `Endpoints` map can also type cache keys for libraries such as Tan
 <summary>TanStack Query example</summary>
 
 ```ts
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Endpoints } from "./api";
-import { api } from "./client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import type { Endpoints } from "./api"
+import { api } from "./client"
 
-type NonNullish = NonNullable<unknown>;
-type EmptyObject = Record<PropertyKey, never>;
-type HasOnlyOptionalProps<T> = T extends object ? (NonNullish extends T ? true : false) : false;
+type NonNullish = NonNullable<unknown>
+type EmptyObject = Record<PropertyKey, never>
+type HasOnlyOptionalProps<T> = T extends object ? (NonNullish extends T ? true : false) : false
 
-type QueryKeyEndpoint = keyof Endpoints & string;
+type QueryKeyEndpoint = keyof Endpoints & string
 
 type QueryKeyParamsPart<K extends QueryKeyEndpoint> = Endpoints[K]["params"] extends void
   ? NonNullish
-  : { params: Endpoints[K]["params"] };
+  : { params: Endpoints[K]["params"] }
 
 type QueryKeyQueryPart<K extends QueryKeyEndpoint> = Endpoints[K]["query"] extends void
   ? NonNullish
   : HasOnlyOptionalProps<Endpoints[K]["query"]> extends true
     ? { query?: Endpoints[K]["query"] }
-    : { query: Endpoints[K]["query"] };
+    : { query: Endpoints[K]["query"] }
 
-type QueryKeyInput<K extends QueryKeyEndpoint> = QueryKeyParamsPart<K> & QueryKeyQueryPart<K>;
+type QueryKeyInput<K extends QueryKeyEndpoint> = QueryKeyParamsPart<K> & QueryKeyQueryPart<K>
 
 type QueryKeyArgs<K extends QueryKeyEndpoint> = keyof QueryKeyInput<K> extends never
   ? [input?: EmptyObject]
   : NonNullish extends QueryKeyInput<K>
     ? [input?: QueryKeyInput<K>]
-    : [input: QueryKeyInput<K>];
+    : [input: QueryKeyInput<K>]
 
 export const apiKeys = {
   /** Endpoint-level key for broad invalidation, e.g. all GET /pets queries. */
@@ -415,28 +415,28 @@ export const apiKeys = {
   /** Request-level key including params/query input for exact query caching. */
   request: <K extends QueryKeyEndpoint>(endpoint: K, ...[input]: QueryKeyArgs<K>) =>
     input === undefined ? ([endpoint] as const) : ([endpoint, input] as const),
-};
+}
 
 export function usePets(limit?: number) {
-  const query = limit === undefined ? {} : { limit };
+  const query = limit === undefined ? {} : { limit }
 
   return useQuery({
     queryKey: apiKeys.request("GET /pets", { query }),
     queryFn: () => api("GET /pets", { query }),
-  });
+  })
 }
 
 export function useCreatePet() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: (body: Endpoints["POST /pets"]["body"]) => api("POST /pets", { body }),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: apiKeys.endpoint("GET /pets"),
-      });
+      })
     },
-  });
+  })
 }
 ```
 
@@ -447,23 +447,23 @@ export function useCreatePet() {
 Use the generator directly from build scripts, custom CLIs, or tests:
 
 ```ts
-import { generate } from "openapi-shape";
-import { writeFile } from "node:fs/promises";
+import { generate } from "openapi-shape"
+import { writeFile } from "node:fs/promises"
 
 const code = await generate("./openapi.json", {
   headers: true,
-  formats: { "date-time": "Date", uuid: "UUID" },
-});
+  formats: { "date-time": "Date", "uuid": "UUID" },
+})
 
-await writeFile("src/api.d.ts", code);
+await writeFile("src/api.d.ts", code)
 ```
 
 `generate(source)` is async for file paths and URLs. `generate(doc)` is synchronous for already-parsed OpenAPI objects:
 
 ```ts
-import { generate } from "openapi-shape";
+import { generate } from "openapi-shape"
 
-const code = generate(openapi);
+const code = generate(openapi)
 ```
 
 Options:

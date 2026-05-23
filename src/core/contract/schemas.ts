@@ -1,39 +1,39 @@
-import { safeIdentifier } from "../shared/naming";
-import { escapePointerSegment } from "../shared/pointer";
-import type { ContractSchema, ContractField } from "./contract";
-import { docBlock } from "./doc";
-import { BuildError } from "./errors";
-import type { OpenAPIDocument } from "./openapi";
-import { objectIndexShape, schemaShape } from "./shapes";
+import { safeIdentifier } from "../shared/naming"
+import { escapePointerSegment } from "../shared/pointer"
+import type { ContractSchema, ContractField } from "./contract"
+import { docBlock } from "./doc"
+import { BuildError } from "./errors"
+import type { OpenAPIDocument } from "./openapi"
+import { objectIndexShape, schemaShape } from "./shapes"
 
 export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
-  const raw = doc.components?.schemas;
-  if (!raw) return [];
+  const raw = doc.components?.schemas
+  if (!raw) return []
 
-  const sanitizedToOriginal = new Map<string, string>();
+  const sanitizedToOriginal = new Map<string, string>()
   for (const name of Object.keys(raw)) {
-    const sanitized = safeIdentifier(name);
-    const prior = sanitizedToOriginal.get(sanitized);
+    const sanitized = safeIdentifier(name)
+    const prior = sanitizedToOriginal.get(sanitized)
     if (prior !== undefined && prior !== name) {
       throw new BuildError(
         `Schema name collision after sanitization at /components/schemas: "${prior}" and "${name}" both → "${sanitized}"`,
-      );
+      )
     }
-    sanitizedToOriginal.set(sanitized, name);
+    sanitizedToOriginal.set(sanitized, name)
   }
 
-  const result: ContractSchema[] = [];
+  const result: ContractSchema[] = []
   for (const [originalName, schema] of Object.entries(raw)) {
-    const name = safeIdentifier(originalName);
+    const name = safeIdentifier(originalName)
     if (schema.type === "object" && schema.properties) {
-      const required = new Set<string>(schema.required ?? []);
+      const required = new Set<string>(schema.required ?? [])
       const fields: ContractField[] = Object.entries(schema.properties).map(([fname, fschema]) => ({
         name: fname,
         required: required.has(fname),
         shape: schemaShape(fschema),
         docs: docBlock(fschema),
-      }));
-      const index = objectIndexShape(schema);
+      }))
+      const index = objectIndexShape(schema)
       result.push({
         name,
         originalName,
@@ -43,7 +43,7 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
         ...(index !== null && { index }),
         docs: docBlock(schema),
         source: { location: `/components/schemas/${escapePointerSegment(originalName)}` },
-      });
+      })
     } else {
       result.push({
         name,
@@ -53,8 +53,8 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
         shape: schemaShape(schema),
         docs: docBlock(schema),
         source: { location: `/components/schemas/${escapePointerSegment(originalName)}` },
-      });
+      })
     }
   }
-  return result;
+  return result
 }

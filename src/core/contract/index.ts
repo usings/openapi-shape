@@ -1,6 +1,6 @@
-import { buildContract } from "./build";
-import type { Contract } from "./contract";
-import { loadDocument, prepareDocument } from "./document";
+import { buildContract } from "./build"
+import type { Contract } from "./contract"
+import { loadDocument, prepareDocument } from "./document"
 
 /**
  * Read an OpenAPI source and build the normalized contract IR.
@@ -10,7 +10,7 @@ import { loadDocument, prepareDocument } from "./document";
  * operations.
  */
 export async function loadContract(source: string | URL): Promise<Contract> {
-  return buildContract(await loadDocument(source));
+  return buildContract(await loadDocument(source))
 }
 
 /**
@@ -19,5 +19,5 @@ export async function loadContract(source: string | URL): Promise<Contract> {
  * This runs the same preparation pipeline as `loadContract`, minus source I/O.
  */
 export function prepareContract(raw: unknown): Contract {
-  return buildContract(prepareDocument(raw));
+  return buildContract(prepareDocument(raw))
 }

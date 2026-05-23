@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { LoadError } from "./errors";
+import { readFile } from "node:fs/promises"
+import { fileURLToPath } from "node:url"
+import { LoadError } from "./errors"
 
 /**
  * Read raw OpenAPI JSON from a path, file URL, or HTTP(S) URL.
@@ -15,45 +15,45 @@ import { LoadError } from "./errors";
  * `unknown` stays at the boundary so later stages can narrow the document shape.
  */
 export async function readSource(source: string | URL): Promise<unknown> {
-  const label = typeof source === "string" ? source : source.href;
-  let text: string;
+  const label = typeof source === "string" ? source : source.href
+  let text: string
 
   try {
-    text = await readText(source);
+    text = await readText(source)
   } catch (error) {
-    if (error instanceof LoadError) throw error;
-    throw new LoadError(`Failed to read ${label}: ${(error as Error).message}`);
+    if (error instanceof LoadError) throw error
+    throw new LoadError(`Failed to read ${label}: ${(error as Error).message}`)
   }
 
   try {
-    return JSON.parse(text);
+    return JSON.parse(text)
   } catch (error) {
-    throw new LoadError(`Failed to parse ${label} as JSON: ${(error as Error).message}`);
+    throw new LoadError(`Failed to parse ${label} as JSON: ${(error as Error).message}`)
   }
 }
 
 function readText(source: string | URL): Promise<string> {
   if (source instanceof URL) {
     if (source.protocol === "http:" || source.protocol === "https:") {
-      return fetchText(source.href);
+      return fetchText(source.href)
     }
     if (source.protocol === "file:") {
-      return readFile(fileURLToPath(source), "utf8");
+      return readFile(fileURLToPath(source), "utf8")
     }
     throw new LoadError(
       `Unsupported URL protocol: ${source.protocol} at ${source.href}. Supported: http:, https:, file:.`,
-    );
+    )
   }
   if (source.startsWith("http://") || source.startsWith("https://")) {
-    return fetchText(source);
+    return fetchText(source)
   }
-  return readFile(source, "utf8");
+  return readFile(source, "utf8")
 }
 
 async function fetchText(href: string): Promise<string> {
-  const response = await fetch(href);
+  const response = await fetch(href)
   if (!response.ok) {
-    throw new LoadError(`Failed to fetch ${href}: ${response.status} ${response.statusText}`);
+    throw new LoadError(`Failed to fetch ${href}: ${response.status} ${response.statusText}`)
   }
-  return response.text();
+  return response.text()
 }
