@@ -43,6 +43,29 @@
       }
     }
   },
+  "webhooks": {
+    "item.created": {
+      "post": {
+        "summary": "Fired when a new item is created",
+        "deprecated": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Item" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": { "schema": { "type": "boolean" } }
+            }
+          }
+        }
+      }
+    }
+  },
   "components": {
     "schemas": {
       "Item": {

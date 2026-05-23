@@ -144,6 +144,8 @@ export interface ClientOptions<TOptions = unknown> {
   serializeQuery?: QuerySerializer;
 }
 
+// ----- Utility functions -----
+
 function splitEndpoint(endpoint: string): { method: string; path: string } {
   const space = endpoint.indexOf(" ");
   if (space <= 0 || space === endpoint.length - 1) {
@@ -262,6 +264,8 @@ function mergeAdapterOptions<TOptions>(
   }
   return overrides;
 }
+
+// ----- Public API -----
 
 export function createClient<
   Endpoints extends { [K in keyof Endpoints]: EndpointDefinition },

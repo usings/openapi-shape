@@ -3,29 +3,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { styleText } from "node:util";
 import { defineCommand, runMain } from "citty";
-import { generate } from "./index";
+import { generate } from ".";
 
-function info(msg: string): void {
-  process.stdout.write(`${styleText("cyan", "ℹ")} ${msg}\n`);
-}
-
-function ok(msg: string): void {
-  process.stdout.write(`${styleText("green", "✔")} ${msg}\n`);
-}
-
-function fail(msg: string): void {
-  process.stderr.write(`${styleText("red", "✘")} ${msg}\n`);
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(2)} kB`;
-  return `${(n / 1024 / 1024).toFixed(2)} MB`;
-}
-
-function formatDuration(start: number): string {
-  return `${Math.round(performance.now() - start)}ms`;
-}
+// --- CLI command definition
 
 const main = defineCommand({
   meta: {
@@ -63,42 +43,92 @@ const main = defineCommand({
     info(`source: ${args.source}`);
     info(`output: ${args.output}${args.check ? " (check)" : ""}`);
 
-    const code = await generate(args.source, { headers: args.headers, errors: args.errors });
+    const target = resolve(args.output);
+    const generateOptions = { headers: args.headers, errors: args.errors };
 
     if (args.check) {
-      const target = resolve(args.output);
-      const existing = await readFile(target, "utf8").catch(() => null);
-
-      if (existing === code) {
+      const [code, existing] = await Promise.all([
+        generate(args.source, generateOptions),
+        readFile(target, "utf8").catch(() => null),
+      ]);
+      const result = compareOutput(code, existing);
+      if (result.kind === "fresh") {
         ok(`${args.output} is up to date in ${formatDuration(start)}`);
         return;
       }
-
-      reportStale(args.output, code, existing);
+      reportStale(args.output, result);
       process.exitCode = 1;
       return;
     }
 
-    await writeFile(resolve(args.output), code, "utf8");
-    const size = formatBytes(Buffer.byteLength(code, "utf8"));
-    ok(`Generated ${args.output} (${size}) in ${formatDuration(start)}`);
+    const code = await generate(args.source, generateOptions);
+    const { bytes } = await writeOutput(target, code);
+    ok(`Generated ${args.output} (${formatBytes(bytes)}) in ${formatDuration(start)}`);
   },
 });
 
-function reportStale(output: string, expected: string, actual: string | null): void {
-  if (actual === null) {
+runMain(main);
+
+// --- Utility functions and types
+
+interface StaleReport {
+  kind: "stale";
+  existing: string | null;
+  currentLines: number;
+  expectedLines: number;
+  lineDelta: number;
+}
+
+type CheckResult = { kind: "fresh" } | StaleReport;
+
+function compareOutput(code: string, existing: string | null): CheckResult {
+  if (existing === code) return { kind: "fresh" };
+
+  const expectedLines = code.split("\n").length;
+  const currentLines = existing === null ? 0 : existing.split("\n").length;
+  return {
+    kind: "stale",
+    existing,
+    currentLines,
+    expectedLines,
+    lineDelta: expectedLines - currentLines,
+  };
+}
+
+async function writeOutput(target: string, code: string): Promise<{ bytes: number }> {
+  await writeFile(target, code, "utf8");
+  return { bytes: Buffer.byteLength(code, "utf8") };
+}
+
+function reportStale(output: string, result: StaleReport): void {
+  if (result.existing === null) {
     fail(`${output}: file does not exist`);
     return;
   }
-
-  const expectedLines = expected.split("\n");
-  const actualLines = actual.split("\n");
-  const delta = expectedLines.length - actualLines.length;
-  const sign = delta > 0 ? `+${delta}` : `${delta}`;
-
+  const sign = result.lineDelta > 0 ? `+${result.lineDelta}` : `${result.lineDelta}`;
   fail(`${output} is out of date`);
-  info(`  current:  ${actualLines.length} lines`);
-  info(`  expected: ${expectedLines.length} lines (${sign})`);
+  info(`  current:  ${result.currentLines} lines`);
+  info(`  expected: ${result.expectedLines} lines (${sign})`);
 }
 
-runMain(main);
+function info(msg: string): void {
+  process.stdout.write(`${styleText("cyan", "ℹ")} ${msg}\n`);
+}
+
+function ok(msg: string): void {
+  process.stdout.write(`${styleText("green", "✔")} ${msg}\n`);
+}
+
+function fail(msg: string): void {
+  process.stderr.write(`${styleText("red", "✘")} ${msg}\n`);
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(2)} kB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function formatDuration(start: number): string {
+  return `${Math.round(performance.now() - start)}ms`;
+}

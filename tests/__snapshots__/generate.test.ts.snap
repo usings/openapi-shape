@@ -179,6 +179,18 @@ export interface Endpoints {
   }
 }
 
+export interface Webhooks {
+  /**
+   * @summary Fired when a new item is created
+   * @deprecated
+   */
+  "POST item.created": {
+    query: void
+    payload: Schemas.Item
+    reply: boolean
+  }
+}
+
 export namespace Schemas {
   export type ItemKind = "book" | "movie" | "music"
 
