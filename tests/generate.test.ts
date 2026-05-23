@@ -180,22 +180,20 @@ describe("generate (integration)", () => {
     expect(code).toContain("headers: void");
   });
 
-  it("errors: true adds errors field", () => {
-    const code = generate(
-      {
-        paths: {
-          "/x": {
-            get: {
-              responses: {
-                "200": { content: { "application/json": { schema: { type: "string" } } } },
-                "400": { content: { "application/json": { schema: { type: "string" } } } },
-              },
+  it("response field is a status-keyed map of every declared response", () => {
+    const code = generate({
+      paths: {
+        "/x": {
+          get: {
+            responses: {
+              "200": { content: { "application/json": { schema: { type: "string" } } } },
+              "400": { content: { "application/json": { schema: { type: "string" } } } },
+              default: { content: { "application/json": { schema: { type: "string" } } } },
             },
           },
         },
       },
-      { errors: true },
-    );
-    expect(code).toContain('errors: { "400": string }');
+    });
+    expect(code).toContain('response: { "200": string; "400": string; "default": string }');
   });
 });

@@ -1,150 +1,50 @@
-// ----- Building blocks -----
-
-type FetchBodyInit = typeof globalThis extends {
-  fetch: (input: never, init?: infer Init) => unknown;
-}
-  ? Init extends { body?: infer B }
-    ? NonNullable<B>
-    : never
-  : never;
-
-type FallbackBodyInit =
-  | string
-  | ArrayBuffer
-  | ArrayBufferView<ArrayBuffer>
-  | Blob
-  | FormData
-  | URLSearchParams
-  | ReadableStream<Uint8Array<ArrayBuffer>>;
-
-type BodyLike = [FetchBodyInit] extends [never] ? FallbackBodyInit : FetchBodyInit;
-
-type NonNullish = NonNullable<unknown>;
-
-// ----- Contracts -----
-
-interface EndpointDefinition {
-  params: unknown;
-  query: unknown;
-  body?: unknown;
-  headers?: unknown;
-  response: unknown;
-}
-
-interface AdapterRequest<TOptions = unknown> {
-  method: string;
-  url: string;
-  body: BodyLike | undefined;
-  headers: Record<string, string>;
-  options: TOptions | undefined;
-}
-
-interface BodySerializerResult {
-  body: BodyLike | undefined;
-  headers?: Record<string, string>;
-}
-
-type QuerySerializerResult = string | { toString(): string };
-
-// ----- Type-level call signature derivation -----
-
-type RequestField<TKey extends string, TValue> = TValue extends void
-  ? Partial<Record<TKey, never>>
-  : undefined extends TValue
-    ? Partial<Record<TKey, Exclude<TValue, undefined>>>
-    : NonNullish extends TValue
-      ? Partial<Record<TKey, TValue>>
-      : Record<TKey, TValue>;
-
-type RequestBodyField<TValue> = TValue extends void
-  ? { body?: never }
-  : undefined extends TValue
-    ? { body?: Exclude<TValue, undefined> | BodyLike }
-    : NonNullish extends TValue
-      ? { body?: TValue | BodyLike }
-      : { body: TValue | BodyLike };
-
-type HeadersField<TValue> = TValue extends void
-  ? { headers?: Record<string, string> }
-  : undefined extends TValue
-    ? { headers?: Exclude<TValue, undefined> & Record<string, string> }
-    : NonNullish extends TValue
-      ? { headers?: TValue & Record<string, string> }
-      : { headers: TValue & Record<string, string> };
-
-type EndpointHeaders<T extends EndpointDefinition> = T extends { headers: infer H } ? H : void;
-
-type RequestOptions<T extends EndpointDefinition, TOptions> = RequestField<"params", T["params"]> &
-  RequestField<"query", T["query"]> &
-  RequestBodyField<T["body"]> &
-  HeadersField<EndpointHeaders<T>> & {
-    options?: TOptions;
-  };
-
-type HasRequiredOptions<T extends EndpointDefinition> =
-  NonNullish extends RequestOptions<T, unknown> ? false : true;
-
-// ----- Runtime helper -----
-
-interface RuntimeRequestOptions<TOptions> {
-  params?: Record<string, unknown>;
-  query?: Record<string, unknown>;
-  body?: unknown;
-  headers?: Record<string, string>;
-  options?: TOptions;
-}
-
-// ----- Public API -----
-
-export type Adapter<TOptions = unknown> = (request: AdapterRequest<TOptions>) => Promise<unknown>;
-
-export type BodySerializer = (body: unknown) => BodySerializerResult;
-
-export type QuerySerializer = (query: Record<string, unknown>) => QuerySerializerResult;
-
-export type Client<
+/**
+ * Create a typed client for a generated `Endpoints` map.
+ *
+ * The returned function builds normalized adapter requests; the adapter owns
+ * transport, response parsing, auth, retries, and error handling.
+ */
+export function createClient<
   Endpoints extends { [K in keyof Endpoints]: EndpointDefinition },
   TOptions = unknown,
-> = <K extends keyof Endpoints & string>(
-  endpoint: K,
-  ...args: HasRequiredOptions<Endpoints[K]> extends true
-    ? [options: RequestOptions<Endpoints[K], TOptions>]
-    : [options?: RequestOptions<Endpoints[K], TOptions>]
-) => Promise<Endpoints[K]["response"]>;
+>(adapter: Adapter<TOptions>, options?: ClientOptions<TOptions>): Client<Endpoints, TOptions> {
+  const baseURL = (options?.baseURL ?? "").replace(/\/+$/, "");
+  const {
+    headers: defaultHeaders,
+    options: defaultAdapterOptions,
+    serializeBody,
+    serializeQuery,
+  } = options ?? {};
 
-export interface ClientOptions<TOptions = unknown> {
-  /**
-   * Prefix for relative endpoint paths. Trailing slashes are removed.
-   * Absolute `http://` and `https://` endpoint paths bypass this value.
-   */
-  baseURL?: string;
+  const client = async <K extends keyof Endpoints & string>(
+    endpoint: K,
+    ...args: HasRequiredOptions<Endpoints[K]> extends true
+      ? [options: RequestOptions<Endpoints[K], TOptions>]
+      : [options?: RequestOptions<Endpoints[K], TOptions>]
+  ): Promise<SuccessOf<Endpoints[K]>> => {
+    const { method, path } = splitEndpoint(endpoint);
+    const opts = (args[0] ?? {}) as RuntimeRequestOptions<TOptions>;
 
-  /**
-   * Default headers for every request. Header names are lowercased.
-   * Merge order is defaults, body-derived headers, then per-call headers.
-   */
-  headers?: Record<string, string>;
+    const pathWithParams = replacePathParams(path, opts.params);
+    const url = appendQuery(pathWithParams, opts.query, serializeQuery);
+    const { body, headers: bodyHeaders } = buildBody(opts.body, serializeBody);
+    const adapterOptions = mergeAdapterOptions(defaultAdapterOptions, opts.options);
 
-  /**
-   * Default adapter-specific options. Plain objects are shallow-merged with
-   * per-call options; other values are replaced by the per-call value.
-   */
-  options?: TOptions;
+    const result = await adapter({
+      method,
+      url: /^https?:\/\//i.test(url) ? url : baseURL + url,
+      body,
+      headers: mergeHeaders(defaultHeaders, bodyHeaders, opts.headers),
+      options: adapterOptions,
+    });
 
-  /**
-   * Custom body serializer. When set, it receives every defined body and
-   * replaces the default string, passthrough, and JSON handling.
-   */
-  serializeBody?: BodySerializer;
+    return result as SuccessOf<Endpoints[K]>;
+  };
 
-  /**
-   * Custom query serializer. The default skips `null`/`undefined`, keeps
-   * falsy values, and serializes arrays as repeated keys.
-   */
-  serializeQuery?: QuerySerializer;
+  return client;
 }
 
-// ----- Utility functions -----
+// --- internal utilities
 
 function splitEndpoint(endpoint: string): { method: string; path: string } {
   const space = endpoint.indexOf(" ");
@@ -265,44 +165,190 @@ function mergeAdapterOptions<TOptions>(
   return overrides;
 }
 
-// ----- Public API -----
+// --- internal types
 
-export function createClient<
-  Endpoints extends { [K in keyof Endpoints]: EndpointDefinition },
-  TOptions = unknown,
->(adapter: Adapter<TOptions>, options?: ClientOptions<TOptions>): Client<Endpoints, TOptions> {
-  const baseURL = (options?.baseURL ?? "").replace(/\/+$/, "");
-  const {
-    headers: defaultHeaders,
-    options: defaultAdapterOptions,
-    serializeBody,
-    serializeQuery,
-  } = options ?? {};
+type FetchBodyInit = typeof globalThis extends {
+  fetch: (input: never, init?: infer Init) => unknown;
+}
+  ? Init extends { body?: infer B }
+    ? NonNullable<B>
+    : never
+  : never;
 
-  const client = async <K extends keyof Endpoints & string>(
-    endpoint: K,
-    ...args: HasRequiredOptions<Endpoints[K]> extends true
-      ? [options: RequestOptions<Endpoints[K], TOptions>]
-      : [options?: RequestOptions<Endpoints[K], TOptions>]
-  ): Promise<Endpoints[K]["response"]> => {
-    const { method, path } = splitEndpoint(endpoint);
-    const opts = (args[0] ?? {}) as RuntimeRequestOptions<TOptions>;
+type FallbackBodyInit =
+  | string
+  | ArrayBuffer
+  | ArrayBufferView<ArrayBuffer>
+  | Blob
+  | FormData
+  | URLSearchParams
+  | ReadableStream<Uint8Array<ArrayBuffer>>;
 
-    const pathWithParams = replacePathParams(path, opts.params);
-    const url = appendQuery(pathWithParams, opts.query, serializeQuery);
-    const { body, headers: bodyHeaders } = buildBody(opts.body, serializeBody);
-    const adapterOptions = mergeAdapterOptions(defaultAdapterOptions, opts.options);
+type BodyLike = [FetchBodyInit] extends [never] ? FallbackBodyInit : FetchBodyInit;
 
-    const result = await adapter({
-      method,
-      url: /^https?:\/\//i.test(url) ? url : baseURL + url,
-      body,
-      headers: mergeHeaders(defaultHeaders, bodyHeaders, opts.headers),
-      options: adapterOptions,
-    });
+type NonNullish = NonNullable<unknown>;
 
-    return result as Endpoints[K]["response"];
+interface EndpointDefinition {
+  params: unknown;
+  query: unknown;
+  body?: unknown;
+  headers?: unknown;
+  response: unknown;
+}
+
+interface AdapterRequest<TOptions = unknown> {
+  method: string;
+  url: string;
+  body: BodyLike | undefined;
+  headers: Record<string, string>;
+  options: TOptions | undefined;
+}
+
+interface BodySerializerResult {
+  body: BodyLike | undefined;
+  headers?: Record<string, string>;
+}
+
+type QuerySerializerResult = string | { toString(): string };
+
+// `NonNullish extends TValue` means the field type is broad enough to accept
+// any defined value, so callers should not be forced to pass the option.
+type RequestField<TKey extends string, TValue> = TValue extends void
+  ? Partial<Record<TKey, never>>
+  : undefined extends TValue
+    ? Partial<Record<TKey, Exclude<TValue, undefined>>>
+    : NonNullish extends TValue
+      ? Partial<Record<TKey, TValue>>
+      : Record<TKey, TValue>;
+
+type RequestBodyField<TValue> = TValue extends void
+  ? { body?: never }
+  : undefined extends TValue
+    ? { body?: Exclude<TValue, undefined> | BodyLike }
+    : NonNullish extends TValue
+      ? { body?: TValue | BodyLike }
+      : { body: TValue | BodyLike };
+
+type HeadersField<TValue> = TValue extends void
+  ? { headers?: Record<string, string> }
+  : undefined extends TValue
+    ? { headers?: Exclude<TValue, undefined> & Record<string, string> }
+    : NonNullish extends TValue
+      ? { headers?: TValue & Record<string, string> }
+      : { headers: TValue & Record<string, string> };
+
+type EndpointHeaders<T extends EndpointDefinition> = T extends { headers: infer H } ? H : void;
+
+type RequestOptions<T extends EndpointDefinition, TOptions> = RequestField<"params", T["params"]> &
+  RequestField<"query", T["query"]> &
+  RequestBodyField<T["body"]> &
+  HeadersField<EndpointHeaders<T>> & {
+    options?: TOptions;
   };
 
-  return client;
+type HasRequiredOptions<T extends EndpointDefinition> =
+  NonNullish extends RequestOptions<T, unknown> ? false : true;
+
+type ResponseMapOf<T extends { response: unknown }> =
+  T["response"] extends Record<string, unknown> ? T["response"] : never;
+
+type ResponseStatusKey<T extends { response: unknown }> = Extract<
+  keyof ResponseMapOf<T>,
+  `${number}${string}` | "default"
+>;
+
+type SuccessKey<T extends { response: unknown }> = Extract<ResponseStatusKey<T>, `2${string}`>;
+
+type OnlyDefaultKey<T extends { response: unknown }> =
+  Exclude<keyof ResponseMapOf<T>, "default"> extends never
+    ? Extract<keyof ResponseMapOf<T>, "default">
+    : never;
+
+interface RuntimeRequestOptions<TOptions> {
+  params?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+  body?: unknown;
+  headers?: Record<string, string>;
+  options?: TOptions;
+}
+
+// ----- public types -----
+
+/**
+ * Transport hook called with a normalized request.
+ */
+export type Adapter<TOptions = unknown> = (request: AdapterRequest<TOptions>) => Promise<unknown>;
+
+/**
+ * Encode a defined request body and optional body-derived headers.
+ */
+export type BodySerializer = (body: unknown) => BodySerializerResult;
+
+/**
+ * Encode a query object into a query string-like value.
+ */
+export type QuerySerializer = (query: Record<string, unknown>) => QuerySerializerResult;
+
+/**
+ * Extract a response type by exact status key. Missing keys resolve to `unknown`.
+ */
+export type ResultOf<
+  T extends { response: unknown },
+  TStatus extends string = Extract<ResponseStatusKey<T>, string>,
+> =
+  ResponseMapOf<T> extends infer R extends Record<string, unknown>
+    ? TStatus extends keyof R
+      ? R[TStatus]
+      : unknown
+    : unknown;
+
+/**
+ * Extract the client success type: all `2xx` entries, or sole `default`.
+ */
+export type SuccessOf<T extends { response: unknown }> =
+  ResponseMapOf<T> extends infer R extends Record<string, unknown>
+    ? SuccessKey<T> extends never
+      ? [OnlyDefaultKey<T>] extends [never]
+        ? unknown
+        : OnlyDefaultKey<T> extends keyof R
+          ? R[OnlyDefaultKey<T>]
+          : unknown
+      : R[SuccessKey<T>]
+    : unknown;
+
+export type Client<
+  Endpoints extends { [K in keyof Endpoints]: EndpointDefinition },
+  TOptions = unknown,
+> = <K extends keyof Endpoints & string>(
+  endpoint: K,
+  ...args: HasRequiredOptions<Endpoints[K]> extends true
+    ? [options: RequestOptions<Endpoints[K], TOptions>]
+    : [options?: RequestOptions<Endpoints[K], TOptions>]
+) => Promise<SuccessOf<Endpoints[K]>>;
+
+export interface ClientOptions<TOptions = unknown> {
+  /**
+   * Prefix for relative endpoint paths.
+   */
+  baseURL?: string;
+
+  /**
+   * Default headers merged before body-derived and per-call headers.
+   */
+  headers?: Record<string, string>;
+
+  /**
+   * Default adapter options. Plain objects are shallow-merged per call.
+   */
+  options?: TOptions;
+
+  /**
+   * Custom body serializer.
+   */
+  serializeBody?: BodySerializer;
+
+  /**
+   * Custom query serializer.
+   */
+  serializeQuery?: QuerySerializer;
 }

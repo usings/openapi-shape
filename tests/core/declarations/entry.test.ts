@@ -9,11 +9,11 @@ const base: EndpointOperation = {
   path: "/pets",
   tags: [],
   deprecated: false,
-  params: { fields: [] },
-  query: { fields: [] },
-  headers: { fields: [] },
+  params: [],
+  query: [],
+  headers: [],
   body: { kind: "none" },
-  responses: { success: null, errors: [] },
+  responses: [],
 };
 
 describe("entryDocHeader", () => {

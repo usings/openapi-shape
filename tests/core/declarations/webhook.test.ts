@@ -9,10 +9,10 @@ const baseWebhook: WebhookOperation = {
   name: "pet.created",
   tags: [],
   deprecated: false,
-  query: { fields: [] },
-  headers: { fields: [] },
+  query: [],
+  headers: [],
   body: { kind: "none" },
-  responses: { success: null, errors: [] },
+  responses: [],
 };
 
 describe("renderWebhooksInterface: default", () => {
@@ -54,10 +54,10 @@ describe("renderWebhooksInterface: default", () => {
     const out = renderWebhooksInterface([
       {
         ...baseWebhook,
-        responses: { success: { kind: "primitive", name: "boolean" }, errors: [] },
+        responses: [{ status: "200", shape: { kind: "primitive", name: "boolean" } }],
       },
     ]);
-    expect(out).toContain("reply: boolean");
+    expect(out).toContain('reply: { "200": boolean }');
     expect(out).not.toContain("response:");
   });
 
@@ -66,11 +66,9 @@ describe("renderWebhooksInterface: default", () => {
       renderWebhooksInterface([
         {
           ...baseWebhook,
-          query: {
-            fields: [
-              { name: "version", required: false, shape: { kind: "primitive", name: "string" } },
-            ],
-          },
+          query: [
+            { name: "version", required: false, shape: { kind: "primitive", name: "string" } },
+          ],
         },
       ]),
     ).toContain("query: { version?: string }");
@@ -80,11 +78,7 @@ describe("renderWebhooksInterface: default", () => {
     const out = renderWebhooksInterface([
       {
         ...baseWebhook,
-        query: {
-          fields: [
-            { name: "x-trace", required: true, shape: { kind: "primitive", name: "string" } },
-          ],
-        },
+        query: [{ name: "x-trace", required: true, shape: { kind: "primitive", name: "string" } }],
       },
     ]);
     expect(out).toContain('"x-trace": string');
@@ -99,11 +93,9 @@ describe("renderWebhooksInterface: default", () => {
 describe("renderWebhooksInterface: headers option", () => {
   const wh: WebhookOperation = {
     ...baseWebhook,
-    headers: {
-      fields: [
-        { name: "X-Signature", required: true, shape: { kind: "primitive", name: "string" } },
-      ],
-    },
+    headers: [
+      { name: "X-Signature", required: true, shape: { kind: "primitive", name: "string" } },
+    ],
   };
   it("omits headers field by default", () => {
     expect(renderWebhooksInterface([wh])).not.toContain("headers:");
@@ -115,28 +107,20 @@ describe("renderWebhooksInterface: headers option", () => {
   });
 });
 
-describe("renderWebhooksInterface: errors option", () => {
-  const wh: WebhookOperation = {
-    ...baseWebhook,
-    responses: {
-      success: { kind: "primitive", name: "boolean" },
-      errors: [
-        {
-          status: "400",
-          shape: { kind: "schema", schema: { $ref: "#/components/schemas/BadRequest" } },
-        },
-      ],
-    },
-  };
-  it("omits errors field by default", () => {
-    expect(renderWebhooksInterface([wh])).not.toContain("errors:");
-  });
-  it("emits errors field when option is true", () => {
-    expect(renderWebhooksInterface([wh], { errors: true })).toContain(
-      'errors: { "400": Schemas.BadRequest }',
-    );
-  });
-  it("omits errors field when no error responses", () => {
-    expect(renderWebhooksInterface([baseWebhook], { errors: true })).not.toContain("errors:");
+describe("renderWebhooksInterface: reply map", () => {
+  it("emits every declared response keyed by status", () => {
+    const out = renderWebhooksInterface([
+      {
+        ...baseWebhook,
+        responses: [
+          { status: "200", shape: { kind: "primitive", name: "boolean" } },
+          {
+            status: "400",
+            shape: { kind: "schema", schema: { $ref: "#/components/schemas/BadRequest" } },
+          },
+        ],
+      },
+    ]);
+    expect(out).toContain('reply: { "200": boolean; "400": Schemas.BadRequest }');
   });
 });

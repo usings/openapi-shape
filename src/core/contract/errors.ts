@@ -1,3 +1,4 @@
+/** Error raised while reading, parsing, normalizing, or preparing an OpenAPI document. */
 export class LoadError extends Error {
   constructor(message: string) {
     super(message);
@@ -5,6 +6,7 @@ export class LoadError extends Error {
   }
 }
 
+/** Error raised after preparation, while converting a document into the contract IR. */
 export class BuildError extends Error {
   constructor(message: string) {
     super(message);

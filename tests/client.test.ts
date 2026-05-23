@@ -1,43 +1,43 @@
 import { describe, expect, it, vi } from "vitest";
 import { createClient } from "../src/client";
-import type { Adapter, Client } from "../src/client";
+import type { Adapter, Client, ResultOf, SuccessOf } from "../src/client";
 
 interface TestAPI {
   "GET /pets": {
     params: void;
     query: { limit?: number };
     body: void;
-    response: Array<{ id: number; name: string }>;
+    response: { "200": Array<{ id: number; name: string }> };
   };
   "POST /pets": {
     params: void;
     query: void;
     body: { name: string };
-    response: { id: number };
+    response: { "200": { id: number } };
   };
   "GET /pets/{petId}": {
     params: { petId: string };
     query: void;
     body: void;
-    response: { id: number; name: string };
+    response: { "200": { id: number; name: string } };
   };
   "DELETE /pets/{petId}/tags/{tagId}": {
     params: { petId: string; tagId: string };
     query: void;
     body: void;
-    response: void;
+    response: { "200": void };
   };
   "GET /search": {
     params: void;
     query: { q: string; page?: number };
     body: void;
-    response: string[];
+    response: { "200": string[] };
   };
   "POST /upload": {
     params: void;
     query: void;
     body: { file: Blob; name: string };
-    response: { url: string };
+    response: { "200": { url: string } };
   };
 }
 
@@ -63,7 +63,7 @@ describe("createClient", () => {
         params: void;
         query: void;
         body: void;
-        response: void;
+        response: { "200": void };
       };
     }>(adapter);
 
@@ -152,7 +152,7 @@ describe("createClient", () => {
         params: { id: string };
         query: void;
         body: void;
-        response: void;
+        response: { "200": void };
       };
     }>(adapter);
 
@@ -169,7 +169,7 @@ describe("createClient", () => {
         params: { petId: number };
         query: void;
         body: void;
-        response: void;
+        response: { "200": void };
       };
     }>(adapter);
 
@@ -186,7 +186,7 @@ describe("createClient", () => {
         params: { petId: string };
         query: void;
         body: void;
-        response: void;
+        response: { "200": void };
       };
     }>(adapter);
 
@@ -301,7 +301,7 @@ describe("createClient", () => {
         params: void;
         query: void;
         body: string;
-        response: void;
+        response: { "200": void };
       };
     }>(adapter);
 
@@ -351,34 +351,17 @@ describe("createClient", () => {
     expect(result).toStrictEqual([{ id: 1, name: "Buddy" }]);
   });
 
-  it("supports baseURL option", async () => {
+  it.each([
+    ["https://api.example.com"],
+    ["https://api.example.com/"],
+    ["https://api.example.com///"],
+  ])("prepends baseURL %s and strips trailing slashes", async (baseURL) => {
     const adapter = vi.fn<Adapter>().mockResolvedValue([]);
-    const api = createClient<TestAPI>(adapter, { baseURL: "https://api.example.com" });
+    const api = createClient<TestAPI>(adapter, { baseURL });
 
     await api("GET /pets");
 
-    const call = adapter.mock.calls[0][0];
-    expect(call.url).toBe("https://api.example.com/pets");
-  });
-
-  it("strips trailing slash from baseURL to avoid double slashes", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
-    const api = createClient<TestAPI>(adapter, { baseURL: "https://api.example.com/" });
-
-    await api("GET /pets");
-
-    const call = adapter.mock.calls[0][0];
-    expect(call.url).toBe("https://api.example.com/pets");
-  });
-
-  it("strips multiple trailing slashes from baseURL", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([]);
-    const api = createClient<TestAPI>(adapter, { baseURL: "https://api.example.com///" });
-
-    await api("GET /pets");
-
-    const call = adapter.mock.calls[0][0];
-    expect(call.url).toBe("https://api.example.com/pets");
+    expect(adapter.mock.calls[0][0].url).toBe("https://api.example.com/pets");
   });
 
   it("bypasses baseURL when endpoint path is an absolute URL", async () => {
@@ -388,7 +371,7 @@ describe("createClient", () => {
         params: void;
         query: { token: string };
         body: void;
-        response: void;
+        response: { "200": void };
       };
     }>(adapter, { baseURL: "https://api.example.com" });
 
@@ -417,7 +400,7 @@ describe("createClient", () => {
         params: void;
         query: { q: string };
         body: void;
-        response: string[];
+        response: { "200": string[] };
       };
     }>(adapter);
 
@@ -434,7 +417,7 @@ describe("createClient", () => {
         params: void;
         query: { q: string };
         body: void;
-        response: string[];
+        response: { "200": string[] };
       };
     }>(adapter);
 
@@ -539,56 +522,46 @@ describe("createClient", () => {
     expect(adapter).not.toHaveBeenCalled();
   });
 
-  it("passes per-call options through to the adapter", async () => {
-    interface CustomOptions {
-      timeout?: number;
-      tag?: string;
-    }
-    const adapter = vi.fn<Adapter<CustomOptions>>().mockResolvedValue([]);
-    const api = createClient<TestAPI, CustomOptions>(adapter);
+  interface AdapterOptions {
+    timeout?: number;
+    tag?: string;
+    retry?: number;
+  }
 
-    await api("GET /pets", {
-      query: { limit: 5 },
-      options: { timeout: 5000, tag: "v1" },
-    });
+  it.each<{
+    name: string;
+    defaults: AdapterOptions | undefined;
+    perCall: AdapterOptions | undefined;
+    expected: AdapterOptions | undefined;
+  }>([
+    {
+      name: "per-call only",
+      defaults: undefined,
+      perCall: { timeout: 5000, tag: "v1" },
+      expected: { timeout: 5000, tag: "v1" },
+    },
+    {
+      name: "defaults only",
+      defaults: { timeout: 5000, tag: "default" },
+      perCall: undefined,
+      expected: { timeout: 5000, tag: "default" },
+    },
+    {
+      name: "per-call merged on top of defaults",
+      defaults: { timeout: 5000, tag: "default" },
+      perCall: { tag: "call", retry: 2 },
+      expected: { timeout: 5000, tag: "call", retry: 2 },
+    },
+  ])("plain-object adapter options: $name", async ({ defaults, perCall, expected }) => {
+    const adapter = vi.fn<Adapter<AdapterOptions>>().mockResolvedValue([]);
+    const api = createClient<TestAPI, AdapterOptions>(
+      adapter,
+      defaults ? { options: defaults } : undefined,
+    );
 
-    const call = adapter.mock.calls[0][0];
-    expect(call.options).toStrictEqual({ timeout: 5000, tag: "v1" });
-  });
+    await api("GET /pets", perCall ? { options: perCall } : undefined);
 
-  it("passes default options through to the adapter", async () => {
-    interface CustomOptions {
-      timeout?: number;
-      tag?: string;
-    }
-    const adapter = vi.fn<Adapter<CustomOptions>>().mockResolvedValue([]);
-    const api = createClient<TestAPI, CustomOptions>(adapter, {
-      options: { timeout: 5000, tag: "default" },
-    });
-
-    await api("GET /pets");
-
-    const call = adapter.mock.calls[0][0];
-    expect(call.options).toStrictEqual({ timeout: 5000, tag: "default" });
-  });
-
-  it("merges per-call options on top of default options", async () => {
-    interface CustomOptions {
-      timeout?: number;
-      tag?: string;
-      retry?: number;
-    }
-    const adapter = vi.fn<Adapter<CustomOptions>>().mockResolvedValue([]);
-    const api = createClient<TestAPI, CustomOptions>(adapter, {
-      options: { timeout: 5000, tag: "default" },
-    });
-
-    await api("GET /pets", {
-      options: { tag: "call", retry: 2 },
-    });
-
-    const call = adapter.mock.calls[0][0];
-    expect(call.options).toStrictEqual({ timeout: 5000, tag: "call", retry: 2 });
+    expect(adapter.mock.calls[0][0].options).toStrictEqual(expected);
   });
 
   it("uses per-call options when options are not objects", async () => {
@@ -627,7 +600,7 @@ describe("createClient body optionality (type-level)", () => {
       params: void;
       query: void;
       body?: { name: string };
-      response: void;
+      response: { "200": void };
     };
   }
   interface ReqAPI {
@@ -635,7 +608,7 @@ describe("createClient body optionality (type-level)", () => {
       params: void;
       query: void;
       body: { name: string };
-      response: void;
+      response: { "200": void };
     };
   }
   interface NoBodyAPI {
@@ -643,7 +616,7 @@ describe("createClient body optionality (type-level)", () => {
       params: void;
       query: void;
       body: void;
-      response: void;
+      response: { "200": void };
     };
   }
 
@@ -676,3 +649,115 @@ describe("createClient body optionality (type-level)", () => {
     expect(adapter).toBeDefined();
   });
 });
+
+describe("createClient response inference (type-level)", () => {
+  it("uses default response when no 2xx response is declared", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ message: "ok" });
+    const api = createClient<{
+      "GET /fallback": {
+        params: void;
+        query: void;
+        body: void;
+        response: {
+          default: { message: string };
+        };
+      };
+    }>(adapter);
+
+    const result = await api("GET /fallback");
+    const typed: { message: string } = result;
+
+    expect(typed).toStrictEqual({ message: "ok" });
+  });
+
+  it("prefers 2xx responses over default response", async () => {
+    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1 });
+    const api = createClient<{
+      "GET /fallback": {
+        params: void;
+        query: void;
+        body: void;
+        response: {
+          "200": { id: number };
+          default: { message: string };
+        };
+      };
+    }>(adapter);
+
+    const result = await api("GET /fallback");
+    const typed: { id: number } = result;
+
+    expect(typed).toStrictEqual({ id: 1 });
+  });
+});
+
+describe("client response helper types", () => {
+  interface Endpoint {
+    params: void;
+    query: void;
+    body: void;
+    response: {
+      "200": { ok: true };
+      "201": { created: true };
+      "400": { badRequest: true };
+      "4XX": { clientError: true };
+      "500": { serverError: true };
+      "5XX": { serverFamily: true };
+      default: { fallback: true };
+    };
+  }
+
+  it("ResultOf extracts a response by exact status", () => {
+    const result: ResultOf<Endpoint, "201"> = { created: true };
+
+    expect(result).toStrictEqual({ created: true });
+  });
+
+  it("SuccessOf extracts all 2xx responses", () => {
+    const result: SuccessOf<Endpoint> = { ok: true };
+    const created: SuccessOf<Endpoint> = { created: true };
+
+    expect(result).toStrictEqual({ ok: true });
+    expect(created).toStrictEqual({ created: true });
+  });
+
+  it("SuccessOf falls back to default only when it is the sole response", () => {
+    interface DefaultOnlyEndpoint {
+      params: void;
+      query: void;
+      body: void;
+      response: {
+        default: { fallback: true };
+      };
+    }
+    interface DefaultAndErrorEndpoint {
+      params: void;
+      query: void;
+      body: void;
+      response: {
+        "400": { badRequest: true };
+        default: { fallback: true };
+      };
+    }
+
+    const fallback: SuccessOf<DefaultOnlyEndpoint> = { fallback: true };
+    const unknownSuccess = unknownValue() as SuccessOf<DefaultAndErrorEndpoint>;
+    // @ts-expect-error: default is not a success fallback when other responses exist
+    unknownSuccess satisfies { fallback: true };
+
+    expect(fallback).toStrictEqual({ fallback: true });
+    expect(unknownSuccess).toBeUndefined();
+  });
+
+  it("ResultOf extracts exact 4xx/5xx responses", () => {
+    const badRequest: ResultOf<Endpoint, "400"> = { badRequest: true };
+    const serverError: ResultOf<Endpoint, "500"> = { serverError: true };
+
+    expect(badRequest).toStrictEqual({ badRequest: true });
+    expect(serverError).toStrictEqual({ serverError: true });
+  });
+});
+
+function unknownValue(): unknown {
+  return undefined;
+}

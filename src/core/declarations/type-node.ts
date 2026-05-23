@@ -5,25 +5,53 @@ import { objectIndexSchemas } from "../contract/shapes";
 import { safeIdentifier } from "../shared/naming";
 import type { DeclarationOptions } from "./options";
 
+/**
+ * Renderer-friendly TypeScript type AST.
+ *
+ * This is the declaration layer's IR: schemas are converted into `TypeNode`
+ * values first, then rendered to TypeScript source with formatting rules.
+ */
 export type TypeNode =
+  /** TypeScript primitive or built-in name emitted verbatim. */
   | { kind: "primitive"; name: PrimitiveName }
+  /** String, number, boolean, or null literal type. */
   | { kind: "literal"; value: string | number | boolean | null }
+  /** Reference to a named schema. Renderers may prepend a namespace prefix. */
   | { kind: "ref"; name: string }
+  /** Homogeneous array type. */
   | { kind: "array"; items: TypeNode }
+  /** Tuple type, optionally with a rest item type. */
   | { kind: "tuple"; items: TypeNode[]; rest: TypeNode | null }
+  /** Object literal type with declared fields and an optional string index signature. */
   | { kind: "object"; fields: TypeField[]; index: TypeNode | null }
+  /** `Record<string, T>` object shape used when an object has no declared properties. */
   | { kind: "record"; values: TypeNode }
+  /** TypeScript union. Empty source unions are normalized to `never` before this node. */
   | { kind: "union"; members: TypeNode[] }
+  /** TypeScript intersection, primarily from OpenAPI `allOf`. */
   | { kind: "intersection"; members: TypeNode[] }
+  /** Raw TypeScript supplied by options, such as custom `format` mappings. */
   | { kind: "raw"; text: string };
 
+/** Object field in a rendered object or interface type. */
 export interface TypeField {
+  /** Original property name before TypeScript key escaping. */
   name: string;
+  /** Whether the property is required. */
   required: boolean;
+  /** Property value type. */
   type: TypeNode;
+  /** Documentation copied from the source schema property. */
   docs?: DocBlock;
 }
 
+/**
+ * Convert a supported OpenAPI schema into the declaration type AST.
+ *
+ * Unknown, empty, or unsupported schema shapes become `unknown`; empty enums and
+ * empty unions become `never`; `allOf` becomes an intersection; `oneOf` and
+ * `anyOf` become deduplicated unions.
+ */
 export function schemaToTypeNode(
   schema: OpenAPISchema | undefined,
   options: DeclarationOptions,
@@ -62,6 +90,7 @@ export function schemaToTypeNode(
   return convertSingleType(schema, options);
 }
 
+/** Create a primitive TypeNode. */
 export function primitiveNode(name: PrimitiveName): TypeNode {
   return { kind: "primitive", name };
 }
@@ -156,6 +185,12 @@ function objectToNode(schema: OpenAPISchema, options: DeclarationOptions): TypeN
   return { kind: "object", fields, index };
 }
 
+/**
+ * Convert object index-signature sources into a TypeNode.
+ *
+ * `patternProperties` and schema-valued `additionalProperties` are collected by
+ * `objectIndexSchemas`; multiple value schemas become a union.
+ */
 export function objectIndexNode(
   schema: OpenAPISchema,
   options: DeclarationOptions,

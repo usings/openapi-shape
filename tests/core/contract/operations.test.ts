@@ -63,7 +63,7 @@ describe("contract: params", () => {
         },
       },
     });
-    expect(endpointOperations(contract)[0].params.fields).toStrictEqual([
+    expect(endpointOperations(contract)[0].params).toStrictEqual([
       { name: "id", required: true, shape: { kind: "primitive", name: "string" }, docs: undefined },
     ]);
   });
@@ -82,7 +82,7 @@ describe("contract: params", () => {
         },
       },
     });
-    expect(endpointOperations(contract)[0].query.fields).toStrictEqual([
+    expect(endpointOperations(contract)[0].query).toStrictEqual([
       {
         name: "limit",
         required: true,
@@ -110,7 +110,7 @@ describe("contract: params", () => {
         },
       },
     });
-    expect(endpointOperations(contract)[0].query.fields[0]).toStrictEqual({
+    expect(endpointOperations(contract)[0].query[0]).toStrictEqual({
       name: "q",
       required: true,
       shape: { kind: "schema", schema: { type: "integer" } },
@@ -183,93 +183,15 @@ describe("contract: body", () => {
   });
 });
 
-describe("contract: success response", () => {
-  it("2xx json", () => {
+describe("contract: response map", () => {
+  it("emits one entry per declared status, preserving OpenAPI order", () => {
     const contract = buildContract({
       paths: {
         "/p": {
           get: {
             responses: {
               "200": { content: { "application/json": { schema: { type: "string" } } } },
-            },
-          },
-        },
-      },
-    });
-    expect(endpointOperations(contract)[0].responses.success).toStrictEqual({
-      kind: "schema",
-      schema: { type: "string" },
-    });
-    expect(endpointOperations(contract)[0].responses.successStatus).toBe("200");
-    expect(endpointOperations(contract)[0].responses.successContentType).toBe("application/json");
-  });
-
-  it("status order matters: 200 binary wins over 201 json", () => {
-    const contract = buildContract({
-      paths: {
-        "/p": {
-          get: {
-            responses: {
-              "200": { content: { "application/octet-stream": {} } },
-              "201": { content: { "application/json": { schema: { type: "string" } } } },
-            },
-          },
-        },
-      },
-    });
-    expect(endpointOperations(contract)[0].responses.success).toStrictEqual({
-      kind: "primitive",
-      name: "Blob",
-    });
-  });
-
-  it("2xx no-content → void", () => {
-    const contract = buildContract({
-      paths: { "/p": { delete: { responses: { "204": { description: "ok" } } } } },
-    });
-    expect(endpointOperations(contract)[0].responses.success).toStrictEqual({
-      kind: "primitive",
-      name: "void",
-    });
-  });
-
-  it("falls back to default when no 2xx", () => {
-    const contract = buildContract({
-      paths: {
-        "/p": {
-          get: {
-            responses: {
-              default: { content: { "application/json": { schema: { type: "string" } } } },
-            },
-          },
-        },
-      },
-    });
-    expect(endpointOperations(contract)[0].responses.success).toStrictEqual({
-      kind: "schema",
-      schema: { type: "string" },
-    });
-  });
-
-  it("null when nothing matches", () => {
-    const contract = buildContract({ paths: { "/p": { get: { responses: {} } } } });
-    expect(endpointOperations(contract)[0].responses.success).toBeNull();
-  });
-});
-
-describe("contract: error collection", () => {
-  it("collects 4xx/5xx + 4XX/5XX, skips default, skips no-content", () => {
-    const contract = buildContract({
-      paths: {
-        "/p": {
-          get: {
-            responses: {
-              "200": { content: { "application/json": { schema: { type: "string" } } } },
-              "400": {
-                content: { "application/json": { schema: { $ref: "#/components/schemas/V" } } },
-              },
-              "4XX": { content: { "application/json": { schema: { type: "string" } } } },
-              "500": { content: { "application/json": { schema: { type: "string" } } } },
+              "400": { content: { "application/json": { schema: { type: "string" } } } },
               "5XX": { description: "no content" },
               default: { content: { "application/json": { schema: { type: "string" } } } },
             },
@@ -277,15 +199,65 @@ describe("contract: error collection", () => {
         },
       },
     });
-    expect(endpointOperations(contract)[0].responses.errors.map((e) => e.status)).toStrictEqual([
+    expect(endpointOperations(contract)[0].responses.map((r) => r.status)).toStrictEqual([
+      "200",
       "400",
-      "4XX",
-      "500",
+      "5XX",
+      "default",
     ]);
-    expect(endpointOperations(contract)[0].responses.errors[0]).toMatchObject({
-      contentType: "application/json",
-      source: { location: "/responses/400" },
+  });
+
+  it("picks JSON content type and records it on the entry", () => {
+    const contract = buildContract({
+      paths: {
+        "/p": {
+          get: {
+            responses: {
+              "200": { content: { "application/json": { schema: { type: "string" } } } },
+            },
+          },
+        },
+      },
     });
+    expect(endpointOperations(contract)[0].responses[0]).toStrictEqual({
+      status: "200",
+      shape: { kind: "schema", schema: { type: "string" } },
+      contentType: "application/json",
+      source: { location: "/responses/200" },
+    });
+  });
+
+  it("binary content type produces a Blob shape", () => {
+    const contract = buildContract({
+      paths: {
+        "/p": {
+          get: {
+            responses: {
+              "200": { content: { "application/octet-stream": {} } },
+            },
+          },
+        },
+      },
+    });
+    expect(endpointOperations(contract)[0].responses[0].shape).toStrictEqual({
+      kind: "primitive",
+      name: "Blob",
+    });
+  });
+
+  it("no-content response becomes a void shape", () => {
+    const contract = buildContract({
+      paths: { "/p": { delete: { responses: { "204": { description: "ok" } } } } },
+    });
+    expect(endpointOperations(contract)[0].responses[0].shape).toStrictEqual({
+      kind: "primitive",
+      name: "void",
+    });
+  });
+
+  it("empty responses map produces an empty entry list", () => {
+    const contract = buildContract({ paths: { "/p": { get: { responses: {} } } } });
+    expect(endpointOperations(contract)[0].responses).toStrictEqual([]);
   });
 });
 
@@ -338,9 +310,9 @@ describe("contract: webhooks", () => {
       required: true,
       shape: { kind: "schema", schema: { type: "string" } },
     });
-    expect(webhookOperations(contract)[0].responses.success).toStrictEqual({
-      kind: "schema",
-      schema: { type: "boolean" },
+    expect(webhookOperations(contract)[0].responses[0]).toMatchObject({
+      status: "200",
+      shape: { kind: "schema", schema: { type: "boolean" } },
     });
   });
 

@@ -2,16 +2,40 @@ import { isObject } from "../shared/object";
 import { LoadError } from "./errors";
 import type { OpenAPIDocument, OpenAPISchema } from "./openapi";
 
+/**
+ * A discriminator literal that should be injected into a component schema.
+ *
+ * Each injection is discovered from one branch of a `oneOf` or `anyOf` schema
+ * that declares an OpenAPI discriminator.
+ */
 export interface Injection {
+  /** Component schema name targeted by the discriminator branch. */
   schemaName: string;
+  /** Discriminator property name to require on the target schema. */
   propertyName: string;
+  /** String literal value expected for this branch. */
   value: string;
+  /** Location of the branch that produced the injection, used in diagnostics. */
   sourceLocation: string;
 }
 
 type ReducedInjection = Pick<Injection, "value" | "sourceLocation">;
+
+/**
+ * Discriminator injections grouped by schema name and property name.
+ *
+ * The outer key is a component schema name; the inner key is the discriminator
+ * property to inject into that schema.
+ */
 export type SchemaInjections = Map<string, Map<string, ReducedInjection>>;
 
+/**
+ * Discover, validate, and apply discriminator literal properties to schemas.
+ *
+ * OpenAPI discriminators identify branches externally. TypeScript unions narrow
+ * better when each branch schema carries a required string literal property, so
+ * this preparation step materializes those literals before contract building.
+ */
 export function injectDiscriminators(doc: OpenAPIDocument): OpenAPIDocument {
   return applyInjections(doc, reduceInjections(discoverInjections(doc)));
 }

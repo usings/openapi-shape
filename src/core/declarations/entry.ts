@@ -2,8 +2,8 @@ import type {
   ContractPayload,
   ContractShape,
   ContractOperation,
-  ErrorResponse,
-  ContractFields,
+  ContractOutcome,
+  ContractField,
 } from "../contract/contract";
 import { safeKey } from "../shared/naming";
 import { indent, indentContinuation, jsdoc } from "./format";
@@ -23,16 +23,16 @@ export function entryDocHeader(entry: ContractOperation): string {
   );
 }
 
-export function renderParam(group: ContractFields, options: RenderTypeNodeOptions = {}): string {
-  if (group.fields.length === 0) return "void";
-  const hasDocs = group.fields.some((f) => f.docs?.description || f.docs?.deprecated);
+export function renderParam(fields: ContractField[], options: RenderTypeNodeOptions = {}): string {
+  if (fields.length === 0) return "void";
+  const hasDocs = fields.some((f) => f.docs?.description || f.docs?.deprecated);
   const renderOptions = { ...options, ...schemaRefOptions };
   const renderField = (f: { name: string; required: boolean; shape: ContractShape }) => {
     const opt = f.required ? "" : "?";
     return `${safeKey(f.name)}${opt}: ${renderTypeNode(shapeToTypeNode(f.shape, renderOptions), renderOptions)}`;
   };
-  if (!hasDocs) return `{ ${group.fields.map(renderField).join("; ")} }`;
-  const body = group.fields.map((f) => `${jsdoc(f.docs ?? {})}${renderField(f)}`).join("\n");
+  if (!hasDocs) return `{ ${fields.map((f) => renderField(f)).join("; ")} }`;
+  const body = fields.map((f) => `${jsdoc(f.docs ?? {})}${renderField(f)}`).join("\n");
   return `{\n${indent(body)}\n}`;
 }
 
@@ -50,19 +50,15 @@ export function renderBody(
   return body.required ? `${key}: ${t}` : `${key}?: ${t}`;
 }
 
-export function renderResponse(
-  success: ContractShape | null,
+export function renderResponseMap(
+  responses: ContractOutcome[],
   options: RenderTypeNodeOptions = {},
 ): string {
-  if (!success) return "unknown";
+  if (responses.length === 0) return "unknown";
   const renderOptions = { ...options, ...schemaRefOptions };
-  return indentContinuation(
-    renderTypeNode(shapeToTypeNode(success, renderOptions), renderOptions),
-    "    ",
+  const entries = responses.map(
+    (r) =>
+      `"${r.status}": ${renderTypeNode(shapeToTypeNode(r.shape, renderOptions), renderOptions)}`,
   );
-}
-
-export function renderErrors(errors: ErrorResponse[], options: RenderTypeNodeOptions = {}): string {
-  const renderOptions = { ...options, ...schemaRefOptions };
-  return `{ ${errors.map((e) => `"${e.status}": ${renderTypeNode(shapeToTypeNode(e.shape, renderOptions), renderOptions)}`).join("; ")} }`;
+  return `{ ${entries.join("; ")} }`;
 }

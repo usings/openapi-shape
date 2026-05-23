@@ -13,16 +13,41 @@ import { HTTP_METHODS } from "./openapi";
 
 // A separate read-only walk lives in `discriminators.ts`; see docs/adr/0001 for why they
 // aren't unified.
+/**
+ * Schema transformation callback used by document mapping helpers.
+ *
+ * Return the same schema object to preserve identity, or a replacement schema to
+ * trigger structural sharing up the document tree.
+ */
 export type SchemaMapper = (schema: OpenAPISchema) => OpenAPISchema;
 
+/**
+ * Visitor hooks for shallow OpenAPI document nodes.
+ *
+ * Hook locations are JSON Pointer-like strings for diagnostics. When a hook
+ * returns an object with `$ref`, child traversal stops for that node so unresolved
+ * references are not treated as concrete objects.
+ */
 export interface DocumentVisitor {
+  /** Visit path item objects in `paths`, `webhooks`, and `components.pathItems`. */
   pathItem?: (item: PathItem, location: string) => PathItem;
+  /** Visit parameter objects before their schema child is visited. */
   parameter?: (param: Parameter, location: string) => Parameter;
+  /** Visit request body objects before content schemas are visited. */
   requestBody?: (body: RequestBody, location: string) => RequestBody;
+  /** Visit response objects before content schemas are visited. */
   response?: (resp: Response, location: string) => Response;
+  /** Visit schema objects reachable through supported document locations. */
   schema?: (schema: OpenAPISchema, location: string) => OpenAPISchema;
 }
 
+/**
+ * Map supported OpenAPI document nodes with structural sharing.
+ *
+ * The original object graph is reused when all visitors return the same objects.
+ * Components, `paths`, and `webhooks` are walked; schema recursion is shallow
+ * unless callers use `mapDocumentSchemas`.
+ */
 export function mapDocument(doc: OpenAPIDocument, visitor: DocumentVisitor): OpenAPIDocument {
   let out = doc;
   if (doc.components) {
@@ -40,6 +65,13 @@ export function mapDocument(doc: OpenAPIDocument, visitor: DocumentVisitor): Ope
   return out;
 }
 
+/**
+ * Deep-map every supported schema in the document.
+ *
+ * `$ref` schema objects are left untouched. For non-ref schemas, nested
+ * `properties`, `items`, `prefixItems`, `additionalProperties`, `oneOf`,
+ * `anyOf`, and `allOf` schemas are mapped before the parent schema callback.
+ */
 export function mapDocumentSchemas(doc: OpenAPIDocument, mapSchema: SchemaMapper): OpenAPIDocument {
   return mapDocument(doc, {
     schema: (s) => mapSchemaDeep(s, mapSchema),

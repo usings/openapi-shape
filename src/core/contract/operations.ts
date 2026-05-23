@@ -1,5 +1,5 @@
 import { escapePointerSegment } from "../shared/pointer";
-import type { ContractOperation, ContractFields, ContractPayload, DocBlock } from "./contract";
+import type { ContractOperation, ContractField, ContractPayload, DocBlock } from "./contract";
 import { BuildError } from "./errors";
 import type {
   OpenAPIDocument,
@@ -76,43 +76,37 @@ function mergeParameters(a: Parameter[], b: Parameter[]): Parameter[] {
   return [...seen.values()];
 }
 
-function buildParams(parameters: Parameter[]): ContractFields {
-  return {
-    fields: parameters
-      .filter((p) => p.in === "path")
-      .map((p) => ({
-        name: p.name as string,
-        required: true,
-        shape: { kind: "primitive", name: "string" } as const,
-        docs: docBlockFromParameter(p),
-      })),
-  };
+function buildParams(parameters: Parameter[]): ContractField[] {
+  return parameters
+    .filter((p) => p.in === "path")
+    .map((p) => ({
+      name: p.name as string,
+      required: true,
+      shape: { kind: "primitive", name: "string" } as const,
+      docs: docBlockFromParameter(p),
+    }));
 }
 
-function buildQuery(parameters: Parameter[]): ContractFields {
-  return {
-    fields: parameters
-      .filter((p) => p.in === "query")
-      .map((p) => ({
-        name: p.name as string,
-        required: p.required === true,
-        shape: schemaShape(p.schema),
-        docs: docBlockFromParameter(p),
-      })),
-  };
+function buildQuery(parameters: Parameter[]): ContractField[] {
+  return parameters
+    .filter((p) => p.in === "query")
+    .map((p) => ({
+      name: p.name as string,
+      required: p.required === true,
+      shape: schemaShape(p.schema),
+      docs: docBlockFromParameter(p),
+    }));
 }
 
-function buildHeaders(parameters: Parameter[]): ContractFields {
-  return {
-    fields: parameters
-      .filter((p) => p.in === "header")
-      .map((p) => ({
-        name: p.name as string,
-        required: p.required === true,
-        shape: { kind: "primitive", name: "string" },
-        docs: docBlockFromParameter(p),
-      })),
-  };
+function buildHeaders(parameters: Parameter[]): ContractField[] {
+  return parameters
+    .filter((p) => p.in === "header")
+    .map((p) => ({
+      name: p.name as string,
+      required: p.required === true,
+      shape: { kind: "primitive", name: "string" },
+      docs: docBlockFromParameter(p),
+    }));
 }
 
 function buildBody(rb: RequestBody | undefined): ContractPayload {

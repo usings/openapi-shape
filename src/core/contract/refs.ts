@@ -20,6 +20,16 @@ interface BucketTypes {
   responses: Response;
 }
 
+/**
+ * Resolve supported component references in an OpenAPI document.
+ *
+ * This intentionally resolves only path item, parameter, request body, and
+ * response refs. Schema refs are preserved so declaration rendering can emit
+ * named schema references instead of inlining component schemas.
+ *
+ * Throws `LoadError` for wrong component buckets, missing refs, and circular ref
+ * chains.
+ */
 export function resolveRefs(doc: OpenAPIDocument): OpenAPIDocument {
   const resolver = new RefResolver(doc);
   return mapDocument(doc, {

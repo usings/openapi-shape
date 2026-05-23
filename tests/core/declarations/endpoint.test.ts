@@ -9,15 +9,15 @@ const baseEndpoint: EndpointOperation = {
   path: "/pets",
   tags: [],
   deprecated: false,
-  params: { fields: [] },
-  query: { fields: [] },
-  headers: { fields: [] },
+  params: [],
+  query: [],
+  headers: [],
   body: { kind: "none" },
-  responses: { success: null, errors: [] },
+  responses: [],
 };
 
 describe("renderEndpointsInterface: default", () => {
-  it("void params/query/body, unknown response when empty", () => {
+  it("void params/query/body, unknown response when no responses declared", () => {
     expect(renderEndpointsInterface([baseEndpoint])).toBe(
       `export interface Endpoints {\n  "GET /pets": {\n    params: void\n    query: void\n    body: void\n    response: unknown\n  }\n}`,
     );
@@ -28,12 +28,8 @@ describe("renderEndpointsInterface: default", () => {
       renderEndpointsInterface([
         {
           ...baseEndpoint,
-          query: {
-            fields: [
-              { name: "limit", required: false, shape: { kind: "primitive", name: "number" } },
-            ],
-          },
-          responses: { success: { kind: "primitive", name: "string" }, errors: [] },
+          query: [{ name: "limit", required: false, shape: { kind: "primitive", name: "number" } }],
+          responses: [{ status: "200", shape: { kind: "primitive", name: "string" } }],
         },
       ]),
     ).toContain("query: { limit?: number }");
@@ -43,13 +39,11 @@ describe("renderEndpointsInterface: default", () => {
     const out = renderEndpointsInterface([
       {
         ...baseEndpoint,
-        query: {
-          fields: [
-            { name: "user-id", required: false, shape: { kind: "primitive", name: "string" } },
-            { name: "x-request-id", required: true, shape: { kind: "primitive", name: "string" } },
-          ],
-        },
-        responses: { success: { kind: "primitive", name: "string" }, errors: [] },
+        query: [
+          { name: "user-id", required: false, shape: { kind: "primitive", name: "string" } },
+          { name: "x-request-id", required: true, shape: { kind: "primitive", name: "string" } },
+        ],
+        responses: [{ status: "200", shape: { kind: "primitive", name: "string" } }],
       },
     ]);
     expect(out).toContain('"user-id"?: string');
@@ -60,12 +54,8 @@ describe("renderEndpointsInterface: default", () => {
     const out = renderEndpointsInterface([
       {
         ...baseEndpoint,
-        params: {
-          fields: [
-            { name: "user-id", required: true, shape: { kind: "primitive", name: "string" } },
-          ],
-        },
-        responses: { success: { kind: "primitive", name: "string" }, errors: [] },
+        params: [{ name: "user-id", required: true, shape: { kind: "primitive", name: "string" } }],
+        responses: [{ status: "200", shape: { kind: "primitive", name: "string" } }],
       },
     ]);
     expect(out).toContain('"user-id": string');
@@ -96,32 +86,36 @@ describe("renderEndpointsInterface: default", () => {
   });
 });
 
-describe("renderEndpointsInterface: errors option", () => {
-  const ep: EndpointOperation = {
-    ...baseEndpoint,
-    responses: {
-      success: { kind: "primitive", name: "string" },
-      errors: [
-        {
-          status: "400",
-          shape: { kind: "schema", schema: { $ref: "#/components/schemas/Validation" } },
-        },
-        {
-          status: "5XX",
-          shape: { kind: "schema", schema: { $ref: "#/components/schemas/ServerError" } },
-        },
-      ],
-    },
-  };
-  it("omits errors field by default", () => {
-    expect(renderEndpointsInterface([ep])).not.toContain("errors:");
-  });
-  it("emits errors field when option is true", () => {
-    expect(renderEndpointsInterface([ep], { errors: true })).toContain(
-      'errors: { "400": Schemas.Validation; "5XX": Schemas.ServerError }',
+describe("renderEndpointsInterface: response map", () => {
+  it("emits every declared response keyed by status", () => {
+    const out = renderEndpointsInterface([
+      {
+        ...baseEndpoint,
+        responses: [
+          { status: "200", shape: { kind: "primitive", name: "string" } },
+          {
+            status: "400",
+            shape: { kind: "schema", schema: { $ref: "#/components/schemas/Validation" } },
+          },
+          {
+            status: "5XX",
+            shape: { kind: "schema", schema: { $ref: "#/components/schemas/ServerError" } },
+          },
+        ],
+      },
+    ]);
+    expect(out).toContain(
+      'response: { "200": string; "400": Schemas.Validation; "5XX": Schemas.ServerError }',
     );
   });
-  it("omits errors field when no error responses", () => {
-    expect(renderEndpointsInterface([baseEndpoint], { errors: true })).not.toContain("errors:");
+
+  it("renders the `default` status as a literal key", () => {
+    const out = renderEndpointsInterface([
+      {
+        ...baseEndpoint,
+        responses: [{ status: "default", shape: { kind: "primitive", name: "string" } }],
+      },
+    ]);
+    expect(out).toContain('response: { "default": string }');
   });
 });

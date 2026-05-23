@@ -20,27 +20,27 @@ export interface Endpoints {
       limit?: number
     }
     body: void
-    response: Schemas.Pet[]
+    response: { "200": Schemas.Pet[] }
   }
   /** @summary Create a pet */
   "POST /pets": {
     params: void
     query: void
     body?: Schemas.CreatePet
-    response: Schemas.Pet
+    response: { "201": Schemas.Pet }
   }
   "GET /pets/{petId}": {
     params: { petId: string }
     query: void
     body: void
-    response: Schemas.Pet
+    response: { "200": Schemas.Pet }
   }
   /** @deprecated */
   "DELETE /pets/{petId}": {
     params: { petId: string }
     query: void
     body: void
-    response: void
+    response: { "204": void }
   }
 }
 
@@ -118,7 +118,7 @@ export interface Endpoints {
     params: void
     query: void
     body: void
-    response: Schemas.Animal
+    response: { "200": Schemas.Animal }
   }
 }
 
@@ -163,19 +163,19 @@ export interface Endpoints {
     params: void
     query: { q: string }
     body: void
-    response: Schemas.Item[]
+    response: { "200": Schemas.Item[] }
   }
   "GET /items/{itemId}": {
     params: { itemId: string }
     query: void
     body: void
-    response: Schemas.Item
+    response: { "200": Schemas.Item }
   }
   "GET /health": {
     params: void
     query: void
     body: void
-    response: void
+    response: { "200": void }
   }
 }
 
@@ -187,7 +187,7 @@ export interface Webhooks {
   "POST item.created": {
     query: void
     payload: Schemas.Item
-    reply: boolean
+    reply: { "200": boolean }
   }
 }
 
@@ -239,27 +239,27 @@ export interface Endpoints {
       limit?: number
     }
     body: void
-    response: Schemas.Pet[]
+    response: { "200": Schemas.Pet[] }
   }
   /** @summary Create a pet */
   "POST /pets": {
     params: void
     query: void
     body?: Schemas.CreatePet
-    response: Schemas.Pet
+    response: { "201": Schemas.Pet }
   }
   "GET /pets/{petId}": {
     params: { petId: string }
     query: void
     body: void
-    response: Schemas.Pet
+    response: { "200": Schemas.Pet }
   }
   /** @deprecated */
   "DELETE /pets/{petId}": {
     params: { petId: string }
     query: void
     body: void
-    response: void
+    response: { "204": void }
   }
 }
 
@@ -298,13 +298,13 @@ export interface Endpoints {
     params: { taskId: string }
     query: { page?: number }
     body: void
-    response: Schemas.Task
+    response: { "200": Schemas.Task }
   }
   "PATCH /tasks/{taskId}": {
     params: { taskId: string }
     query: void
     body?: Schemas.Task
-    response: void
+    response: { "204": void }
   }
 }
 

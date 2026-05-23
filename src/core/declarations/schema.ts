@@ -2,14 +2,18 @@ import type { ContractShape, ContractSchema, ContractField } from "../contract/c
 import { safeKey } from "../shared/naming";
 import { indent, jsdoc } from "./format";
 import type { DeclarationOptions } from "./options";
-import { schemaToTypeNode } from "./type-node";
 import type { TypeNode, TypeField } from "./type-node";
+import { schemaToTypeNode } from "./type-node";
 
+/** Options used while rendering declaration-layer TypeNodes. */
 export interface RenderTypeNodeOptions {
+  /** Prefix to add to schema references, for example `Schemas.`. */
   refPrefix?: string;
+  /** Custom OpenAPI `format` to TypeScript type-expression mappings. */
   formats?: DeclarationOptions["formats"];
 }
 
+/** Render a TypeNode into TypeScript source. */
 export function renderTypeNode(node: TypeNode, options: RenderTypeNodeOptions = {}): string {
   switch (node.kind) {
     case "primitive":
@@ -80,6 +84,7 @@ function renderObject(
   return `{\n${indent(lines.join("\n"))}\n}`;
 }
 
+/** Convert a contract shape into the declaration-layer TypeNode IR. */
 export function shapeToTypeNode(
   shape: ContractShape,
   options: RenderTypeNodeOptions = {},
@@ -88,6 +93,7 @@ export function shapeToTypeNode(
   return schemaToTypeNode(shape.schema, options);
 }
 
+/** Render contract schemas into the generated `Schemas` namespace. */
 export function renderSchemas(
   schemas: ContractSchema[],
   options: RenderTypeNodeOptions = {},

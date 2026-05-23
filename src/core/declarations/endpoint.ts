@@ -1,6 +1,6 @@
 import type { EndpointOperation } from "../contract/contract";
 import { safeKey } from "../shared/naming";
-import { entryDocHeader, renderBody, renderErrors, renderParam, renderResponse } from "./entry";
+import { entryDocHeader, renderBody, renderParam, renderResponseMap } from "./entry";
 import { indentContinuation } from "./format";
 import type { DeclarationOptions } from "./options";
 
@@ -23,11 +23,8 @@ function renderEndpointEntry(endpoint: EndpointOperation, options: DeclarationOp
     );
   }
   lines.push(`    ${renderBody(endpoint.body, "body", options)}`);
-  lines.push(`    response: ${renderResponse(endpoint.responses.success, options)}`);
-
-  if (options.errors && endpoint.responses.errors.length > 0) {
-    lines.push(`    errors: ${renderErrors(endpoint.responses.errors, options)}`);
-  }
-
+  lines.push(
+    `    response: ${indentContinuation(renderResponseMap(endpoint.responses, options), "    ")}`,
+  );
   return `${docHeader}  ${safeKey(endpoint.key)}: {\n${lines.join("\n")}\n  }`;
 }
