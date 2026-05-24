@@ -11,32 +11,20 @@ Use `openapi-shape` when OpenAPI is your type contract, but your app should stil
 
 ## Quick Start
 
-Run without installing:
+Generate declarations from a local JSON file or HTTP(S) URL:
 
 ```sh
 npx openapi-shape ./openapi.json -o src/api.d.ts
 ```
 
-Generate from a URL:
+For scripts and CI, install it as a dev dependency:
 
 ```sh
-npx openapi-shape https://api.example.com/openapi.json -o src/api.d.ts
-```
-
-Install in a project when you regenerate types often:
-
-```sh
-pnpm add -D openapi-shape
+pnpm add -D openapi-shape # Install it as a runtime dependency only if you import the optional client.
 pnpm exec openapi-shape ./openapi.json -o src/api.d.ts
 ```
 
-Install as a runtime dependency only if you use the optional client:
-
-```sh
-pnpm add openapi-shape
-```
-
-Requires Node >= 22 and TypeScript >= 5.
+> Requires Node >= 22 and TypeScript >= 5.
 
 ## What It Generates
 
