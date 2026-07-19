@@ -409,4 +409,25 @@ describe("generate (integration)", () => {
     })
     expect(code).toContain('response: { "200": string; "400": string; "default": string }')
   })
+
+  it("renders documentation for nested inline object properties", () => {
+    const code = generate({
+      components: {
+        schemas: {
+          Outer: {
+            type: "object",
+            properties: {
+              inner: {
+                type: "object",
+                properties: {
+                  id: { type: "string", description: "Inner identifier." },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    expect(code).toContain("/** @description Inner identifier. */")
+  })
 })

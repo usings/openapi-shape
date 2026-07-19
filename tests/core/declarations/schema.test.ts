@@ -250,12 +250,9 @@ describe("renderSchemas: contract type rendering", () => {
       },
     ]
 
-    expect(renderSchemas(schemas, { formats: { "date-time": "Date" } })).toContain(
-      "export type UserList = User[]",
-    )
-    expect(renderSchemas(schemas, { formats: { "date-time": "Date" } })).toContain(
-      "createdAt?: Date",
-    )
+    const mapped = renderSchemas(schemas, { formats: { "date-time": "Date" } })
+    expect(mapped).toContain("export type UserList = User[]")
+    expect(mapped).toContain("createdAt?: Date")
     expect(renderSchemas(schemas)).toContain("[key: string]: string | number")
   })
 })

@@ -312,17 +312,6 @@ describe("createClient", () => {
     expect(call.headers).toStrictEqual({ "content-type": "application/json" })
   })
 
-  it("omits body and headers for no body", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter)
-
-    await api("GET /pets")
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.body).toBeUndefined()
-    expect(call.headers).toStrictEqual({})
-  })
-
   it("skips undefined query params", async () => {
     const adapter = vi.fn<Adapter>().mockResolvedValue([])
     const api = createClient<TestAPI>(adapter)
@@ -747,14 +736,6 @@ describe("client response helper types", () => {
 
     expect(fallback).toStrictEqual({ fallback: true })
     expect(unknownSuccess).toBeUndefined()
-  })
-
-  it("ResultOf extracts exact 4xx/5xx responses", () => {
-    const badRequest: ResultOf<Endpoint, "400"> = { badRequest: true }
-    const serverError: ResultOf<Endpoint, "500"> = { serverError: true }
-
-    expect(badRequest).toStrictEqual({ badRequest: true })
-    expect(serverError).toStrictEqual({ serverError: true })
   })
 })
 

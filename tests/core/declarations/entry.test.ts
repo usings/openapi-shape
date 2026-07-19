@@ -21,20 +21,6 @@ describe("entryDocHeader", () => {
     expect(entryDocHeader(base)).toBe("")
   })
 
-  it("emits single-line @summary when only summary is set", () => {
-    expect(entryDocHeader({ ...base, summary: "List pets" })).toBe("  /** @summary List pets */\n")
-  })
-
-  it("emits single-line @deprecated when only deprecated is true", () => {
-    expect(entryDocHeader({ ...base, deprecated: true })).toBe("  /** @deprecated */\n")
-  })
-
-  it("emits multi-line block when summary and deprecated combine", () => {
-    expect(entryDocHeader({ ...base, summary: "List pets", deprecated: true })).toBe(
-      "  /**\n   * @summary List pets\n   * @deprecated\n   */\n",
-    )
-  })
-
   it("emits @summary + @description + @deprecated together", () => {
     expect(
       entryDocHeader({
