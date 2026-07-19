@@ -37,8 +37,9 @@ interface OperationBase {
   /**
    * Stable declaration key for this operation.
    *
-   * The default shape is `${METHOD} ${pathOrWebhookName}`, for example
-   * `"GET /pets"` or `"POST pet.created"`.
+   * Endpoints and webhooks use `${METHOD} ${pathOrWebhookName}`, for example
+   * `"GET /pets"` or `"POST pet.created"`. Callback keys prepend the parent key
+   * and callback name, for example `"POST /subscribe > onEvent > POST {$url}"`.
    */
   key: string
   method: HttpMethod
@@ -79,7 +80,12 @@ export interface WebhookOperation extends OperationBase {
   name: string
 }
 
-/** An operation declared inside an OpenAPI callback expression. */
+/**
+ * An operation declared inside an OpenAPI callback expression.
+ *
+ * Callback path parameters are currently not represented in the contract IR;
+ * query and header parameters are retained.
+ */
 export interface CallbackOperation extends OperationBase {
   kind: "callback"
   /** Key of the endpoint or webhook operation that declares the callback. */

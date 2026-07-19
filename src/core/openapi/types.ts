@@ -11,7 +11,7 @@
 export type { HttpMethod } from "../shared/http"
 export { HTTP_METHODS } from "../shared/http"
 
-/** Supported subset of an OpenAPI document after loader preparation. */
+/** Supported OpenAPI subset used throughout loading, preparation, and contract building. */
 export interface OpenAPIDocument {
   openapi?: string
   info?: Info
@@ -113,7 +113,7 @@ export interface Response {
   description?: string
 }
 
-/** Media type entry. Only schemas are consumed by declaration rendering. */
+/** Media type entry whose schema is converted to a contract type during contract building. */
 export interface MediaType {
   schema?: OpenAPISchema
 }
@@ -129,34 +129,34 @@ export interface Discriminator {
  * Supported subset of an OpenAPI Schema Object.
  *
  * This type intentionally models only keywords used by normalization,
- * discriminator injection, contract building, and declaration rendering.
+ * discriminator injection, reference validation, and contract building.
  */
 export type OpenAPISchema = boolean | OpenAPISchemaObject
 
 export interface OpenAPISchemaObject {
-  /** Schema reference. Schema `$ref`s are preserved for declaration rendering. */
+  /** Schema reference preserved until contract building creates a named reference node. */
   $ref?: string
   /** JSON Schema type or OpenAPI 3.1 nullable-style type array. */
   type?: string | string[]
   /** OpenAPI/JSON Schema format, optionally mapped by declaration options. */
   format?: string
-  /** Literal enum values rendered as TypeScript unions. */
+  /** Literal enum values converted to a contract union. */
   enum?: unknown[]
-  /** JSON Schema const value rendered as a TypeScript literal when supported. */
+  /** JSON Schema const value converted to a contract literal when supported. */
   const?: unknown
 
-  /** Exclusive alternatives; rendered as a TypeScript union. */
+  /** Exclusive alternatives converted to a contract union. */
   oneOf?: OpenAPISchema[]
-  /** Inclusive alternatives; rendered as a TypeScript union. */
+  /** Inclusive alternatives converted to a contract union. */
   anyOf?: OpenAPISchema[]
-  /** Composition rendered as a TypeScript intersection. */
+  /** Composition converted to a contract intersection. */
   allOf?: OpenAPISchema[]
 
   properties?: Record<string, OpenAPISchema>
-  /** Pattern property schemas folded into an index signature value type. */
+  /** Pattern property schemas folded into a contract object index type. */
   patternProperties?: Record<string, OpenAPISchema>
   required?: string[]
-  /** Additional property policy or schema for object index signatures. */
+  /** Additional property policy or schema converted to a contract object index type. */
   additionalProperties?: boolean | OpenAPISchema
 
   /** Array item schema, or `true` for unconstrained tuple rest items. */

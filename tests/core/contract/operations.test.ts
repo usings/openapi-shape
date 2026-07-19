@@ -177,6 +177,24 @@ describe("contract: body", () => {
     expect(endpointOperations(contract)[0].body).toMatchObject({ kind: "json", required: false })
   })
 
+  it("keeps a false JSON body schema as never", () => {
+    const contract = buildContract({
+      paths: {
+        "/p": {
+          post: {
+            requestBody: { content: { "application/json": { schema: false } } },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    })
+    expect(endpointOperations(contract)[0].body).toStrictEqual({
+      kind: "json",
+      required: false,
+      type: { kind: "never" },
+    })
+  })
+
   it("passthrough body for non-json content-type", () => {
     const contract = buildContract({
       paths: {

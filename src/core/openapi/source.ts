@@ -7,7 +7,8 @@ import { LoadError } from "./errors"
  * Read OpenAPI JSON or YAML from a file path, file URL, or HTTP(S) URL.
  *
  * File extensions and HTTP content types select the parser. Unknown formats try
- * JSON before YAML. The unvalidated result stays `unknown` until normalization.
+ * JSON before YAML. The parsed value stays `unknown` until normalization performs
+ * minimal top-level and version validation.
  */
 export async function readSource(source: string | URL): Promise<unknown> {
   const label = typeof source === "string" ? source : source.href

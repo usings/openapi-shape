@@ -3,6 +3,14 @@ import { appendPointer } from "../shared/pointer"
 import type { ContractType, ContractOutcome } from "./model"
 import { buildContractType } from "./schema-type"
 
+/**
+ * Convert declared responses to contract outcomes while preserving response-key order.
+ *
+ * For each response, content is selected by category rather than raw declaration
+ * order: JSON-family entries with schemas first, then binary media/schema entries,
+ * `text/*`, other entries with schemas, and finally the first untyped entry as
+ * binary. A response without usable content becomes `void`.
+ */
 export function buildResponses(
   responses: Record<string, Response>,
   location: string,
@@ -20,6 +28,7 @@ export function buildResponses(
   return out
 }
 
+/** Return whether a media type has a `json` or `+json` subtype, ignoring parameters. */
 export function isJsonContentType(ct: string): boolean {
   const essence = ct.split(";", 1)[0].trim().toLowerCase()
   const slash = essence.indexOf("/")
@@ -41,22 +50,26 @@ function extractResponseType(content: Record<string, MediaType>): {
   contentType?: string
 } | null {
   for (const ct of Object.keys(content)) {
-    if (isJsonContentType(ct) && content[ct].schema) {
+    if (isJsonContentType(ct) && content[ct].schema !== undefined) {
       return { type: buildContractType(content[ct].schema), contentType: ct }
     }
   }
   for (const ct of Object.keys(content)) {
-    if (isBinaryContentType(ct) || isBinarySchema(content[ct].schema)) {
+    const schema = content[ct].schema
+    if (isBinaryContentType(ct) || isBinarySchema(schema)) {
+      if (schema === false) return { type: buildContractType(schema), contentType: ct }
       return { type: { kind: "binary" }, contentType: ct }
     }
   }
   for (const ct of Object.keys(content)) {
     if (ct.toLowerCase().startsWith("text/")) {
+      const schema = content[ct].schema
+      if (schema === false) return { type: buildContractType(schema), contentType: ct }
       return { type: { kind: "scalar", name: "string" }, contentType: ct }
     }
   }
   for (const ct of Object.keys(content)) {
-    if (content[ct].schema) {
+    if (content[ct].schema !== undefined) {
       return { type: buildContractType(content[ct].schema), contentType: ct }
     }
   }

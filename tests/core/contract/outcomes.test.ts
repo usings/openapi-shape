@@ -42,4 +42,39 @@ describe("isJsonContentType", () => {
       name: "number",
     })
   })
+
+  it("keeps a false JSON response schema as never", () => {
+    const contract = buildContract({
+      paths: {
+        "/x": {
+          get: {
+            responses: {
+              "200": { content: { "application/json": { schema: false } } },
+            },
+          },
+        },
+      },
+    })
+    const endpoint = contract.operations.find((operation) => operation.kind === "endpoint")
+    expect(endpoint?.responses[0].type).toStrictEqual({ kind: "never" })
+  })
+
+  it.each(["text/plain", "application/octet-stream", "application/x-custom"])(
+    "keeps a false %s response schema as never",
+    (contentType) => {
+      const contract = buildContract({
+        paths: {
+          "/x": {
+            get: {
+              responses: {
+                "200": { content: { [contentType]: { schema: false } } },
+              },
+            },
+          },
+        },
+      })
+      const endpoint = contract.operations.find((operation) => operation.kind === "endpoint")
+      expect(endpoint?.responses[0].type).toStrictEqual({ kind: "never" })
+    },
+  )
 })

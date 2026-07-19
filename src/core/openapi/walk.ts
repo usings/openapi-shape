@@ -24,7 +24,7 @@ export type SchemaMapper = (schema: OpenAPISchema, location: string) => OpenAPIS
 /**
  * Visitor hooks for shallow OpenAPI document nodes.
  *
- * Locations are JSON Pointer-like diagnostic paths. Traversal stops when a hook
+ * Locations are JSON Pointer diagnostic paths. Traversal stops when a hook
  * returns an object with `$ref`, because unresolved references have no local children.
  */
 export interface DocumentVisitor {
@@ -41,7 +41,8 @@ export interface DocumentVisitor {
  *
  * The original object graph is reused when all visitors return the same objects.
  * Components, `paths`, and `webhooks` are walked; schema recursion is shallow
- * unless callers use `mapDocumentSchemas`.
+ * unless callers use `mapDocumentSchemas`. Callback path items are visited one
+ * level deep; callbacks declared by callback operations are intentionally skipped.
  */
 export function mapDocument(doc: OpenAPIDocument, visitor: DocumentVisitor): OpenAPIDocument {
   let out = doc
@@ -181,6 +182,8 @@ function mapCallback(callback: Callback, visitor: DocumentVisitor, location: str
   const visited = visitor.callback ? visitor.callback(callback, location) : callback
   if (isCallbackReference(visited)) return visited
 
+  // Nested callbacks are outside the supported traversal depth. Passing `false`
+  // prevents callback operations from recursively walking their own callbacks.
   return mapValuesIdentity(visited as Record<string, PathItem>, (item, expression) =>
     mapPathItem(item, visitor, appendPointer(location, expression), false),
   )
@@ -189,7 +192,7 @@ function mapCallback(callback: Callback, visitor: DocumentVisitor, location: str
 function mapParameter(p: Parameter, visitor: DocumentVisitor, location: string): Parameter {
   let current = visitor.parameter ? visitor.parameter(p, location) : p
   if (current.$ref !== undefined) return current
-  if (current.schema && visitor.schema) {
+  if (current.schema !== undefined && visitor.schema) {
     const next = visitor.schema(current.schema, appendPointer(location, "schema"))
     if (next !== current.schema) current = { ...current, schema: next }
   }
@@ -224,7 +227,7 @@ function mapMediaContent(
   const schemaVisitor = visitor.schema
   if (!schemaVisitor) return content
   return mapValuesIdentity(content, (media, ct) => {
-    if (!media.schema) return media
+    if (media.schema === undefined) return media
     const next = schemaVisitor(media.schema, appendPointer(location, ct, "schema"))
     return next === media.schema ? media : { ...media, schema: next }
   })

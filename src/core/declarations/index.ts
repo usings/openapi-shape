@@ -13,6 +13,7 @@ import { renderWebhooksInterface } from "./webhook"
 
 export type { DeclarationOptions } from "./options"
 
+/** Render a complete TypeScript declaration module from the normalized contract IR. */
 export function renderDeclarations(contract: Contract, options: DeclarationOptions = {}): string {
   const parts: string[] = []
   const endpoints = contract.operations.filter(

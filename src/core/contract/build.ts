@@ -3,6 +3,7 @@ import type { Contract } from "./model"
 import { buildOperations } from "./operations"
 import { buildSchemas } from "./schemas"
 
+/** Build the renderer-facing contract IR from a prepared OpenAPI document. */
 export function buildContract(doc: OpenAPIDocument): Contract {
   return {
     info: buildInfo(doc),

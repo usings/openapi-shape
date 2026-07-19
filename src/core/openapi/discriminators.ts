@@ -75,8 +75,8 @@ function hasSingleStringLiteral(schema: OpenAPISchema | undefined): boolean {
 /**
  * Find discriminator branches in supported schema locations.
  *
- * Non-schema data is ignored. Structurally invalid branches throw `LoadError`;
- * conflicts between otherwise valid injections are handled separately.
+ * Non-schema data and inline branches are ignored. Invalid referenced branch
+ * refs throw `LoadError`; conflicts between valid injections are handled separately.
  */
 export function discoverInjections(doc: OpenAPIDocument): Injection[] {
   const out: Injection[] = []

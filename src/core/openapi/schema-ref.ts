@@ -6,6 +6,12 @@ import { mapDocumentSchemas } from "./walk"
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/"
 
+/**
+ * Decode the component name from a local `#/components/schemas/<name>` reference.
+ *
+ * The reference must identify exactly one component schema. URI encoding and
+ * JSON Pointer escaping are decoded; external and nested references throw `LoadError`.
+ */
 export function schemaNameFromRef(ref: string, location?: string): string {
   const suffix = location ? ` (at ${location})` : ""
   if (!ref.startsWith(SCHEMA_REF_PREFIX)) {
@@ -24,6 +30,7 @@ export function schemaNameFromRef(ref: string, location?: string): string {
   }
 }
 
+/** Validate that every schema reference is local and targets an existing component schema. */
 export function validateSchemaRefs(doc: OpenAPIDocument): OpenAPIDocument {
   const schemas = doc.components?.schemas ?? {}
   return mapDocumentSchemas(doc, (schema: OpenAPISchema, location) => {

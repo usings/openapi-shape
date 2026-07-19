@@ -26,7 +26,8 @@ interface BucketTypes {
  * Resolve supported component references in an OpenAPI document.
  *
  * Path item, parameter, request body, response, and callback refs are resolved.
- * Schema refs remain intact so declarations can emit named references.
+ * Schema refs remain intact so contract building can convert them into named
+ * reference nodes.
  *
  * Throws `LoadError` for wrong component buckets, missing refs, and cycles.
  */

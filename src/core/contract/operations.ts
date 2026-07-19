@@ -15,6 +15,15 @@ import type { ContractOperation, ContractField, ContractPayload, DocBlock } from
 import { buildResponses, isJsonContentType } from "./outcomes"
 import { buildContractType } from "./schema-type"
 
+/**
+ * Build endpoint, webhook, and direct callback operations in declaration order.
+ *
+ * Operation-level parameters replace path-level parameters with the same
+ * `in:name` identity. Path and header parameters become strings, query parameters
+ * retain their schema types, and callbacks are flattened beside their parent
+ * operations. OpenAPI 3.0 operations must declare `responses`; 3.1 operations may
+ * omit them.
+ */
 export function buildOperations(doc: OpenAPIDocument): ContractOperation[] {
   const responsesRequired = /^3\.0\.\d+$/.test(doc.openapi ?? "")
   return [
@@ -29,6 +38,9 @@ function walkCallbacks(
   parentLocation: string,
   responsesRequired: boolean,
 ): ContractOperation[] {
+  // Only callbacks declared directly by endpoints and webhooks are flattened.
+  // Callback operations may contain callbacks in the source, but nested callbacks
+  // are outside the supported contract model and are not traversed here.
   const out: ContractOperation[] = []
   for (const [callbackName, callback] of Object.entries(callbacks)) {
     if (isCallbackReference(callback)) continue
@@ -171,7 +183,7 @@ function buildBody(rb: RequestBody | undefined): ContractPayload {
   if (!rb?.content) return { kind: "none" }
   const required = rb.required === true
   for (const [ct, media] of Object.entries(rb.content)) {
-    if (isJsonContentType(ct) && (media as MediaType).schema) {
+    if (isJsonContentType(ct) && (media as MediaType).schema !== undefined) {
       return {
         kind: "json",
         required,
@@ -180,7 +192,7 @@ function buildBody(rb: RequestBody | undefined): ContractPayload {
     }
   }
   for (const [, media] of Object.entries(rb.content)) {
-    if ((media as MediaType).schema) {
+    if ((media as MediaType).schema !== undefined) {
       return {
         kind: "passthrough",
         required,

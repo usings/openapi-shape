@@ -1,7 +1,6 @@
 export interface DeclarationOptions {
   /**
-   * Emit typed `in: header` parameters: outgoing headers for endpoints and
-   * incoming headers for webhooks.
+   * Emit typed `in: header` parameters for endpoints, webhooks, and callbacks.
    */
   headers?: boolean
   /**

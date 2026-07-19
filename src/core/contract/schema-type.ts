@@ -6,11 +6,11 @@ import { docBlock } from "./doc"
 import type { ContractField, ContractType, ScalarName } from "./model"
 
 /**
- * Convert a supported OpenAPI schema into the language-neutral contract type.
+ * Convert a supported OpenAPI schema into the OpenAPI-decoupled contract type.
  *
  * Unknown, empty, or unsupported schema shapes become `unknown`; `false` and
- * empty enums or unions become `never`; `allOf` becomes an intersection; and
- * `oneOf`/`anyOf` become unions. Scalars keep their declared `format` so
+ * empty enums, type arrays, or unions become `never`; `allOf` becomes an
+ * intersection; and `oneOf`/`anyOf` become unions. Scalars keep their declared `format` so
  * renderers can apply user format mappings.
  */
 export function buildContractType(schema: OpenAPISchema | undefined): ContractType {
@@ -95,7 +95,8 @@ function compositionSiblingType(schema: OpenAPISchemaObject): ContractType | nul
 
 function typeArrayType(schema: OpenAPISchemaObject): ContractType {
   const types = schema.type as string[]
-  // An empty type array permits no type at all, like an empty enum.
+  // Defensively map an invalid empty type array to `never` instead of producing
+  // an empty union that would render invalid TypeScript.
   if (types.length === 0) return { kind: "never" }
   const nonNull = types.filter((t) => t !== "null")
   const includesNull = types.includes("null")

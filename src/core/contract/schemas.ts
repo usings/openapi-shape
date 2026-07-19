@@ -6,6 +6,14 @@ import { BuildError } from "./errors"
 import type { ContractSchema, ContractField } from "./model"
 import { buildContractType, objectIndexType } from "./schema-type"
 
+/**
+ * Build named contract schemas from `components.schemas` in declaration order.
+ *
+ * A schema becomes an interface only when it explicitly declares `type: object`,
+ * has `properties`, and has no composition keywords; all other schemas become
+ * aliases. Names are sanitized for TypeScript and collisions after sanitization
+ * throw `BuildError`.
+ */
 export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
   const raw = doc.components?.schemas
   if (!raw) return []
@@ -25,7 +33,8 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
   const result: ContractSchema[] = []
   for (const [originalName, schema] of Object.entries(raw)) {
     const name = safeIdentifier(originalName)
-    // Interfaces cannot express composition alongside sibling properties.
+    // Schemas with composition remain aliases so composition and sibling
+    // constraints can be represented without loss.
     const hasComposition =
       typeof schema === "object" ? (schema.allOf ?? schema.oneOf ?? schema.anyOf) : undefined
     if (
