@@ -190,7 +190,7 @@ describe("buildContractType: compositions", () => {
         refA,
         {
           kind: "object",
-          fields: [{ name: "extra", required: true, shape: { kind: "scalar", name: "string" } }],
+          fields: [{ name: "extra", required: true, type: { kind: "scalar", name: "string" } }],
         },
       ],
     })
@@ -265,10 +265,10 @@ describe("buildContractType: objects", () => {
         {
           name: "id",
           required: true,
-          shape: { kind: "scalar", name: "number" },
+          type: { kind: "scalar", name: "number" },
           docs: { description: "Identifier." },
         },
-        { name: "name", required: false, shape: { kind: "scalar", name: "string" } },
+        { name: "name", required: false, type: { kind: "scalar", name: "string" } },
       ],
     })
   })
@@ -289,7 +289,7 @@ describe("buildContractType: objects", () => {
       }),
     ).toStrictEqual({
       kind: "object",
-      fields: [{ name: "id", required: false, shape: { kind: "scalar", name: "number" } }],
+      fields: [{ name: "id", required: false, type: { kind: "scalar", name: "number" } }],
       index: { kind: "scalar", name: "string" },
     })
   })
@@ -303,7 +303,7 @@ describe("buildContractType: objects", () => {
       }),
     ).toStrictEqual({
       kind: "object",
-      fields: [{ name: "id", required: false, shape: { kind: "scalar", name: "number" } }],
+      fields: [{ name: "id", required: false, type: { kind: "scalar", name: "number" } }],
       index: unknown,
     })
   })
@@ -318,7 +318,7 @@ describe("buildContractType: objects", () => {
       }),
     ).toStrictEqual({
       kind: "object",
-      fields: [{ name: "id", required: false, shape: { kind: "scalar", name: "number" } }],
+      fields: [{ name: "id", required: false, type: { kind: "scalar", name: "number" } }],
       index: {
         kind: "union",
         members: [

@@ -168,7 +168,7 @@ function objectType(schema: OpenAPISchemaObject): ContractType {
     const field: ContractField = {
       name,
       required: required.has(name),
-      shape: buildContractType(value),
+      type: buildContractType(value),
     }
     const docs = docBlock(value)
     if (docs !== undefined) field.docs = docs

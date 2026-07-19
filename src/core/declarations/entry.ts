@@ -28,7 +28,7 @@ export function renderParam(fields: ContractField[], options: RenderTypeOptions 
   const renderOptions = { ...options, ...schemaRefOptions }
   const renderField = (f: ContractField) => {
     const opt = f.required ? "" : "?"
-    return `${safeKey(f.name)}${opt}: ${renderContractType(f.shape, renderOptions)}`
+    return `${safeKey(f.name)}${opt}: ${renderContractType(f.type, renderOptions)}`
   }
   if (!hasDocs) return `{ ${fields.map((f) => renderField(f)).join("; ")} }`
   const body = fields.map((f) => `${jsdoc(f.docs ?? {})}${renderField(f)}`).join("\n")
@@ -42,7 +42,7 @@ export function renderBody(
 ): string {
   if (body.kind === "none") return `${key}: void`
   const renderOptions = { ...options, ...schemaRefOptions }
-  const t = indentContinuation(renderContractType(body.shape, renderOptions), "    ")
+  const t = indentContinuation(renderContractType(body.type, renderOptions), "    ")
   return body.required ? `${key}: ${t}` : `${key}?: ${t}`
 }
 
@@ -53,7 +53,7 @@ export function renderResponseMap(
   if (responses.length === 0) return "unknown"
   const renderOptions = { ...options, ...schemaRefOptions }
   const entries = responses.map(
-    (r) => `"${r.status}": ${renderContractType(r.shape, renderOptions)}`,
+    (r) => `"${r.status}": ${renderContractType(r.type, renderOptions)}`,
   )
   return `{ ${entries.join("; ")} }`
 }

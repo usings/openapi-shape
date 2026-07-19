@@ -28,8 +28,8 @@ describe("renderEndpointsInterface: default", () => {
       renderEndpointsInterface([
         {
           ...baseEndpoint,
-          query: [{ name: "limit", required: false, shape: { kind: "scalar", name: "number" } }],
-          responses: [{ status: "200", shape: { kind: "scalar", name: "string" } }],
+          query: [{ name: "limit", required: false, type: { kind: "scalar", name: "number" } }],
+          responses: [{ status: "200", type: { kind: "scalar", name: "string" } }],
         },
       ]),
     ).toContain("query: { limit?: number }")
@@ -40,10 +40,10 @@ describe("renderEndpointsInterface: default", () => {
       {
         ...baseEndpoint,
         query: [
-          { name: "user-id", required: false, shape: { kind: "scalar", name: "string" } },
-          { name: "x-request-id", required: true, shape: { kind: "scalar", name: "string" } },
+          { name: "user-id", required: false, type: { kind: "scalar", name: "string" } },
+          { name: "x-request-id", required: true, type: { kind: "scalar", name: "string" } },
         ],
-        responses: [{ status: "200", shape: { kind: "scalar", name: "string" } }],
+        responses: [{ status: "200", type: { kind: "scalar", name: "string" } }],
       },
     ])
     expect(out).toContain('"user-id"?: string')
@@ -54,8 +54,8 @@ describe("renderEndpointsInterface: default", () => {
     const out = renderEndpointsInterface([
       {
         ...baseEndpoint,
-        params: [{ name: "user-id", required: true, shape: { kind: "scalar", name: "string" } }],
-        responses: [{ status: "200", shape: { kind: "scalar", name: "string" } }],
+        params: [{ name: "user-id", required: true, type: { kind: "scalar", name: "string" } }],
+        responses: [{ status: "200", type: { kind: "scalar", name: "string" } }],
       },
     ])
     expect(out).toContain('"user-id": string')
@@ -66,7 +66,7 @@ describe("renderEndpointsInterface: default", () => {
       renderEndpointsInterface([
         {
           ...baseEndpoint,
-          body: { kind: "json", required: true, shape: { kind: "scalar", name: "string" } },
+          body: { kind: "json", required: true, type: { kind: "scalar", name: "string" } },
         },
       ]),
     ).toContain("body: string")
@@ -74,7 +74,7 @@ describe("renderEndpointsInterface: default", () => {
       renderEndpointsInterface([
         {
           ...baseEndpoint,
-          body: { kind: "json", required: false, shape: { kind: "scalar", name: "string" } },
+          body: { kind: "json", required: false, type: { kind: "scalar", name: "string" } },
         },
       ]),
     ).toContain("body?: string")
@@ -92,14 +92,14 @@ describe("renderEndpointsInterface: response map", () => {
       {
         ...baseEndpoint,
         responses: [
-          { status: "200", shape: { kind: "scalar", name: "string" } },
+          { status: "200", type: { kind: "scalar", name: "string" } },
           {
             status: "400",
-            shape: { kind: "reference", name: "Validation" },
+            type: { kind: "reference", name: "Validation" },
           },
           {
             status: "5XX",
-            shape: { kind: "reference", name: "ServerError" },
+            type: { kind: "reference", name: "ServerError" },
           },
         ],
       },
@@ -113,7 +113,7 @@ describe("renderEndpointsInterface: response map", () => {
     const out = renderEndpointsInterface([
       {
         ...baseEndpoint,
-        responses: [{ status: "default", shape: { kind: "scalar", name: "string" } }],
+        responses: [{ status: "default", type: { kind: "scalar", name: "string" } }],
       },
     ])
     expect(out).toContain('response: { "default": string }')

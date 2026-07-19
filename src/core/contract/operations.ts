@@ -140,7 +140,7 @@ function buildParams(parameters: Parameter[]): ContractField[] {
     .map((p) => ({
       name: p.name as string,
       required: true,
-      shape: { kind: "scalar", name: "string" } as const,
+      type: { kind: "scalar", name: "string" } as const,
       docs: docBlockFromParameter(p),
     }))
 }
@@ -151,7 +151,7 @@ function buildQuery(parameters: Parameter[]): ContractField[] {
     .map((p) => ({
       name: p.name as string,
       required: p.required === true,
-      shape: buildContractType(p.schema),
+      type: buildContractType(p.schema),
       docs: docBlockFromParameter(p),
     }))
 }
@@ -162,7 +162,7 @@ function buildHeaders(parameters: Parameter[]): ContractField[] {
     .map((p) => ({
       name: p.name as string,
       required: p.required === true,
-      shape: { kind: "scalar", name: "string" },
+      type: { kind: "scalar", name: "string" },
       docs: docBlockFromParameter(p),
     }))
 }
@@ -175,7 +175,7 @@ function buildBody(rb: RequestBody | undefined): ContractPayload {
       return {
         kind: "json",
         required,
-        shape: buildContractType((media as MediaType).schema),
+        type: buildContractType((media as MediaType).schema),
       }
     }
   }
@@ -184,7 +184,7 @@ function buildBody(rb: RequestBody | undefined): ContractPayload {
       return {
         kind: "passthrough",
         required,
-        shape: buildContractType((media as MediaType).schema),
+        type: buildContractType((media as MediaType).schema),
       }
     }
   }

@@ -85,7 +85,7 @@ export function objectFieldLines(
   const lines = fields.map((f) => {
     const docHeader = f.docs ? jsdoc(f.docs) : ""
     const opt = f.required ? "" : "?"
-    return `${docHeader}${safeKey(f.name)}${opt}: ${renderNode(f.shape, options).text}`
+    return `${docHeader}${safeKey(f.name)}${opt}: ${renderNode(f.type, options).text}`
   })
   if (index) lines.push(`[key: string]: ${widenedIndexText(index, fields, options)}`)
   return lines
@@ -100,7 +100,7 @@ function widenedIndexText(
   const members = index.kind === "union" ? index.members : [index]
   const rendered: Rendered[] = [
     ...members.map((m) => renderNode(m, options)),
-    ...fields.map((f) => renderNode(f.shape, options)),
+    ...fields.map((f) => renderNode(f.type, options)),
   ]
   if (fields.some((f) => !f.required)) rendered.push({ text: "undefined", kind: "scalar" })
   return renderUnion(rendered).text

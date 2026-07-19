@@ -14,9 +14,7 @@ export function renderSchemas(schemas: ContractSchema[], options: RenderTypeOpti
       const body = objectFieldLines(s.fields, s.index, bodyOptions).join("\n")
       interfaces.push(`${docHeader}export interface ${s.name} {\n${indent(body)}\n}`)
     } else {
-      aliases.push(
-        `${docHeader}export type ${s.name} = ${renderContractType(s.shape, bodyOptions)}`,
-      )
+      aliases.push(`${docHeader}export type ${s.name} = ${renderContractType(s.type, bodyOptions)}`)
     }
   }
   return `export namespace Schemas {\n${indent([...aliases, ...interfaces].join("\n\n"))}\n}`

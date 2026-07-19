@@ -9,10 +9,10 @@ export function buildResponses(
 ): ContractOutcome[] {
   const out: ContractOutcome[] = []
   for (const [status, response] of Object.entries(responses)) {
-    const { shape, contentType } = pickResponseType(response)
+    const { type, contentType } = pickResponseType(response)
     out.push({
       status,
-      shape,
+      type,
       ...(contentType !== undefined ? { contentType } : {}),
       source: { location: appendPointer(location, status) },
     })
@@ -29,39 +29,39 @@ export function isJsonContentType(ct: string): boolean {
 }
 
 function pickResponseType(response: Response | undefined): {
-  shape: ContractType
+  type: ContractType
   contentType?: string
 } {
-  if (!response?.content) return { shape: { kind: "void" } }
-  return extractResponseType(response.content) ?? { shape: { kind: "void" } }
+  if (!response?.content) return { type: { kind: "void" } }
+  return extractResponseType(response.content) ?? { type: { kind: "void" } }
 }
 
 function extractResponseType(content: Record<string, MediaType>): {
-  shape: ContractType
+  type: ContractType
   contentType?: string
 } | null {
   for (const ct of Object.keys(content)) {
     if (isJsonContentType(ct) && content[ct].schema) {
-      return { shape: buildContractType(content[ct].schema), contentType: ct }
+      return { type: buildContractType(content[ct].schema), contentType: ct }
     }
   }
   for (const ct of Object.keys(content)) {
     if (isBinaryContentType(ct) || isBinarySchema(content[ct].schema)) {
-      return { shape: { kind: "binary" }, contentType: ct }
+      return { type: { kind: "binary" }, contentType: ct }
     }
   }
   for (const ct of Object.keys(content)) {
     if (ct.toLowerCase().startsWith("text/")) {
-      return { shape: { kind: "scalar", name: "string" }, contentType: ct }
+      return { type: { kind: "scalar", name: "string" }, contentType: ct }
     }
   }
   for (const ct of Object.keys(content)) {
     if (content[ct].schema) {
-      return { shape: buildContractType(content[ct].schema), contentType: ct }
+      return { type: buildContractType(content[ct].schema), contentType: ct }
     }
   }
   const firstContentType = Object.keys(content)[0]
-  if (firstContentType) return { shape: { kind: "binary" }, contentType: firstContentType }
+  if (firstContentType) return { type: { kind: "binary" }, contentType: firstContentType }
   return null
 }
 

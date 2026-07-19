@@ -27,13 +27,13 @@ describe("contract: schema models", () => {
           {
             name: "id",
             required: true,
-            shape: { kind: "scalar", name: "number" },
+            type: { kind: "scalar", name: "number" },
             docs: undefined,
           },
           {
             name: "name",
             required: false,
-            shape: { kind: "scalar", name: "string" },
+            type: { kind: "scalar", name: "string" },
             docs: undefined,
           },
         ],
@@ -50,7 +50,7 @@ describe("contract: schema models", () => {
       name: "Status",
       originalName: "Status",
       kind: "alias",
-      shape: {
+      type: {
         kind: "union",
         members: [
           { kind: "literal", value: "a" },
@@ -104,7 +104,7 @@ describe("contract: schema models", () => {
         {
           name: "id",
           required: true,
-          shape: { kind: "scalar", name: "string" },
+          type: { kind: "scalar", name: "string" },
           docs: undefined,
         },
       ],

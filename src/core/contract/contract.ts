@@ -103,7 +103,7 @@ export type ContractOperation = EndpointOperation | WebhookOperation | CallbackO
 export interface ContractField {
   name: string
   required: boolean
-  shape: ContractType
+  type: ContractType
   docs?: DocBlock
 }
 
@@ -118,9 +118,9 @@ export type ContractPayload =
   /** No declared request body, or no request body schema that can be rendered. */
   | { kind: "none" }
   /** JSON-family request body, such as `application/json` or `application/problem+json`. */
-  | { kind: "json"; required: boolean; shape: ContractType }
+  | { kind: "json"; required: boolean; type: ContractType }
   /** Non-JSON request body kept as its selected schema type. */
-  | { kind: "passthrough"; required: boolean; shape: ContractType }
+  | { kind: "passthrough"; required: boolean; type: ContractType }
 
 /**
  * One OpenAPI response entry after media-type selection.
@@ -131,8 +131,8 @@ export interface ContractOutcome {
   /** OpenAPI response key, for example `"200"`, `"4XX"`, or `"default"`. */
   status: string
   /** Selected response type, or `void` when no usable content schema exists. */
-  shape: ContractType
-  /** Media type that produced `shape`, when a content entry was selected. */
+  type: ContractType
+  /** Media type that produced `type`, when a content entry was selected. */
   contentType?: string
   /** Source location of this response entry. */
   source?: SourceRef
@@ -142,7 +142,7 @@ export interface ContractOutcome {
  * A named schema from `components.schemas`.
  *
  * Object schemas with properties become `interface` entries and carry `fields`.
- * Everything else becomes an `alias` entry and carries a single `shape`.
+ * Everything else becomes an `alias` entry and carries a single `type`.
  */
 interface ContractSchemaBase {
   /** Safe TypeScript identifier used in generated declarations. */
@@ -165,7 +165,7 @@ export type ContractSchema = ContractSchemaBase &
       }
     | {
         kind: "alias"
-        shape: ContractType
+        type: ContractType
       }
   )
 

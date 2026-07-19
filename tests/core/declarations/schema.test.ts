@@ -134,7 +134,7 @@ describe("renderContractType: object", () => {
     expect(
       renderContractType({
         kind: "object",
-        fields: [{ name: "a", required: true, shape: { kind: "scalar", name: "number" } }],
+        fields: [{ name: "a", required: true, type: { kind: "scalar", name: "number" } }],
       }),
     ).toBe("{\n  a: number\n}")
   })
@@ -142,7 +142,7 @@ describe("renderContractType: object", () => {
     expect(
       renderContractType({
         kind: "object",
-        fields: [{ name: "a", required: false, shape: { kind: "scalar", name: "number" } }],
+        fields: [{ name: "a", required: false, type: { kind: "scalar", name: "number" } }],
       }),
     ).toBe("{\n  a?: number\n}")
   })
@@ -150,7 +150,7 @@ describe("renderContractType: object", () => {
     expect(
       renderContractType({
         kind: "object",
-        fields: [{ name: "a", required: true, shape: { kind: "scalar", name: "string" } }],
+        fields: [{ name: "a", required: true, type: { kind: "scalar", name: "string" } }],
         index: { kind: "scalar", name: "string" },
       }),
     ).toBe("{\n  a: string\n  [key: string]: string\n}")
@@ -191,13 +191,13 @@ describe("renderSchemas: ordering (aliases first, interfaces second)", () => {
         name: "User",
         originalName: "User",
         kind: "interface",
-        fields: [{ name: "id", required: true, shape: { kind: "scalar", name: "number" } }],
+        fields: [{ name: "id", required: true, type: { kind: "scalar", name: "number" } }],
       },
       {
         name: "Status",
         originalName: "Status",
         kind: "alias",
-        shape: {
+        type: {
           kind: "union",
           members: [
             { kind: "literal", value: "a" },
@@ -222,11 +222,11 @@ describe("renderSchemas: contract type rendering", () => {
         originalName: "User",
         kind: "interface",
         fields: [
-          { name: "id", required: true, shape: { kind: "scalar", name: "number" } },
+          { name: "id", required: true, type: { kind: "scalar", name: "number" } },
           {
             name: "createdAt",
             required: false,
-            shape: { kind: "scalar", name: "string", format: "date-time" },
+            type: { kind: "scalar", name: "string", format: "date-time" },
           },
         ],
         index: {
@@ -241,7 +241,7 @@ describe("renderSchemas: contract type rendering", () => {
         name: "UserList",
         originalName: "UserList",
         kind: "alias",
-        shape: { kind: "array", items: { kind: "reference", name: "User" } },
+        type: { kind: "array", items: { kind: "reference", name: "User" } },
       },
     ]
 

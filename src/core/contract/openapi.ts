@@ -97,7 +97,7 @@ export interface RequestBody {
   /** Component reference resolved before contract building. */
   $ref?: string
   required?: boolean
-  /** Media type map used to select the request payload shape. */
+  /** Media type map used to select the request payload type. */
   content?: Record<string, MediaType>
   /** Request body description. Currently retained only in the prepared document. */
   description?: string
@@ -107,7 +107,7 @@ export interface RequestBody {
 export interface Response {
   /** Component reference resolved before contract building. */
   $ref?: string
-  /** Media type map used to select the response shape. */
+  /** Media type map used to select the response type. */
   content?: Record<string, MediaType>
   /** Response description. Currently retained only in the prepared document. */
   description?: string
