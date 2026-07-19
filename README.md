@@ -249,13 +249,13 @@ The optional client builds adapter input with these rules:
 
 OpenAPI request media types inform the generated body type, but they do not configure runtime serialization. The default client serialization is described below; use `serializeBody` for media types such as `text/plain` that need different encoding.
 
-| Field     | Behavior                                                                                                                                                                                                                                                        |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `method`  | Read from the endpoint key, such as `GET /pets`.                                                                                                                                                                                                                |
-| `url`     | `baseURL` plus path params and query string. Path params are URL-encoded. Query arrays become repeated keys, for example `tags=a&tags=b`. `null` and `undefined` query values are skipped. Absolute `http://` and `https://` endpoint paths bypass `baseURL`.   |
-| `body`    | `undefined` stays `undefined`. `FormData`, `URLSearchParams`, `Blob`, `ArrayBuffer`, `ArrayBuffer` views (including typed arrays and `DataView`), and `ReadableStream` pass through unchanged. Other defined bodies — including strings — are JSON-stringified. |
+| Field     | Behavior                                                                                                                                                                                                                                                                           |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `method`  | Read from the endpoint key, such as `GET /pets`.                                                                                                                                                                                                                                   |
+| `url`     | `baseURL` plus path params and query string. Path params are URL-encoded. Query arrays become repeated keys, for example `tags=a&tags=b`. `null` and `undefined` query values are skipped. Absolute `http://` and `https://` endpoint paths bypass `baseURL`.                      |
+| `body`    | `undefined` stays `undefined`. `FormData`, `URLSearchParams`, `Blob`, `ArrayBuffer`, `ArrayBuffer` views (including typed arrays and `DataView`), and `ReadableStream` pass through unchanged. Other defined bodies — including strings — are JSON-stringified.                    |
 | `headers` | Client-level defaults are merged before body-derived headers and per-call headers. JSON bodies get `content-type: application/json`; passthrough bodies get no automatic content type. Later values override earlier ones case-insensitively. Adapter headers use lowercase names. |
-| `options` | Passed through to your adapter after default/per-call merging. Object options are shallow-merged; non-object options are replaced by the per-call value.                                                                                                        |
+| `options` | Passed through to your adapter after default/per-call merging. Object options are shallow-merged; non-object options are replaced by the per-call value.                                                                                                                           |
 
 Customize serialization when your API does not use the defaults:
 
@@ -501,7 +501,7 @@ Options:
 | Option    | Default | Description                                                                                                                                                                                                   |
 | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `formats` | `{}`    | Maps OpenAPI `format` values to raw TypeScript expressions. Applies to `string`, `number`, and `integer` schemas, including nullable variants. User mappings override the built-in `binary`/`byte` -> `Blob`. |
-| `headers` | `false` | Adds a typed `headers` field to each endpoint, webhook, and callback from `in: header` parameters. When false, callers may still pass arbitrary runtime headers through the client.                              |
+| `headers` | `false` | Adds a typed `headers` field to each endpoint, webhook, and callback from `in: header` parameters. When false, callers may still pass arbitrary runtime headers through the client.                           |
 
 ## OpenAPI Support
 
@@ -509,17 +509,17 @@ Options:
 
 ### Documents and operations
 
-| Feature                 | Generated behavior                                                                                                                                                                                                                                         |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Paths and HTTP methods  | `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, and `trace` operations become `"METHOD /path"` entries in `Endpoints`.                                                                                                                         |
-| Parameters              | Path parameters are required strings. Query parameters retain their schema types and requiredness. Header parameters become strings when generation uses `headers: true` or `--headers`. Cookie parameters are ignored.                                    |
-| Request bodies          | JSON-family media types are preferred, followed by the first media type with a schema. `requestBody.required: true` emits `body: T`; otherwise it emits `body?: T`. An absent or schema-less body emits `body: void`.                                      |
+| Feature                 | Generated behavior                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Paths and HTTP methods  | `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, and `trace` operations become `"METHOD /path"` entries in `Endpoints`.                                                                                                                                                                                                                                              |
+| Parameters              | Path parameters are required strings. Query parameters retain their schema types and requiredness. Header parameters become strings when generation uses `headers: true` or `--headers`. Cookie parameters are ignored.                                                                                                                                                         |
+| Request bodies          | JSON-family media types are preferred, followed by the first media type with a schema. `requestBody.required: true` emits `body: T`; otherwise it emits `body?: T`. An absent or schema-less body emits `body: void`.                                                                                                                                                           |
 | Responses               | OpenAPI response keys are preserved, including `"200"`, `"4XX"`, and `"default"`. Selection prefers JSON-family content with a schema, followed by binary (`Blob`), text (`string`), and then the first other schema-bearing media type. If content exists but none of its media types has a schema, the first entry becomes `Blob`; a response without content becomes `void`. |
-| Missing responses       | OpenAPI 3.0 operations must declare `responses`. In OpenAPI 3.1, a missing or empty response map emits `response: unknown`.                                                                                                                                |
-| OpenAPI 3.1 `webhooks`  | Webhook operations become entries in a parallel `Webhooks` interface, using `payload` for the incoming body and `reply` for responses.                                                                                                                     |
-| Callbacks               | Inline callbacks and local `components.callbacks` references become entries in a parallel `Callbacks` interface, using receiving-side `payload` and `reply` fields.                                                                                        |
-| Local component `$ref`s | Local references to component path items, parameters, request bodies, responses, and callbacks are resolved before generation. Schema references are validated and remain named `Schemas.*` references.                                                    |
-| Documentation metadata  | Document info, operation/schema/property descriptions, summaries, and deprecation markers are retained where they map to the generated declaration.                                                                                                        |
+| Missing responses       | OpenAPI 3.0 operations must declare `responses`. In OpenAPI 3.1, a missing or empty response map emits `response: unknown`.                                                                                                                                                                                                                                                     |
+| OpenAPI 3.1 `webhooks`  | Webhook operations become entries in a parallel `Webhooks` interface, using `payload` for the incoming body and `reply` for responses.                                                                                                                                                                                                                                          |
+| Callbacks               | Inline callbacks and local `components.callbacks` references become entries in a parallel `Callbacks` interface, using receiving-side `payload` and `reply` fields.                                                                                                                                                                                                             |
+| Local component `$ref`s | Local references to component path items, parameters, request bodies, responses, and callbacks are resolved before generation. Schema references are validated and remain named `Schemas.*` references.                                                                                                                                                                         |
+| Documentation metadata  | Document info, operation/schema/property descriptions, summaries, and deprecation markers are retained where they map to the generated declaration.                                                                                                                                                                                                                             |
 
 ### Schemas
 
@@ -546,21 +546,26 @@ Options:
 
 ## Limitations
 
-- Swagger 2.0. Convert to OpenAPI 3 first.
-- OpenAPI 3.2.
-- `readOnly` / `writeOnly` request and response variants.
+### Unsupported inputs
+
+- Swagger 2.0 and OpenAPI 3.2.
 - External `$ref` targets such as remote URLs or separate files.
-- Non-component discriminator `$ref` branches. Inline branches without an existing single-string `const` or `enum` are preserved but cannot be augmented with an inferred discriminator value.
-- Cookie parameters (`in: cookie`). They are parsed but not emitted.
+
+### Features not generated
+
+- `readOnly` / `writeOnly` request and response variants.
+- Cookie parameters and parameter `content`.
 - Response headers and reusable `components.headers`.
-- Parameter `content`; parameters must provide a `schema` to contribute a generated type.
 - Parameter serialization keywords such as `style`, `explode`, and `allowReserved`.
-- `additionalProperties: false` cannot enforce exact object types under TypeScript's structural type system.
-- Without `prefixItems`, boolean `items: false` is currently approximated as `unknown[]` rather than an element-free array.
-- Path parameters declared on callback path items are not represented in callback entries; query parameters and optionally generated headers are retained.
-- Callbacks nested inside callback operations.
-- OpenAPI sections that do not contribute to generated declarations, including `servers`, `security`, `securitySchemes`, `links`, and `examples`.
-- JSON Schema keywords outside the supported feature table, such as `not`, `if`/`then`/`else`, and `unevaluatedProperties`.
+- Path parameters on callback path items and callbacks nested inside callback operations.
+- Sections such as `servers`, `security`, `securitySchemes`, `links`, and `examples`.
+
+### Type system approximations
+
+- `oneOf` exclusivity and exact objects with `additionalProperties: false` cannot be enforced by TypeScript.
+- Non-component discriminator references cannot receive inferred discriminator values.
+- Without `prefixItems`, `items: false` is approximated as `unknown[]`.
+- Unsupported JSON Schema keywords include `not`, `if` / `then` / `else`, and `unevaluatedProperties`.
 
 ## License
 
