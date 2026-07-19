@@ -9,7 +9,7 @@ Generate TypeScript API contracts from OpenAPI 3.0/3.1 JSON or YAML—without ge
 
 `openapi-shape` turns operations and schemas into a compact declaration file. Use those types directly, or pair them with the optional transport-agnostic client while keeping fetch, axios, ky, ofetch, authentication, retries, caching, and response parsing under your control.
 
-- **Contract-first:** endpoint keys, request inputs, response status maps, schemas, and webhooks stay aligned with your OpenAPI document.
+- **Contract-first:** endpoint keys, request inputs, response status maps, schemas, webhooks, and callbacks stay aligned with your OpenAPI document.
 - **Client-agnostic:** bring your existing HTTP stack instead of adopting generated runtime code.
 - **CI-friendly:** generate from a local file or URL and detect stale output with `--check`.
 - **Small runtime footprint:** generated declarations have no runtime dependency; install the client only when you need it.
@@ -95,7 +95,7 @@ The shape is intentionally predictable:
 - Each endpoint has `params`, `query`, `body`, and `response`.
 - `response` is a map keyed by OpenAPI response keys such as `"200"`, `"404"`, or `"default"`.
 - OpenAPI `components.schemas` are grouped under `Schemas`.
-- `void` means that the request slot is not used by the operation.
+- In request slots, `void` means the operation does not use that input. In a response map, it means that status has no response body.
 - The generated file can be committed or regenerated in CI.
 
 ### Webhooks
@@ -107,7 +107,7 @@ export interface Webhooks {
   "POST pet.created": {
     query: void
     payload: Schemas.Pet
-    reply: void
+    reply: { "204": void }
   }
 }
 ```
@@ -250,7 +250,7 @@ The optional client builds adapter input with these rules:
 | `method`  | Read from the endpoint key, such as `GET /pets`.                                                                                                                                                                                                                |
 | `url`     | `baseURL` plus path params and query string. Path params are URL-encoded. Query arrays become repeated keys, for example `tags=a&tags=b`. `null` and `undefined` query values are skipped. Absolute `http://` and `https://` endpoint paths bypass `baseURL`.   |
 | `body`    | `undefined` stays `undefined`. `FormData`, `URLSearchParams`, `Blob`, `ArrayBuffer`, `ArrayBuffer` views (including typed arrays and `DataView`), and `ReadableStream` pass through unchanged. Other defined bodies — including strings — are JSON-stringified. |
-| `headers` | JSON bodies get `content-type: application/json`. Passthrough bodies get no automatic content type. Per-call headers override automatic headers case-insensitively. Adapter headers use lowercase names.                                                        |
+| `headers` | Client-level defaults are merged before body-derived headers and per-call headers. JSON bodies get `content-type: application/json`; passthrough bodies get no automatic content type. Later values override earlier ones case-insensitively. Adapter headers use lowercase names. |
 | `options` | Passed through to your adapter after default/per-call merging. Object options are shallow-merged; non-object options are replaced by the per-call value.                                                                                                        |
 
 Customize serialization when your API does not use the defaults:
@@ -334,6 +334,7 @@ const adapter: Adapter = async ({ method, url, body, headers }) => {
 
 export const api = createClient<Endpoints>(adapter, {
   baseURL: "https://api.example.com",
+  headers: { Authorization: "Bearer token" },
 })
 ```
 
@@ -497,7 +498,7 @@ Options:
 | Option    | Default | Description                                                                                                                                                                                                   |
 | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `formats` | `{}`    | Maps OpenAPI `format` values to raw TypeScript expressions. Applies to `string`, `number`, and `integer` schemas, including nullable variants. User mappings override the built-in `binary`/`byte` -> `Blob`. |
-| `headers` | `false` | Adds a typed `headers` field to each endpoint/webhook from `in: header` parameters. When false, callers may still pass arbitrary runtime headers through the client.                                          |
+| `headers` | `false` | Adds a typed `headers` field to each endpoint, webhook, and callback from `in: header` parameters. When false, callers may still pass arbitrary runtime headers through the client.                              |
 
 ## OpenAPI Support
 
@@ -510,7 +511,7 @@ Options:
 | Paths and HTTP methods  | `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, and `trace` operations become `"METHOD /path"` entries in `Endpoints`.                                                                                                                         |
 | Parameters              | Path parameters are required strings. Query parameters retain their schema types and requiredness. Header parameters become strings when generation uses `headers: true` or `--headers`. Cookie parameters are ignored.                                    |
 | Request bodies          | JSON-family media types are preferred, followed by the first media type with a schema. `requestBody.required: true` emits `body: T`; otherwise it emits `body?: T`. An absent or schema-less body emits `body: void`.                                      |
-| Responses               | OpenAPI response keys are preserved, including `"200"`, `"4XX"`, and `"default"`. JSON-family content is preferred, followed by binary (`Blob`), text (`string`), and then the first schema-bearing media type. A response without content becomes `void`. |
+| Responses               | OpenAPI response keys are preserved, including `"200"`, `"4XX"`, and `"default"`. Selection prefers JSON-family content with a schema, followed by binary (`Blob`), text (`string`), and then the first other schema-bearing media type. If content exists but none of its media types has a schema, the first entry becomes `Blob`; a response without content becomes `void`. |
 | Missing responses       | OpenAPI 3.0 operations must declare `responses`. In OpenAPI 3.1, a missing or empty response map emits `response: unknown`.                                                                                                                                |
 | OpenAPI 3.1 `webhooks`  | Webhook operations become entries in a parallel `Webhooks` interface, using `payload` for the incoming body and `reply` for responses.                                                                                                                     |
 | Callbacks               | Inline callbacks and local `components.callbacks` references become entries in a parallel `Callbacks` interface, using receiving-side `payload` and `reply` fields.                                                                                        |
@@ -529,7 +530,7 @@ Options:
 | `discriminator`            | For component `$ref` branches, required string literals are injected and explicit mappings are honored. Inline branches are accepted; an existing single-string `const` or `enum` discriminator is made required for narrowing. |
 | OpenAPI 3.0 `nullable`     | Typed nullable schemas become an explicit union with `null`, retaining constraints such as `enum` and composition.                                                                                                              |
 | OpenAPI 3.1 type arrays    | `type: ["T", "null"]` and other type arrays become TypeScript unions. An `enum` remains authoritative, so `null` is included only when it appears in the enum.                                                                  |
-| Arrays and tuples          | `items` becomes an array element type. `prefixItems` becomes a tuple head, with an optional rest element derived from `items`.                                                                                                  |
+| Arrays and tuples          | Schema-valued `items` becomes an array element type. `prefixItems` becomes a tuple head, with an optional rest element derived from `items`; `items: true` produces an `unknown` rest element.                                  |
 | `additionalProperties`     | `true` produces an `unknown` index signature. Schema-valued entries use `T`; dictionary-only objects become `Record<string, T>`, while declared objects receive a compatible index signature.                                   |
 | `patternProperties`        | Pattern value schemas are folded into a string index signature. When multiple patterns exist, their value types become a union; regular-expression key constraints are not preserved by TypeScript.                             |
 | Formats                    | `binary` and `byte` map to `Blob`. The programmatic `formats` option can map other string, number, or integer formats to custom TypeScript expressions.                                                                         |
@@ -551,6 +552,8 @@ Options:
 - Response headers and reusable `components.headers`.
 - Parameter serialization keywords such as `style`, `explode`, and `allowReserved`.
 - `additionalProperties: false` cannot enforce exact object types under TypeScript's structural type system.
+- Without `prefixItems`, boolean `items: false` is currently approximated as `unknown[]` rather than an element-free array.
+- Path parameters declared on callback path items are not represented in callback entries; query parameters and optionally generated headers are retained.
 - Callbacks nested inside callback operations.
 - OpenAPI sections that do not contribute to generated declarations, including `servers`, `security`, `securitySchemes`, `links`, and `examples`.
 - JSON Schema keywords outside the supported feature table, such as `not`, `if`/`then`/`else`, and `unevaluatedProperties`.
