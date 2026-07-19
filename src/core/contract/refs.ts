@@ -1,7 +1,14 @@
 import { isObject } from "../shared/object"
 import { decodePointerSegment } from "../shared/pointer"
 import { LoadError } from "./errors"
-import type { OpenAPIDocument, PathItem, Parameter, RequestBody, Response } from "./openapi"
+import type {
+  Callback,
+  OpenAPIDocument,
+  PathItem,
+  Parameter,
+  RequestBody,
+  Response,
+} from "./openapi"
 import { mapDocument } from "./walk"
 
 const REF_BUCKETS = {
@@ -9,6 +16,7 @@ const REF_BUCKETS = {
   parameters: "#/components/parameters/",
   requestBodies: "#/components/requestBodies/",
   responses: "#/components/responses/",
+  callbacks: "#/components/callbacks/",
 } as const
 
 type RefBucket = keyof typeof REF_BUCKETS
@@ -18,13 +26,14 @@ interface BucketTypes {
   parameters: Parameter
   requestBodies: RequestBody
   responses: Response
+  callbacks: Callback
 }
 
 /**
  * Resolve supported component references in an OpenAPI document.
  *
- * Path item, parameter, request body, and response refs are resolved. Schema
- * refs remain intact so declarations can emit named references.
+ * Path item, parameter, request body, response, and callback refs are resolved.
+ * Schema refs remain intact so declarations can emit named references.
  *
  * Throws `LoadError` for wrong component buckets, missing refs, and cycles.
  */
@@ -35,6 +44,7 @@ export function resolveRefs(doc: OpenAPIDocument): OpenAPIDocument {
     parameter: (p, location) => resolver.resolve(p, "parameters", location),
     requestBody: (b, location) => resolver.resolve(b, "requestBodies", location),
     response: (r, location) => resolver.resolve(r, "responses", location),
+    callback: (callback, location) => resolver.resolve(callback, "callbacks", location),
   })
 }
 

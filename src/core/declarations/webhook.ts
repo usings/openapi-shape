@@ -1,7 +1,5 @@
 import type { WebhookOperation } from "../contract/contract"
-import { safeKey } from "../shared/naming"
-import { entryDocHeader, renderBody, renderParam, renderResponseMap } from "./entry"
-import { indentContinuation } from "./format"
+import { renderOperationEntry } from "./operation"
 import type { DeclarationOptions } from "./options"
 
 export function renderWebhooksInterface(
@@ -13,15 +11,5 @@ export function renderWebhooksInterface(
 }
 
 function renderWebhookEntry(webhook: WebhookOperation, options: DeclarationOptions): string {
-  const docHeader = entryDocHeader(webhook)
-  const lines: string[] = []
-  lines.push(`    query: ${indentContinuation(renderParam(webhook.query, options), "    ")}`)
-  if (options.headers) {
-    lines.push(`    headers: ${indentContinuation(renderParam(webhook.headers, options), "    ")}`)
-  }
-  lines.push(`    ${renderBody(webhook.body, "payload", options)}`)
-  lines.push(
-    `    reply: ${indentContinuation(renderResponseMap(webhook.responses, options), "    ")}`,
-  )
-  return `${docHeader}  ${safeKey(webhook.key)}: {\n${lines.join("\n")}\n  }`
+  return renderOperationEntry(webhook, { bodyKey: "payload", responseKey: "reply" }, options)
 }

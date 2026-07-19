@@ -23,6 +23,7 @@ export function normalize(raw: unknown): OpenAPIDocument {
 }
 
 function rewrite30Schema(schema: OpenAPISchema): OpenAPISchema {
+  if (typeof schema === "boolean") return schema
   if (!schema.nullable) return schema
   if (typeof schema.type !== "string") return schema
   const { nullable: _n, ...nonNullSchema } = schema

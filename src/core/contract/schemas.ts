@@ -26,8 +26,14 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
   for (const [originalName, schema] of Object.entries(raw)) {
     const name = safeIdentifier(originalName)
     // Interfaces cannot express composition alongside sibling properties.
-    const hasComposition = schema.allOf ?? schema.oneOf ?? schema.anyOf
-    if (schema.type === "object" && schema.properties && !hasComposition) {
+    const hasComposition =
+      typeof schema === "object" ? (schema.allOf ?? schema.oneOf ?? schema.anyOf) : undefined
+    if (
+      typeof schema === "object" &&
+      schema.type === "object" &&
+      schema.properties &&
+      !hasComposition
+    ) {
       const required = new Set<string>(schema.required ?? [])
       const fields: ContractField[] = Object.entries(schema.properties).map(([fname, fschema]) => ({
         name: fname,
@@ -41,7 +47,6 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
         originalName,
         kind: "interface",
         fields,
-        shape: null,
         ...(index !== null && { index }),
         docs: docBlock(schema),
         source: { location: `/components/schemas/${escapePointerSegment(originalName)}` },
@@ -51,7 +56,6 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
         name,
         originalName,
         kind: "alias",
-        fields: null,
         shape: schemaShape(schema),
         docs: docBlock(schema),
         source: { location: `/components/schemas/${escapePointerSegment(originalName)}` },

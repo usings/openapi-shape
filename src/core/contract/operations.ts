@@ -1,4 +1,4 @@
-import { escapePointerSegment } from "../shared/pointer"
+import { appendPointer } from "../shared/pointer"
 import type { ContractOperation, ContractField, ContractPayload, DocBlock } from "./contract"
 import { BuildError } from "./errors"
 import type {
@@ -9,8 +9,9 @@ import type {
   RequestBody,
   MediaType,
   HttpMethod,
+  Callback,
 } from "./openapi"
-import { HTTP_METHODS } from "./openapi"
+import { HTTP_METHODS, isCallbackReference } from "./openapi"
 import { buildResponses, isJsonContentType } from "./outcomes"
 import { schemaShape } from "./shapes"
 
@@ -22,6 +23,56 @@ export function buildOperations(doc: OpenAPIDocument): ContractOperation[] {
   ]
 }
 
+function walkCallbacks(
+  callbacks: Record<string, Callback>,
+  parentKey: string,
+  parentLocation: string,
+  responsesRequired: boolean,
+): ContractOperation[] {
+  const out: ContractOperation[] = []
+  for (const [callbackName, callback] of Object.entries(callbacks)) {
+    if (isCallbackReference(callback)) continue
+    for (const [expression, callbackPathItem] of Object.entries(callback)) {
+      if (!callbackPathItem || typeof callbackPathItem !== "object") continue
+      const pathParams = callbackPathItem.parameters ?? []
+      for (const method of HTTP_METHODS) {
+        const op = callbackPathItem[method]
+        if (!op) continue
+        const location = appendPointer(
+          parentLocation,
+          "callbacks",
+          callbackName,
+          expression,
+          method,
+        )
+        requireResponses(op, location, responsesRequired, "Callback operation")
+        const merged = mergeParameters(pathParams, op.parameters ?? [])
+        const base = buildBase(method, expression, merged, op, location)
+        out.push({
+          ...base,
+          kind: "callback",
+          key: `${parentKey} > ${callbackName} > ${base.key}`,
+          parentKey,
+          callbackName,
+          expression,
+          source: { location },
+        })
+      }
+    }
+  }
+  return out
+}
+
+function requireResponses(
+  operation: Operation,
+  location: string,
+  required: boolean,
+  label = "Operation",
+): void {
+  if (required && !operation.responses) {
+    throw new BuildError(`${label} is missing required responses at ${location}`)
+  }
+}
 function walkPathItems(
   items: Record<string, PathItem>,
   kind: "endpoint" | "webhook",
@@ -35,25 +86,30 @@ function walkPathItems(
     for (const method of HTTP_METHODS) {
       const op = pathItem[method]
       if (!op) continue
-      if (responsesRequired && !op.responses) {
-        throw new BuildError(
-          `Operation is missing required responses at ${locationRoot}/${label}/${method}`,
-        )
-      }
+      const location = appendPointer(locationRoot, label, method)
+      requireResponses(op, location, responsesRequired)
       const merged = mergeParameters(pathParams, op.parameters ?? [])
-      const base = buildBase(method, label, merged, op)
-      const source = { location: `${locationRoot}/${escapePointerSegment(label)}/${method}` }
+      const base = buildBase(method, label, merged, op, location)
+      const source = { location }
       out.push(
         kind === "endpoint"
           ? { ...base, kind: "endpoint", path: label, params: buildParams(merged), source }
           : { ...base, kind: "webhook", name: label, source },
       )
+      if (op.callbacks)
+        out.push(...walkCallbacks(op.callbacks, base.key, location, responsesRequired))
     }
   }
   return out
 }
 
-function buildBase(method: HttpMethod, label: string, merged: Parameter[], op: Operation) {
+function buildBase(
+  method: HttpMethod,
+  label: string,
+  merged: Parameter[],
+  op: Operation,
+  location: string,
+) {
   return {
     key: `${method.toUpperCase()} ${label}`,
     method,
@@ -65,7 +121,7 @@ function buildBase(method: HttpMethod, label: string, merged: Parameter[], op: O
     query: buildQuery(merged),
     headers: buildHeaders(merged),
     body: buildBody(op.requestBody),
-    responses: buildResponses(op.responses ?? {}),
+    responses: buildResponses(op.responses ?? {}, appendPointer(location, "responses")),
   }
 }
 

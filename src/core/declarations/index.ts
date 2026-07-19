@@ -1,4 +1,10 @@
-import type { Contract, EndpointOperation, WebhookOperation } from "../contract/contract"
+import type {
+  CallbackOperation,
+  Contract,
+  EndpointOperation,
+  WebhookOperation,
+} from "../contract/contract"
+import { renderCallbacksInterface } from "./callback"
 import { renderEndpointsInterface } from "./endpoint"
 import { renderInfo } from "./info"
 import type { DeclarationOptions } from "./options"
@@ -13,9 +19,13 @@ export function renderDeclarations(contract: Contract, options: DeclarationOptio
     (op): op is EndpointOperation => op.kind === "endpoint",
   )
   const webhooks = contract.operations.filter((op): op is WebhookOperation => op.kind === "webhook")
+  const callbacks = contract.operations.filter(
+    (op): op is CallbackOperation => op.kind === "callback",
+  )
   parts.push(renderInfo(contract.info))
   if (endpoints.length > 0) parts.push(renderEndpointsInterface(endpoints, options))
   if (webhooks.length > 0) parts.push(renderWebhooksInterface(webhooks, options))
+  if (callbacks.length > 0) parts.push(renderCallbacksInterface(callbacks, options))
   if (contract.schemas.length > 0) parts.push(renderSchemas(contract.schemas, options))
   return `${parts.join("\n\n")}\n`
 }

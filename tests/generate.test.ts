@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { LoadError } from "../src/core/contract/errors"
 import { generate } from "../src/index"
 import { expectPassesTsc } from "./_helpers/tsc"
 
@@ -60,6 +61,41 @@ describe("generate (integration)", () => {
     expect(code).toContain("query: { p?: string }")
   })
 
+  it("decodes and validates local schema refs", () => {
+    const code = generate({
+      components: {
+        schemas: {
+          "User/Profile": { type: "object", properties: { id: { type: "string" } } },
+          "Result": { $ref: "#/components/schemas/User~1Profile" },
+        },
+      },
+    })
+    expect(code).toContain("export type Result = User_Profile")
+    expect(code).toContain("export interface User_Profile")
+  })
+
+  it("rejects missing, non-component, and external schema refs", () => {
+    expect(() =>
+      generate({ components: { schemas: { Result: { $ref: "#/components/schemas/Missing" } } } }),
+    ).toThrow(LoadError)
+    expect(() =>
+      generate({ components: { schemas: { Result: { $ref: "#/$defs/Result" } } } }),
+    ).toThrow(LoadError)
+    expect(() =>
+      generate({ components: { schemas: { Result: { $ref: "./models.yaml#/Pet" } } } }),
+    ).toThrow(LoadError)
+  })
+
+  it("maps OpenAPI 3.1 boolean schemas to unknown and never", async () => {
+    const code = generate({
+      openapi: "3.1.0",
+      components: { schemas: { Anything: true, Nothing: false } },
+    })
+    expect(code).toContain("export type Anything = unknown")
+    expect(code).toContain("export type Nothing = never")
+    await expectPassesTsc([code])
+  })
+
   it("generate(doc) injects discriminator literals end-to-end", () => {
     const code = generate({
       components: {
@@ -110,6 +146,65 @@ describe("generate (integration)", () => {
       'export type Cat = BaseAnimal & {\n    purr?: string\n    type: "cat"\n  }',
     )
     expect(code).toContain("export type Animal = Cat")
+  })
+
+  it("generate(doc) supports inline discriminator branches", () => {
+    const code = generate({
+      components: {
+        schemas: {
+          Animal: {
+            oneOf: [
+              {
+                type: "object",
+                properties: { type: { const: "cat" }, purr: { type: "string" } },
+              },
+              {
+                type: "object",
+                properties: { type: { enum: ["dog"] }, bark: { type: "string" } },
+              },
+            ],
+            discriminator: { propertyName: "type" },
+          },
+        },
+      },
+    })
+    expect(code).toContain('type: "cat"')
+    expect(code).toContain('type: "dog"')
+  })
+
+  it("generate(doc) emits callback types from a component ref", async () => {
+    const code = generate({
+      components: {
+        callbacks: {
+          OnEvent: {
+            "{$request.body#/callbackUrl}": {
+              post: {
+                requestBody: {
+                  required: true,
+                  content: { "application/json": { schema: { type: "string" } } },
+                },
+                responses: { "204": { description: "accepted" } },
+              },
+            },
+          },
+        },
+      },
+      paths: {
+        "/subscribe": {
+          post: {
+            callbacks: {
+              onEvent: { $ref: "#/components/callbacks/OnEvent" },
+            },
+            responses: { "202": { description: "subscribed" } },
+          },
+        },
+      },
+    })
+    expect(code).toContain("export interface Callbacks")
+    expect(code).toContain('"POST /subscribe > onEvent > POST {$request.body#/callbackUrl}"')
+    expect(code).toContain("payload: string")
+    expect(code).toContain('reply: { "204": void }')
+    await expectPassesTsc([code])
   })
 
   it("generates correct output for discriminator fixture", async () => {

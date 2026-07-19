@@ -6,6 +6,12 @@ import {
 } from "../../../src/core/contract/discriminators"
 import type { Injection, SchemaInjections } from "../../../src/core/contract/discriminators"
 import { LoadError } from "../../../src/core/contract/errors"
+import type { OpenAPISchemaObject } from "../../../src/core/contract/openapi"
+
+function schemaObject(value: unknown): OpenAPISchemaObject {
+  if (typeof value !== "object" || value === null) throw new Error("expected schema object")
+  return value as OpenAPISchemaObject
+}
 
 function injectionsOf(entries: Array<[string, string, string]>): SchemaInjections {
   const map: SchemaInjections = new Map()
@@ -81,8 +87,8 @@ describe("discover: walks the document for discriminator branches", () => {
     expect(found[0].value).toBe("A")
   })
 
-  it("throws when a branch is an inline schema rather than $ref", () => {
-    expect(() =>
+  it("leaves inline branches out of component injections", () => {
+    expect(
       discoverInjections({
         components: {
           schemas: {
@@ -93,7 +99,7 @@ describe("discover: walks the document for discriminator branches", () => {
           },
         },
       }),
-    ).toThrow(LoadError)
+    ).toStrictEqual([])
   })
 
   it("throws when a branch $ref points outside components.schemas", () => {
@@ -252,7 +258,7 @@ describe("apply: produces a new document with literals injected", () => {
       },
       injectionsOf([["A", "kind", "a"]]),
     )
-    const allOf = out.components?.schemas?.A.allOf as Array<Record<string, unknown>>
+    const allOf = schemaObject(out.components?.schemas?.A).allOf as Array<Record<string, unknown>>
     expect(allOf[1]).toMatchObject({
       type: "object",
       properties: { foo: { type: "string" }, kind: { const: "a" } },
@@ -271,7 +277,7 @@ describe("apply: produces a new document with literals injected", () => {
       },
       injectionsOf([["A", "kind", "a"]]),
     )
-    const allOf = out.components?.schemas?.A.allOf as Array<Record<string, unknown>>
+    const allOf = schemaObject(out.components?.schemas?.A).allOf as Array<Record<string, unknown>>
     expect(allOf).toHaveLength(2)
     expect(allOf[1]).toStrictEqual({
       type: "object",

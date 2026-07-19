@@ -1,7 +1,5 @@
 import type { EndpointOperation } from "../contract/contract"
-import { safeKey } from "../shared/naming"
-import { entryDocHeader, renderBody, renderParam, renderResponseMap } from "./entry"
-import { indentContinuation } from "./format"
+import { renderOperationEntry } from "./operation"
 import type { DeclarationOptions } from "./options"
 
 export function renderEndpointsInterface(
@@ -13,16 +11,9 @@ export function renderEndpointsInterface(
 }
 
 function renderEndpointEntry(endpoint: EndpointOperation, options: DeclarationOptions): string {
-  const docHeader = entryDocHeader(endpoint)
-  const lines: string[] = []
-  lines.push(`    params: ${indentContinuation(renderParam(endpoint.params, options), "    ")}`)
-  lines.push(`    query: ${indentContinuation(renderParam(endpoint.query, options), "    ")}`)
-  if (options.headers) {
-    lines.push(`    headers: ${indentContinuation(renderParam(endpoint.headers, options), "    ")}`)
-  }
-  lines.push(`    ${renderBody(endpoint.body, "body", options)}`)
-  lines.push(
-    `    response: ${indentContinuation(renderResponseMap(endpoint.responses, options), "    ")}`,
+  return renderOperationEntry(
+    endpoint,
+    { params: endpoint.params, bodyKey: "body", responseKey: "response" },
+    options,
   )
-  return `${docHeader}  ${safeKey(endpoint.key)}: {\n${lines.join("\n")}\n  }`
 }

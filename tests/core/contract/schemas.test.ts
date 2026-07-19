@@ -21,7 +21,6 @@ describe("contract: schema models", () => {
         name: "User",
         originalName: "User",
         kind: "interface",
-        shape: null,
         source: { location: "/components/schemas/User" },
         docs: undefined,
         fields: [
@@ -51,7 +50,6 @@ describe("contract: schema models", () => {
       name: "Status",
       originalName: "Status",
       kind: "alias",
-      fields: null,
       shape: { kind: "schema", schema: { enum: ["a", "b"] } },
     })
   })

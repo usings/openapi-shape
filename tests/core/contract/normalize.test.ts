@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { LoadError } from "../../../src/core/contract/errors"
 import { normalize } from "../../../src/core/contract/normalize"
+import type { OpenAPISchemaObject } from "../../../src/core/contract/openapi"
+
+function schemaObject(schema: unknown): OpenAPISchemaObject {
+  return schema as OpenAPISchemaObject
+}
 
 describe("normalize: version handling", () => {
   it.each(["3.2.0", "2.0"])("throws LoadError on unsupported version %s", (version) => {
@@ -37,7 +42,7 @@ describe("normalize: 3.0 nullable rewrite", () => {
         },
       },
     })
-    expect(out.components?.schemas?.X?.properties?.a).toStrictEqual({
+    expect(schemaObject(out.components?.schemas?.X).properties?.a).toStrictEqual({
       anyOf: [{ type: "integer" }, { type: "null" }],
     })
   })
@@ -53,7 +58,7 @@ describe("normalize: 3.0 nullable rewrite", () => {
         },
       },
     })
-    expect(out.components?.schemas?.X?.oneOf?.[0]).toStrictEqual({
+    expect(schemaObject(out.components?.schemas?.X).oneOf?.[0]).toStrictEqual({
       anyOf: [{ type: "string" }, { type: "null" }],
     })
   })
@@ -70,7 +75,7 @@ describe("normalize: 3.0 nullable rewrite", () => {
         },
       },
     })
-    expect(out.components?.schemas?.X?.patternProperties?.["^x-"]).toStrictEqual({
+    expect(schemaObject(out.components?.schemas?.X).patternProperties?.["^x-"]).toStrictEqual({
       anyOf: [{ type: "string" }, { type: "null" }],
     })
   })
@@ -88,10 +93,10 @@ describe("normalize: 3.0 nullable rewrite", () => {
         },
       },
     })
-    expect(out.components?.schemas?.X?.items).toStrictEqual({
+    expect(schemaObject(out.components?.schemas?.X).items).toStrictEqual({
       anyOf: [{ type: "string" }, { type: "null" }],
     })
-    expect(out.components?.schemas?.Y?.prefixItems?.[0]).toStrictEqual({
+    expect(schemaObject(out.components?.schemas?.Y).prefixItems?.[0]).toStrictEqual({
       anyOf: [{ type: "string" }, { type: "null" }],
     })
   })

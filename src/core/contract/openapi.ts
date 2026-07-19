@@ -44,6 +44,7 @@ export interface Components {
   requestBodies?: Record<string, RequestBody>
   responses?: Record<string, Response>
   pathItems?: Record<string, PathItem>
+  callbacks?: Record<string, Callback>
 }
 
 /** OpenAPI path item object for endpoints, webhooks, and path item components. */
@@ -75,6 +76,15 @@ export interface Operation {
   requestBody?: RequestBody
   /** Response map keyed by OpenAPI response status keys. */
   responses?: Record<string, Response>
+  /** Out-of-band requests initiated in response to this operation. */
+  callbacks?: Record<string, Callback>
+}
+
+/** OpenAPI callback object or unresolved callback component reference. */
+export type Callback = { $ref: string } | Record<string, PathItem>
+
+export function isCallbackReference(callback: Callback): callback is { $ref: string } {
+  return "$ref" in callback && typeof callback.$ref === "string"
 }
 
 /** OpenAPI parameter object or unresolved parameter reference. */
@@ -131,7 +141,9 @@ export interface Discriminator {
  * This type intentionally models only keywords used by normalization,
  * discriminator injection, contract building, and declaration rendering.
  */
-export interface OpenAPISchema {
+export type OpenAPISchema = boolean | OpenAPISchemaObject
+
+export interface OpenAPISchemaObject {
   /** Schema reference. Schema `$ref`s are preserved for declaration rendering. */
   $ref?: string
   /** JSON Schema type or OpenAPI 3.1 nullable-style type array. */
@@ -169,4 +181,8 @@ export interface OpenAPISchema {
   description?: string
   summary?: string
   deprecated?: boolean
+}
+
+export function isSchemaObject(schema: OpenAPISchema | undefined): schema is OpenAPISchemaObject {
+  return typeof schema === "object" && schema !== null
 }

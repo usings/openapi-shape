@@ -137,7 +137,6 @@ describe("renderSchemas: ordering (aliases first, interfaces second)", () => {
         name: "User",
         originalName: "User",
         kind: "interface",
-        shape: null,
         fields: [
           { name: "id", required: true, shape: { kind: "schema", schema: { type: "number" } } },
         ],
@@ -146,7 +145,6 @@ describe("renderSchemas: ordering (aliases first, interfaces second)", () => {
         name: "Status",
         originalName: "Status",
         kind: "alias",
-        fields: null,
         shape: { kind: "schema", schema: { enum: ["a", "b"] } },
       },
     ]
@@ -165,7 +163,6 @@ describe("renderSchemas: schema shape conversion", () => {
         name: "User",
         originalName: "User",
         kind: "interface",
-        shape: null,
         fields: [
           {
             name: "id",
@@ -184,7 +181,6 @@ describe("renderSchemas: schema shape conversion", () => {
         name: "UserList",
         originalName: "UserList",
         kind: "alias",
-        fields: null,
         shape: {
           kind: "schema",
           schema: { type: "array", items: { $ref: "#/components/schemas/User" } },

@@ -129,6 +129,22 @@ function onPetCreated(payload: Webhooks["POST pet.created"]["payload"]) {
 }
 ```
 
+### Callbacks
+
+OpenAPI callbacks are emitted in a parallel `Callbacks` interface. Each key includes the parent operation, callback name, callback method, and runtime expression so entries remain unique across the document:
+
+```ts
+export interface Callbacks {
+  "POST /subscriptions > onEvent > POST {$request.body#/callbackUrl}": {
+    query: void
+    payload: Schemas.Event
+    reply: { "204": void }
+  }
+}
+```
+
+Callback entries use the same receiving-side `payload` and `reply` vocabulary as webhooks. Inline callbacks and local references to `components.callbacks` are supported.
+
 ## CLI
 
 ```sh
@@ -485,7 +501,7 @@ Options:
 
 ## OpenAPI Support
 
-`openapi-shape` supports a focused subset of OpenAPI 3.0.x and 3.1.x. It reads JSON or YAML and generates types for operations, reusable schemas, and OpenAPI 3.1 webhooks; it is not a full OpenAPI or JSON Schema implementation.
+`openapi-shape` supports a focused subset of OpenAPI 3.0.x and 3.1.x. It reads JSON or YAML and generates types for operations, callbacks, reusable schemas, and OpenAPI 3.1 webhooks; it is not a full OpenAPI or JSON Schema implementation.
 
 ### Documents and operations
 
@@ -497,25 +513,26 @@ Options:
 | Responses               | OpenAPI response keys are preserved, including `"200"`, `"4XX"`, and `"default"`. JSON-family content is preferred, followed by binary (`Blob`), text (`string`), and then the first schema-bearing media type. A response without content becomes `void`. |
 | Missing responses       | OpenAPI 3.0 operations must declare `responses`. In OpenAPI 3.1, a missing or empty response map emits `response: unknown`.                                                                                                                                |
 | OpenAPI 3.1 `webhooks`  | Webhook operations become entries in a parallel `Webhooks` interface, using `payload` for the incoming body and `reply` for responses.                                                                                                                     |
-| Local component `$ref`s | Local references to component path items, parameters, request bodies, and responses are resolved before generation. Schema references remain named `Schemas.*` references.                                                                                 |
+| Callbacks               | Inline callbacks and local `components.callbacks` references become entries in a parallel `Callbacks` interface, using receiving-side `payload` and `reply` fields.                                                                                        |
+| Local component `$ref`s | Local references to component path items, parameters, request bodies, responses, and callbacks are resolved before generation. Schema references are validated and remain named `Schemas.*` references.                                                    |
 | Documentation metadata  | Document info, operation/schema/property descriptions, summaries, and deprecation markers are retained where they map to the generated declaration.                                                                                                        |
 
 ### Schemas
 
-| Feature                              | TypeScript output                                                                                                                                                                                             |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `components.schemas`                 | Named declarations under `export namespace Schemas`. Simple object models become `interface`s; aliases, primitives, unions, and composed schemas become `type`s.                                              |
-| Primitive and object types           | `string`, `number`/`integer`, `boolean`, `null`, object properties, and required properties map to their TypeScript equivalents. Unknown or unsupported schema shapes fall back to `unknown`.                 |
-| `enum` / `const`                     | Primitive values become literal types and literal unions. Empty enums become `never`; unsupported literal values become `unknown`.                                                                            |
-| `oneOf` / `anyOf`                    | Approximated as deduplicated TypeScript unions. TypeScript does not preserve `oneOf` exclusivity.                                                                                                             |
-| `allOf`                              | TypeScript intersections. Meaningful sibling constraints beside `allOf`, `oneOf`, or `anyOf` are retained as an additional intersection member.                                                               |
-| `discriminator`                      | For `$ref` branches in `oneOf` or `anyOf`, required string literal properties are injected into referenced component schemas so TypeScript can narrow the union. Explicit discriminator mappings are honored. |
-| OpenAPI 3.0 `nullable`               | Typed nullable schemas become an explicit union with `null`, retaining constraints such as `enum` and composition.                                                                                            |
-| OpenAPI 3.1 type arrays              | `type: ["T", "null"]` and other type arrays become TypeScript unions. An `enum` remains authoritative, so `null` is included only when it appears in the enum.                                                |
-| Arrays and tuples                    | `items` becomes an array element type. `prefixItems` becomes a tuple head, with an optional rest element derived from `items`.                                                                                |
-| Schema-valued `additionalProperties` | Dictionary-only objects become `Record<string, T>`; objects with declared properties receive an index signature widened to include those property types.                                                      |
-| `patternProperties`                  | Pattern value schemas are folded into a string index signature. When multiple patterns exist, their value types become a union; regular-expression key constraints are not preserved by TypeScript.           |
-| Formats                              | `binary` and `byte` map to `Blob`. The programmatic `formats` option can map other string, number, or integer formats to custom TypeScript expressions.                                                       |
+| Feature                    | TypeScript output                                                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `components.schemas`       | Named declarations under `export namespace Schemas`. Simple object models become `interface`s; aliases, primitives, unions, and composed schemas become `type`s.                                                                |
+| Primitive and object types | `string`, `number`/`integer`, `boolean`, `null`, object properties, and required properties map to their TypeScript equivalents. Boolean schemas map `true` to `unknown` and `false` to `never`.                                |
+| `enum` / `const`           | Primitive values become literal types and literal unions. Empty enums become `never`; unsupported literal values become `unknown`.                                                                                              |
+| `oneOf` / `anyOf`          | Approximated as deduplicated TypeScript unions. TypeScript does not preserve `oneOf` exclusivity.                                                                                                                               |
+| `allOf`                    | TypeScript intersections. Meaningful sibling constraints beside `allOf`, `oneOf`, or `anyOf` are retained as an additional intersection member.                                                                                 |
+| `discriminator`            | For component `$ref` branches, required string literals are injected and explicit mappings are honored. Inline branches are accepted; an existing single-string `const` or `enum` discriminator is made required for narrowing. |
+| OpenAPI 3.0 `nullable`     | Typed nullable schemas become an explicit union with `null`, retaining constraints such as `enum` and composition.                                                                                                              |
+| OpenAPI 3.1 type arrays    | `type: ["T", "null"]` and other type arrays become TypeScript unions. An `enum` remains authoritative, so `null` is included only when it appears in the enum.                                                                  |
+| Arrays and tuples          | `items` becomes an array element type. `prefixItems` becomes a tuple head, with an optional rest element derived from `items`.                                                                                                  |
+| `additionalProperties`     | `true` produces an `unknown` index signature. Schema-valued entries use `T`; dictionary-only objects become `Record<string, T>`, while declared objects receive a compatible index signature.                                   |
+| `patternProperties`        | Pattern value schemas are folded into a string index signature. When multiple patterns exist, their value types become a union; regular-expression key constraints are not preserved by TypeScript.                             |
+| Formats                    | `binary` and `byte` map to `Blob`. The programmatic `formats` option can map other string, number, or integer formats to custom TypeScript expressions.                                                                         |
 
 ### Identifier handling
 
@@ -529,12 +546,13 @@ Options:
 - OpenAPI 3.2.
 - `readOnly` / `writeOnly` request and response variants.
 - External `$ref` targets such as remote URLs or separate files.
-- Inline or non-component `discriminator` branches; discriminator branches must be local `$ref`s into `components.schemas`.
+- Non-component discriminator `$ref` branches. Inline branches without an existing single-string `const` or `enum` are preserved but cannot be augmented with an inferred discriminator value.
 - Cookie parameters (`in: cookie`). They are parsed but not emitted.
 - Response headers and reusable `components.headers`.
 - Parameter serialization keywords such as `style`, `explode`, and `allowReserved`.
-- Boolean `additionalProperties` policies are not emitted as explicit index signatures; only schema-valued `additionalProperties` produces a typed index signature.
-- OpenAPI sections that do not contribute to generated declarations, including `servers`, `security`, `securitySchemes`, `callbacks`, `links`, and `examples`.
+- `additionalProperties: false` cannot enforce exact object types under TypeScript's structural type system.
+- Callbacks nested inside callback operations.
+- OpenAPI sections that do not contribute to generated declarations, including `servers`, `security`, `securitySchemes`, `links`, and `examples`.
 - JSON Schema keywords outside the supported feature table, such as `not`, `if`/`then`/`else`, and `unevaluatedProperties`.
 
 ## License

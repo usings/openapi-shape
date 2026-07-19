@@ -86,6 +86,28 @@ describe("schemaToTypeNode: composition keywords with siblings", () => {
 })
 
 describe("schemaToTypeNode: index signature widening", () => {
+  it("emits an unknown index signature for additionalProperties: true", () => {
+    expect(
+      render({
+        type: "object",
+        properties: { id: { type: "number" } },
+        required: ["id"],
+        additionalProperties: true,
+      }),
+    ).toBe("{\n  id: number\n  [key: string]: unknown\n}")
+  })
+
+  it("lets additionalProperties: true subsume pattern property value types", () => {
+    expect(
+      render({
+        type: "object",
+        properties: { id: { type: "number" } },
+        patternProperties: { "^x-": { type: "string" } },
+        additionalProperties: true,
+      }),
+    ).toBe("{\n  id?: number\n  [key: string]: unknown\n}")
+  })
+
   it("widens the index type with declared property types", () => {
     expect(
       render({

@@ -1,6 +1,7 @@
 import type { DocBlock, PrimitiveName } from "../contract/contract"
 import { docBlock } from "../contract/doc"
-import type { OpenAPISchema } from "../contract/openapi"
+import type { OpenAPISchema, OpenAPISchemaObject } from "../contract/openapi"
+import { schemaNameFromRef } from "../contract/schema-ref"
 import { objectIndexSchemas } from "../contract/shapes"
 import { safeIdentifier } from "../shared/naming"
 import { isObjectAdditional } from "../shared/object"
@@ -46,7 +47,9 @@ export function schemaToTypeNode(
   schema: OpenAPISchema | undefined,
   options: DeclarationOptions,
 ): TypeNode {
-  if (!schema || isEmptySchema(schema)) return primitiveNode("unknown")
+  if (schema === undefined || schema === true) return primitiveNode("unknown")
+  if (schema === false) return primitiveNode("never")
+  if (isEmptySchema(schema)) return primitiveNode("unknown")
 
   if (schema.oneOf || schema.anyOf || schema.allOf) {
     return compositionToTypeNode(schema, options)
@@ -59,8 +62,7 @@ export function schemaToTypeNode(
   if (Array.isArray(schema.enum)) return enumToNode(schema.enum)
 
   if (schema.$ref) {
-    const last = schema.$ref.split("/").at(-1) ?? schema.$ref
-    return { kind: "ref", name: safeIdentifier(last) }
+    return { kind: "ref", name: safeIdentifier(schemaNameFromRef(schema.$ref)) }
   }
 
   return convertSingleType(schema, options)
@@ -73,7 +75,7 @@ export function schemaToTypeNode(
  * sibling `properties`, `items`, and scalar types join the intersection instead
  * of being dropped.
  */
-function compositionToTypeNode(schema: OpenAPISchema, options: DeclarationOptions): TypeNode {
+function compositionToTypeNode(schema: OpenAPISchemaObject, options: DeclarationOptions): TypeNode {
   const members: TypeNode[] = []
   if (schema.allOf) {
     members.push(...schema.allOf.map((b) => schemaToTypeNode(b, options)))
@@ -91,7 +93,7 @@ function compositionToTypeNode(schema: OpenAPISchema, options: DeclarationOption
 }
 
 function compositionSiblingNode(
-  schema: OpenAPISchema,
+  schema: OpenAPISchemaObject,
   options: DeclarationOptions,
 ): TypeNode | null {
   const { oneOf: _o, anyOf: _a, allOf: _l, discriminator: _d, ...rest } = schema
@@ -121,7 +123,7 @@ export function primitiveNode(name: DeclarationPrimitive): TypeNode {
   return { kind: "primitive", name }
 }
 
-function isEmptySchema(s: OpenAPISchema): boolean {
+function isEmptySchema(s: OpenAPISchemaObject): boolean {
   return (
     s.type === undefined &&
     !s.$ref &&
@@ -133,7 +135,7 @@ function isEmptySchema(s: OpenAPISchema): boolean {
   )
 }
 
-function typeArrayToNode(schema: OpenAPISchema, options: DeclarationOptions): TypeNode {
+function typeArrayToNode(schema: OpenAPISchemaObject, options: DeclarationOptions): TypeNode {
   const types = schema.type as string[]
   const nonNull = types.filter((t) => t !== "null")
   const includesNull = types.includes("null")
@@ -158,7 +160,7 @@ function typeArrayToNode(schema: OpenAPISchema, options: DeclarationOptions): Ty
   return { kind: "union", members: inner }
 }
 
-function convertSingleType(schema: OpenAPISchema, options: DeclarationOptions): TypeNode {
+function convertSingleType(schema: OpenAPISchemaObject, options: DeclarationOptions): TypeNode {
   const t = typeof schema.type === "string" ? schema.type : undefined
 
   if (
@@ -183,7 +185,7 @@ function convertSingleType(schema: OpenAPISchema, options: DeclarationOptions): 
   return primitiveStringToNode(t)
 }
 
-function arrayToNode(schema: OpenAPISchema, options: DeclarationOptions): TypeNode {
+function arrayToNode(schema: OpenAPISchemaObject, options: DeclarationOptions): TypeNode {
   if (Array.isArray(schema.prefixItems)) {
     const items = schema.prefixItems.map((it) => schemaToTypeNode(it, options))
     let rest: TypeNode | null = null
@@ -199,7 +201,7 @@ function arrayToNode(schema: OpenAPISchema, options: DeclarationOptions): TypeNo
   return { kind: "array", items }
 }
 
-function objectToNode(schema: OpenAPISchema, options: DeclarationOptions): TypeNode {
+function objectToNode(schema: OpenAPISchemaObject, options: DeclarationOptions): TypeNode {
   const index = objectIndexNode(schema, options)
   if (!schema.properties) {
     return { kind: "record", values: index ?? primitiveNode("unknown") }
@@ -219,6 +221,7 @@ function objectToNode(schema: OpenAPISchema, options: DeclarationOptions): TypeN
  * TypeScript. Optional properties also contribute `undefined`.
  */
 export function widenIndexNode(index: TypeNode, fields: TypeField[]): TypeNode {
+  if (index.kind === "primitive" && index.name === "unknown") return index
   const members: TypeNode[] = [
     ...(index.kind === "union" ? index.members : [index]),
     ...fields.map((f) => f.type),
@@ -232,7 +235,7 @@ export function widenIndexNode(index: TypeNode, fields: TypeField[]): TypeNode {
  * index-signature value type.
  */
 export function objectIndexNode(
-  schema: OpenAPISchema,
+  schema: OpenAPISchemaObject,
   options: DeclarationOptions,
 ): TypeNode | null {
   const values = objectIndexSchemas(schema).map((s) => schemaToTypeNode(s, options))

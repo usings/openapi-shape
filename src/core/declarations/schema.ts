@@ -106,11 +106,11 @@ export function renderSchemas(
   const interfaces: string[] = []
   for (const s of schemas) {
     const docHeader = s.docs ? jsdoc(s.docs) : ""
-    if (s.kind === "interface" && s.fields) {
+    if (s.kind === "interface") {
       interfaces.push(
         `${docHeader}export interface ${s.name} {\n${indent(renderInterfaceBody(s.fields, s.index ?? null, options))}\n}`,
       )
-    } else if (s.kind === "alias" && s.shape) {
+    } else {
       aliases.push(
         `${docHeader}export type ${s.name} = ${renderTypeNode(shapeToTypeNode(s.shape, options))}`,
       )

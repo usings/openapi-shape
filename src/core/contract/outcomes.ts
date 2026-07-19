@@ -1,8 +1,12 @@
+import { appendPointer } from "../shared/pointer"
 import type { ContractShape, ContractOutcome } from "./contract"
 import type { OpenAPISchema, MediaType, Response } from "./openapi"
 import { primitiveShape, schemaShape } from "./shapes"
 
-export function buildResponses(responses: Record<string, Response>): ContractOutcome[] {
+export function buildResponses(
+  responses: Record<string, Response>,
+  location: string,
+): ContractOutcome[] {
   const out: ContractOutcome[] = []
   for (const [status, response] of Object.entries(responses)) {
     const { shape, contentType } = pickResponseShape(response)
@@ -10,14 +14,18 @@ export function buildResponses(responses: Record<string, Response>): ContractOut
       status,
       shape,
       ...(contentType !== undefined ? { contentType } : {}),
-      source: { location: `/responses/${status}` },
+      source: { location: appendPointer(location, status) },
     })
   }
   return out
 }
 
 export function isJsonContentType(ct: string): boolean {
-  return ct.toLowerCase().includes("json")
+  const essence = ct.split(";", 1)[0].trim().toLowerCase()
+  const slash = essence.indexOf("/")
+  if (slash === -1) return false
+  const subtype = essence.slice(slash + 1)
+  return subtype === "json" || subtype.endsWith("+json")
 }
 
 function pickResponseShape(response: Response | undefined): {
@@ -70,5 +78,5 @@ function isBinaryContentType(ct: string): boolean {
 }
 
 function isBinarySchema(s: OpenAPISchema | undefined): boolean {
-  return s !== undefined && (s.format === "binary" || s.format === "byte")
+  return typeof s === "object" && (s.format === "binary" || s.format === "byte")
 }

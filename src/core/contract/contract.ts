@@ -79,8 +79,19 @@ export interface WebhookOperation extends OperationBase {
   name: string
 }
 
-/** Endpoint or webhook operation. Narrow with the `kind` discriminator. */
-export type ContractOperation = EndpointOperation | WebhookOperation
+/** An operation declared inside an OpenAPI callback expression. */
+export interface CallbackOperation extends OperationBase {
+  kind: "callback"
+  /** Key of the endpoint or webhook operation that declares the callback. */
+  parentKey: string
+  /** Name of the callback on the parent operation. */
+  callbackName: string
+  /** Runtime expression or URL used as the callback path-item key. */
+  expression: string
+}
+
+/** Endpoint, webhook, or callback operation. Narrow with the `kind` discriminator. */
+export type ContractOperation = EndpointOperation | WebhookOperation | CallbackOperation
 
 /**
  * Named field used for parameters and object properties.
@@ -133,27 +144,30 @@ export interface ContractOutcome {
  * Object schemas with properties become `interface` entries and carry `fields`.
  * Everything else becomes an `alias` entry and carries a single `shape`.
  */
-export interface ContractSchema {
+interface ContractSchemaBase {
   /** Safe TypeScript identifier used in generated declarations. */
   name: string
   /** Original OpenAPI schema name. */
   originalName: string
-  /** Rendering strategy for this schema. */
-  kind: "interface" | "alias"
-  /** Interface fields when `kind` is `"interface"`; otherwise `null`. */
-  fields: ContractField[] | null
-  /** Alias target when `kind` is `"alias"`; otherwise `null`. */
-  shape: ContractShape | null
-  /**
-   * Index-signature value type for interface schemas with `patternProperties` or
-   * schema-valued `additionalProperties`.
-   */
-  index?: ContractShape | null
   /** Documentation attached to the source schema. */
   docs?: DocBlock
   /** Source location of the schema in `components.schemas`. */
   source?: SourceRef
 }
+
+export type ContractSchema = ContractSchemaBase &
+  (
+    | {
+        kind: "interface"
+        fields: ContractField[]
+        /** Index-signature value type, when the object permits additional keys. */
+        index?: ContractShape
+      }
+    | {
+        kind: "alias"
+        shape: ContractShape
+      }
+  )
 
 /**
  * Deferred type slot used by the declaration renderer.

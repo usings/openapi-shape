@@ -11,6 +11,10 @@ function webhookOperations(contract: Contract) {
   return contract.operations.filter((operation) => operation.kind === "webhook")
 }
 
+function callbackOperations(contract: Contract) {
+  return contract.operations.filter((operation) => operation.kind === "callback")
+}
+
 describe("contract: endpoint key/method/path/meta", () => {
   it("METHOD path key, method lowercase, path raw", () => {
     const contract = buildContract({
@@ -232,7 +236,7 @@ describe("contract: response map", () => {
       status: "200",
       shape: { kind: "schema", schema: { type: "string" } },
       contentType: "application/json",
-      source: { location: "/responses/200" },
+      source: { location: "/paths/~1p/get/responses/200" },
     })
   })
 
@@ -352,5 +356,41 @@ describe("contract: webhooks", () => {
       "endpoint:GET /x",
       "webhook:POST ping",
     ])
+  })
+})
+
+describe("contract: callbacks", () => {
+  it("builds callback operations with collision-resistant keys", () => {
+    const contract = buildContract({
+      paths: {
+        "/subscribe": {
+          post: {
+            callbacks: {
+              onEvent: {
+                "{$request.body#/callbackUrl}": {
+                  post: {
+                    requestBody: {
+                      required: true,
+                      content: { "application/json": { schema: { type: "string" } } },
+                    },
+                    responses: { "204": { description: "accepted" } },
+                  },
+                },
+              },
+            },
+            responses: { "202": { description: "subscribed" } },
+          },
+        },
+      },
+    })
+    expect(callbackOperations(contract)).toHaveLength(1)
+    expect(callbackOperations(contract)[0]).toMatchObject({
+      kind: "callback",
+      key: "POST /subscribe > onEvent > POST {$request.body#/callbackUrl}",
+      parentKey: "POST /subscribe",
+      callbackName: "onEvent",
+      expression: "{$request.body#/callbackUrl}",
+      body: { kind: "json", required: true },
+    })
   })
 })

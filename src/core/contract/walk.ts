@@ -1,3 +1,4 @@
+import { appendPointer } from "../shared/pointer"
 import type {
   OpenAPIDocument,
   Components,
@@ -8,8 +9,9 @@ import type {
   Response,
   MediaType,
   OpenAPISchema,
+  Callback,
 } from "./openapi"
-import { HTTP_METHODS } from "./openapi"
+import { HTTP_METHODS, isCallbackReference, isSchemaObject } from "./openapi"
 
 /**
  * Schema transformation callback used by document mapping helpers.
@@ -17,7 +19,7 @@ import { HTTP_METHODS } from "./openapi"
  * Return the same schema object to preserve identity, or a replacement schema to
  * trigger structural sharing up the document tree.
  */
-export type SchemaMapper = (schema: OpenAPISchema) => OpenAPISchema
+export type SchemaMapper = (schema: OpenAPISchema, location: string) => OpenAPISchema
 
 /**
  * Visitor hooks for shallow OpenAPI document nodes.
@@ -30,6 +32,7 @@ export interface DocumentVisitor {
   parameter?: (param: Parameter, location: string) => Parameter
   requestBody?: (body: RequestBody, location: string) => RequestBody
   response?: (resp: Response, location: string) => Response
+  callback?: (callback: Callback, location: string) => Callback
   schema?: (schema: OpenAPISchema, location: string) => OpenAPISchema
 }
 
@@ -67,7 +70,7 @@ export function mapDocument(doc: OpenAPIDocument, visitor: DocumentVisitor): Ope
  */
 export function mapDocumentSchemas(doc: OpenAPIDocument, mapSchema: SchemaMapper): OpenAPIDocument {
   return mapDocument(doc, {
-    schema: (s) => mapSchemaDeep(s, mapSchema),
+    schema: (schema, location) => mapSchemaDeep(schema, mapSchema, location),
   })
 }
 
@@ -76,27 +79,33 @@ function mapComponents(components: Components, visitor: DocumentVisitor): Compon
   const schemaVisitor = visitor.schema
   if (components.schemas && schemaVisitor) {
     const next = mapValuesIdentity(components.schemas, (s, name) =>
-      schemaVisitor(s, `/components/schemas/${name}`),
+      schemaVisitor(s, appendPointer("/components/schemas", name)),
     )
     if (next !== components.schemas) out = { ...out, schemas: next }
   }
   if (components.parameters) {
     const next = mapValuesIdentity(components.parameters, (p, name) =>
-      mapParameter(p, visitor, `/components/parameters/${name}`),
+      mapParameter(p, visitor, appendPointer("/components/parameters", name)),
     )
     if (next !== components.parameters) out = { ...out, parameters: next }
   }
   if (components.requestBodies) {
     const next = mapValuesIdentity(components.requestBodies, (b, name) =>
-      mapRequestBody(b, visitor, `/components/requestBodies/${name}`),
+      mapRequestBody(b, visitor, appendPointer("/components/requestBodies", name)),
     )
     if (next !== components.requestBodies) out = { ...out, requestBodies: next }
   }
   if (components.responses) {
     const next = mapValuesIdentity(components.responses, (r, name) =>
-      mapResponse(r, visitor, `/components/responses/${name}`),
+      mapResponse(r, visitor, appendPointer("/components/responses", name)),
     )
     if (next !== components.responses) out = { ...out, responses: next }
+  }
+  if (components.callbacks) {
+    const next = mapValuesIdentity(components.callbacks, (callback, name) =>
+      mapCallback(callback, visitor, appendPointer("/components/callbacks", name)),
+    )
+    if (next !== components.callbacks) out = { ...out, callbacks: next }
   }
   return out
 }
@@ -106,55 +115,82 @@ function mapPathMap(
   visitor: DocumentVisitor,
   basePath: string,
 ): Record<string, PathItem> {
-  return mapValuesIdentity(paths, (item, key) => mapPathItem(item, visitor, `${basePath}/${key}`))
+  return mapValuesIdentity(paths, (item, key) =>
+    mapPathItem(item, visitor, appendPointer(basePath, key)),
+  )
 }
 
-function mapPathItem(item: PathItem, visitor: DocumentVisitor, location: string): PathItem {
+function mapPathItem(
+  item: PathItem,
+  visitor: DocumentVisitor,
+  location: string,
+  walkCallbacks = true,
+): PathItem {
   const visited = visitor.pathItem ? visitor.pathItem(item, location) : item
   if (visited.$ref !== undefined) return visited
 
   let out = visited
   if (visited.parameters) {
     const next = mapArrayIdentity(visited.parameters, (p, i) =>
-      mapParameter(p, visitor, `${location}/parameters[${i}]`),
+      mapParameter(p, visitor, appendPointer(location, "parameters", i)),
     )
     if (next !== visited.parameters) out = { ...out, parameters: next }
   }
   for (const method of HTTP_METHODS) {
     const op = visited[method]
     if (!op) continue
-    const next = mapOperation(op, visitor, `${location}/${method}`)
+    const next = mapOperation(op, visitor, appendPointer(location, method), walkCallbacks)
     if (next !== op) out = { ...out, [method]: next }
   }
   return out
 }
 
-function mapOperation(op: Operation, visitor: DocumentVisitor, location: string): Operation {
+function mapOperation(
+  op: Operation,
+  visitor: DocumentVisitor,
+  location: string,
+  walkCallbacks: boolean,
+): Operation {
   let out = op
   if (op.parameters) {
     const next = mapArrayIdentity(op.parameters, (p, i) =>
-      mapParameter(p, visitor, `${location}/parameters[${i}]`),
+      mapParameter(p, visitor, appendPointer(location, "parameters", i)),
     )
     if (next !== op.parameters) out = { ...out, parameters: next }
   }
   if (op.requestBody) {
-    const next = mapRequestBody(op.requestBody, visitor, `${location}/requestBody`)
+    const next = mapRequestBody(op.requestBody, visitor, appendPointer(location, "requestBody"))
     if (next !== op.requestBody) out = { ...out, requestBody: next }
   }
   if (op.responses) {
     const next = mapValuesIdentity(op.responses, (r, code) =>
-      mapResponse(r, visitor, `${location}/responses/${code}`),
+      mapResponse(r, visitor, appendPointer(location, "responses", code)),
     )
     if (next !== op.responses) out = { ...out, responses: next }
   }
+  if (walkCallbacks && op.callbacks) {
+    const next = mapValuesIdentity(op.callbacks, (callback, name) =>
+      mapCallback(callback, visitor, appendPointer(location, "callbacks", name)),
+    )
+    if (next !== op.callbacks) out = { ...out, callbacks: next }
+  }
   return out
+}
+
+function mapCallback(callback: Callback, visitor: DocumentVisitor, location: string): Callback {
+  const visited = visitor.callback ? visitor.callback(callback, location) : callback
+  if (isCallbackReference(visited)) return visited
+
+  return mapValuesIdentity(visited as Record<string, PathItem>, (item, expression) =>
+    mapPathItem(item, visitor, appendPointer(location, expression), false),
+  )
 }
 
 function mapParameter(p: Parameter, visitor: DocumentVisitor, location: string): Parameter {
   let current = visitor.parameter ? visitor.parameter(p, location) : p
   if (current.$ref !== undefined) return current
   if (current.schema && visitor.schema) {
-    const next = visitor.schema(current.schema, `${location}/schema`)
+    const next = visitor.schema(current.schema, appendPointer(location, "schema"))
     if (next !== current.schema) current = { ...current, schema: next }
   }
   return current
@@ -164,7 +200,7 @@ function mapRequestBody(b: RequestBody, visitor: DocumentVisitor, location: stri
   let current = visitor.requestBody ? visitor.requestBody(b, location) : b
   if (current.$ref !== undefined) return current
   if (current.content) {
-    const next = mapMediaContent(current.content, visitor, `${location}/content`)
+    const next = mapMediaContent(current.content, visitor, appendPointer(location, "content"))
     if (next !== current.content) current = { ...current, content: next }
   }
   return current
@@ -174,7 +210,7 @@ function mapResponse(r: Response, visitor: DocumentVisitor, location: string): R
   let current = visitor.response ? visitor.response(r, location) : r
   if (current.$ref !== undefined) return current
   if (current.content) {
-    const next = mapMediaContent(current.content, visitor, `${location}/content`)
+    const next = mapMediaContent(current.content, visitor, appendPointer(location, "content"))
     if (next !== current.content) current = { ...current, content: next }
   }
   return current
@@ -189,27 +225,34 @@ function mapMediaContent(
   if (!schemaVisitor) return content
   return mapValuesIdentity(content, (media, ct) => {
     if (!media.schema) return media
-    const next = schemaVisitor(media.schema, `${location}/${ct}/schema`)
+    const next = schemaVisitor(media.schema, appendPointer(location, ct, "schema"))
     return next === media.schema ? media : { ...media, schema: next }
   })
 }
 
-function mapSchemaDeep(schema: OpenAPISchema, mapSchema: SchemaMapper): OpenAPISchema {
-  if (schema.$ref !== undefined) return schema
+function mapSchemaDeep(
+  schema: OpenAPISchema,
+  mapSchema: SchemaMapper,
+  location: string,
+): OpenAPISchema {
+  if (!isSchemaObject(schema)) return mapSchema(schema, location)
+  if (schema.$ref !== undefined) return mapSchema(schema, location)
 
   let next = schema
   let changed = false
 
   if (next.properties) {
-    const newProps = mapValuesIdentity(next.properties, (v) => mapSchemaDeep(v, mapSchema))
+    const newProps = mapValuesIdentity(next.properties, (value, name) =>
+      mapSchemaDeep(value, mapSchema, appendPointer(location, "properties", name)),
+    )
     if (newProps !== next.properties) {
       next = { ...next, properties: newProps }
       changed = true
     }
   }
   if (next.patternProperties) {
-    const newPatterns = mapValuesIdentity(next.patternProperties, (v) =>
-      mapSchemaDeep(v, mapSchema),
+    const newPatterns = mapValuesIdentity(next.patternProperties, (value, pattern) =>
+      mapSchemaDeep(value, mapSchema, appendPointer(location, "patternProperties", pattern)),
     )
     if (newPatterns !== next.patternProperties) {
       next = { ...next, patternProperties: newPatterns }
@@ -217,21 +260,27 @@ function mapSchemaDeep(schema: OpenAPISchema, mapSchema: SchemaMapper): OpenAPIS
     }
   }
   if (next.items && typeof next.items === "object") {
-    const nextItems = mapSchemaDeep(next.items, mapSchema)
+    const nextItems = mapSchemaDeep(next.items, mapSchema, appendPointer(location, "items"))
     if (nextItems !== next.items) {
       next = { ...next, items: nextItems }
       changed = true
     }
   }
   if (next.prefixItems) {
-    const nextItems = mapArrayIdentity(next.prefixItems, (item) => mapSchemaDeep(item, mapSchema))
+    const nextItems = mapArrayIdentity(next.prefixItems, (item, index) =>
+      mapSchemaDeep(item, mapSchema, appendPointer(location, "prefixItems", index)),
+    )
     if (nextItems !== next.prefixItems) {
       next = { ...next, prefixItems: nextItems }
       changed = true
     }
   }
   if (next.additionalProperties && typeof next.additionalProperties === "object") {
-    const nextAP = mapSchemaDeep(next.additionalProperties, mapSchema)
+    const nextAP = mapSchemaDeep(
+      next.additionalProperties,
+      mapSchema,
+      appendPointer(location, "additionalProperties"),
+    )
     if (nextAP !== next.additionalProperties) {
       next = { ...next, additionalProperties: nextAP }
       changed = true
@@ -240,7 +289,9 @@ function mapSchemaDeep(schema: OpenAPISchema, mapSchema: SchemaMapper): OpenAPIS
   for (const key of ["oneOf", "anyOf", "allOf"] as const) {
     const branches = next[key]
     if (branches) {
-      const nextBranches = mapArrayIdentity(branches, (b) => mapSchemaDeep(b, mapSchema))
+      const nextBranches = mapArrayIdentity(branches, (branch, index) =>
+        mapSchemaDeep(branch, mapSchema, appendPointer(location, key, index)),
+      )
       if (nextBranches !== branches) {
         next = { ...next, [key]: nextBranches }
         changed = true
@@ -248,7 +299,7 @@ function mapSchemaDeep(schema: OpenAPISchema, mapSchema: SchemaMapper): OpenAPIS
     }
   }
 
-  const mapped = mapSchema(next)
+  const mapped = mapSchema(next, location)
   if (mapped !== next) return mapped
   return changed ? next : schema
 }

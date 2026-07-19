@@ -17,7 +17,7 @@ export async function readSource(source: string | URL): Promise<unknown> {
     raw = await readText(source)
   } catch (error) {
     if (error instanceof LoadError) throw error
-    throw new LoadError(`Failed to read ${label}: ${(error as Error).message}`)
+    throw new LoadError(`Failed to read ${label}: ${errorMessage(error)}`, { cause: error })
   }
 
   return parseSource(raw, label)
@@ -83,7 +83,12 @@ function parseAs(format: "json" | "yaml", text: string, label: string): unknown 
     return format === "json" ? JSON.parse(text) : parseYamlText(text)
   } catch (error) {
     throw new LoadError(
-      `Failed to parse ${label} as ${format.toUpperCase()}: ${(error as Error).message}`,
+      `Failed to parse ${label} as ${format.toUpperCase()}: ${errorMessage(error)}`,
+      { cause: error },
     )
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

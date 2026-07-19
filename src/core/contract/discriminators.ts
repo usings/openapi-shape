@@ -1,7 +1,9 @@
-import { isObject, isObjectAdditional } from "../shared/object"
+import { isObject } from "../shared/object"
 import { LoadError } from "./errors"
-import type { OpenAPIDocument, OpenAPISchema } from "./openapi"
-import { mapDocument } from "./walk"
+import { isSchemaObject } from "./openapi"
+import type { OpenAPIDocument, OpenAPISchema, OpenAPISchemaObject } from "./openapi"
+import { schemaNameFromRef } from "./schema-ref"
+import { mapDocument, mapDocumentSchemas } from "./walk"
 
 /** Discriminator literal to inject into one referenced component schema. */
 export interface Injection {
@@ -25,7 +27,49 @@ export type SchemaInjections = Map<string, Map<string, ReducedInjection>>
  * this preparation step materializes those literals before contract building.
  */
 export function injectDiscriminators(doc: OpenAPIDocument): OpenAPIDocument {
-  return applyInjections(doc, reduceInjections(discoverInjections(doc)))
+  const normalized = normalizeInlineDiscriminators(doc)
+  return applyInjections(normalized, reduceInjections(discoverInjections(normalized)))
+}
+
+/**
+ * Make an inline discriminator branch narrowable when it already declares one
+ * unambiguous string literal for the discriminator property.
+ *
+ * Unlike referenced component branches, inline branches have no schema name or
+ * mapping target from which a discriminator value can be inferred. Branches
+ * without an existing single-value `const`/`enum` are therefore left unchanged.
+ */
+export function normalizeInlineDiscriminators(doc: OpenAPIDocument): OpenAPIDocument {
+  return mapDocumentSchemas(doc, normalizeInlineBranches)
+}
+
+function normalizeInlineBranches(schema: OpenAPISchema): OpenAPISchema {
+  if (!isSchemaObject(schema)) return schema
+  const propertyName = schema.discriminator?.propertyName
+  if (typeof propertyName !== "string") return schema
+
+  const key = Array.isArray(schema.oneOf) ? "oneOf" : Array.isArray(schema.anyOf) ? "anyOf" : null
+  if (!key) return schema
+
+  const original = schema[key] ?? []
+  const branches = original.map((branch) => requireInlineLiteral(branch, propertyName))
+  const changed = branches.some((branch, index) => branch !== original[index])
+  return changed ? { ...schema, [key]: branches } : schema
+}
+
+function requireInlineLiteral(branch: OpenAPISchema, propertyName: string): OpenAPISchema {
+  if (!isSchemaObject(branch)) return branch
+  if (branch.$ref) return branch
+  const property = branch.properties?.[propertyName]
+  if (!hasSingleStringLiteral(property)) return branch
+  if (branch.required?.includes(propertyName)) return branch
+  return { ...branch, required: [...(branch.required ?? []), propertyName] }
+}
+
+function hasSingleStringLiteral(schema: OpenAPISchema | undefined): boolean {
+  if (!isSchemaObject(schema)) return false
+  if (typeof schema.const === "string") return true
+  return schema.enum?.length === 1 && typeof schema.enum[0] === "string"
 }
 
 /**
@@ -46,7 +90,7 @@ export function discoverInjections(doc: OpenAPIDocument): Injection[] {
 }
 
 function walkSchema(schema: OpenAPISchema, location: string, out: Injection[]): void {
-  if (!isObject(schema)) return
+  if (!isSchemaObject(schema)) return
 
   const disc = schema.discriminator
   if (isObject(disc) && typeof disc.propertyName === "string") {
@@ -72,7 +116,7 @@ function walkSchema(schema: OpenAPISchema, location: string, out: Injection[]): 
       walkSchema(child, `${location}/prefixItems/${index}`, out)
     })
   }
-  if (isObjectAdditional<OpenAPISchema>(schema.additionalProperties)) {
+  if (isSchemaObject(schema.additionalProperties)) {
     walkSchema(schema.additionalProperties, `${location}/additionalProperties`, out)
   }
   for (const key of ["oneOf", "anyOf", "allOf"] as const) {
@@ -97,18 +141,10 @@ function collectFromDiscriminator(
 
   branches.forEach((branch, index) => {
     const branchLocation = `${location}/${containerKey}[${index}]`
-    if (!isObject(branch) || typeof branch.$ref !== "string") {
-      throw new LoadError(
-        `discriminator branch must be $ref; got inline schema (at ${branchLocation})`,
-      )
-    }
+    if (!isObject(branch)) return
+    if (typeof branch.$ref !== "string") return
     const ref = branch.$ref
-    if (!ref.startsWith("#/components/schemas/")) {
-      throw new LoadError(
-        `discriminator branch $ref must point to components.schemas; got ${ref} (at ${branchLocation})`,
-      )
-    }
-    const schemaName = ref.slice("#/components/schemas/".length)
+    const schemaName = schemaNameFromRef(ref, branchLocation)
     const value = findValueForBranch(ref, schemaName, mapping)
     out.push({ schemaName, propertyName, value, sourceLocation: branchLocation })
   })
@@ -175,6 +211,11 @@ function injectInto(
   perSchema: Map<string, ReducedInjection>,
   schemaName: string,
 ): OpenAPISchema {
+  if (!isSchemaObject(schema)) {
+    throw new LoadError(
+      `Cannot inject discriminator into "${schemaName}": schema is boolean (at /components/schemas/${schemaName})`,
+    )
+  }
   if (schema.allOf) return injectIntoAllOf(schema, perSchema, schemaName)
   if (schema.type !== undefined && schema.type !== "object") {
     throw new LoadError(
@@ -194,7 +235,7 @@ function injectInto(
 }
 
 function injectIntoAllOf(
-  schema: OpenAPISchema,
+  schema: OpenAPISchemaObject,
   perSchema: Map<string, ReducedInjection>,
   schemaName: string,
 ): OpenAPISchema {
@@ -230,6 +271,11 @@ function validateExistingProperty(
   value: string,
 ): void {
   const at = `/components/schemas/${schemaName}/properties/${propertyName}`
+  if (!isSchemaObject(existing)) {
+    throw new LoadError(
+      `Discriminator conflict in schema "${schemaName}": "${propertyName}" is a boolean schema (at ${at})`,
+    )
+  }
   if ("const" in existing) {
     if (existing.const !== value) {
       throw new LoadError(

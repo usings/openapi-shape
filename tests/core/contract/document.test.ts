@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { loadDocument, prepareDocument } from "../../../src/core/contract/document"
 import { LoadError } from "../../../src/core/contract/errors"
+import type { OpenAPISchemaObject } from "../../../src/core/contract/openapi"
 import { withTmpFile } from "../../_helpers/tmp"
+
+function schemaObject(value: unknown): OpenAPISchemaObject {
+  if (typeof value !== "object" || value === null) throw new Error("expected schema object")
+  return value as OpenAPISchemaObject
+}
 
 describe("loadDocument: I/O", () => {
   it("reads, normalizes, resolves refs, and injects discriminators end-to-end", async () => {
@@ -163,6 +169,33 @@ describe("prepareDocument: refs", () => {
     })
   })
 
+  it("resolves callback component refs", () => {
+    const out = prepareDocument({
+      components: {
+        callbacks: {
+          OnEvent: {
+            "{$request.body#/callbackUrl}": {
+              post: { responses: { "200": { description: "ok" } } },
+            },
+          },
+        },
+      },
+      paths: {
+        "/subscribe": {
+          post: {
+            callbacks: { onEvent: { $ref: "#/components/callbacks/OnEvent" } },
+            responses: { "202": { description: "accepted" } },
+          },
+        },
+      },
+    })
+    expect(out.paths?.["/subscribe"]?.post?.callbacks?.onEvent).toStrictEqual({
+      "{$request.body#/callbackUrl}": {
+        post: { responses: { "200": { description: "ok" } } },
+      },
+    })
+  })
+
   it("throws LoadError on missing ref target", () => {
     expect(() =>
       prepareDocument({
@@ -217,23 +250,46 @@ describe("prepareDocument: discriminator", () => {
         },
       },
     })
-    expect(out.components?.schemas?.Cat?.properties?.type).toStrictEqual({ const: "cat" })
-    expect(out.components?.schemas?.Dog?.properties?.type).toStrictEqual({ const: "dog" })
+    expect(schemaObject(out.components?.schemas?.Cat).properties?.type).toStrictEqual({
+      const: "cat",
+    })
+    expect(schemaObject(out.components?.schemas?.Dog).properties?.type).toStrictEqual({
+      const: "dog",
+    })
   })
 
-  it("throws LoadError on inline (non-$ref) branch", () => {
-    expect(() =>
-      prepareDocument({
-        components: {
-          schemas: {
-            Animal: {
-              oneOf: [{ type: "object" }],
-              discriminator: { propertyName: "type" },
-            },
+  it("makes an inline branch discriminator literal required", () => {
+    const out = prepareDocument({
+      components: {
+        schemas: {
+          Animal: {
+            oneOf: [
+              {
+                type: "object",
+                properties: { type: { const: "cat" }, purr: { type: "string" } },
+              },
+            ],
+            discriminator: { propertyName: "type" },
           },
         },
-      }),
-    ).toThrow(LoadError)
+      },
+    })
+    const animal = schemaObject(out.components?.schemas?.Animal)
+    expect(schemaObject(animal.oneOf?.[0]).required).toStrictEqual(["type"])
+  })
+
+  it("accepts an inline branch when no discriminator literal can be inferred", () => {
+    const input = {
+      components: {
+        schemas: {
+          Animal: {
+            oneOf: [{ type: "object", properties: { name: { type: "string" } } }],
+            discriminator: { propertyName: "type" },
+          },
+        },
+      },
+    }
+    expect(() => prepareDocument(input)).not.toThrow()
   })
 })
 
