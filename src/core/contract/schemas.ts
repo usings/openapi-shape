@@ -4,7 +4,7 @@ import type { ContractSchema, ContractField } from "./contract"
 import { docBlock } from "./doc"
 import { BuildError } from "./errors"
 import type { OpenAPIDocument } from "./openapi"
-import { objectIndexShape, schemaShape } from "./shapes"
+import { buildContractType, objectIndexType } from "./schema-type"
 
 export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
   const raw = doc.components?.schemas
@@ -38,10 +38,10 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
       const fields: ContractField[] = Object.entries(schema.properties).map(([fname, fschema]) => ({
         name: fname,
         required: required.has(fname),
-        shape: schemaShape(fschema),
+        shape: buildContractType(fschema),
         docs: docBlock(fschema),
       }))
-      const index = objectIndexShape(schema)
+      const index = objectIndexType(schema)
       result.push({
         name,
         originalName,
@@ -56,7 +56,7 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
         name,
         originalName,
         kind: "alias",
-        shape: schemaShape(schema),
+        shape: buildContractType(schema),
         docs: docBlock(schema),
         source: { location: `/components/schemas/${escapePointerSegment(originalName)}` },
       })

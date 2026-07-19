@@ -30,7 +30,7 @@ describe("renderCallbacksInterface", () => {
         {
           ...callback,
           headers: [
-            { name: "X-Signature", required: true, shape: { kind: "primitive", name: "string" } },
+            { name: "X-Signature", required: true, shape: { kind: "scalar", name: "string" } },
           ],
         },
       ],

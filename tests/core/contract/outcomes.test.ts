@@ -38,8 +38,8 @@ describe("isJsonContentType", () => {
     })
     const endpoint = contract.operations.find((operation) => operation.kind === "endpoint")
     expect(endpoint?.responses[0].shape).toStrictEqual({
-      kind: "schema",
-      schema: { type: "number" },
+      kind: "scalar",
+      name: "number",
     })
   })
 })

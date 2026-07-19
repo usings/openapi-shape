@@ -13,7 +13,7 @@ import type {
 } from "./openapi"
 import { HTTP_METHODS, isCallbackReference } from "./openapi"
 import { buildResponses, isJsonContentType } from "./outcomes"
-import { schemaShape } from "./shapes"
+import { buildContractType } from "./schema-type"
 
 export function buildOperations(doc: OpenAPIDocument): ContractOperation[] {
   const responsesRequired = /^3\.0\.\d+$/.test(doc.openapi ?? "")
@@ -140,7 +140,7 @@ function buildParams(parameters: Parameter[]): ContractField[] {
     .map((p) => ({
       name: p.name as string,
       required: true,
-      shape: { kind: "primitive", name: "string" } as const,
+      shape: { kind: "scalar", name: "string" } as const,
       docs: docBlockFromParameter(p),
     }))
 }
@@ -151,7 +151,7 @@ function buildQuery(parameters: Parameter[]): ContractField[] {
     .map((p) => ({
       name: p.name as string,
       required: p.required === true,
-      shape: schemaShape(p.schema),
+      shape: buildContractType(p.schema),
       docs: docBlockFromParameter(p),
     }))
 }
@@ -162,7 +162,7 @@ function buildHeaders(parameters: Parameter[]): ContractField[] {
     .map((p) => ({
       name: p.name as string,
       required: p.required === true,
-      shape: { kind: "primitive", name: "string" },
+      shape: { kind: "scalar", name: "string" },
       docs: docBlockFromParameter(p),
     }))
 }
@@ -175,7 +175,7 @@ function buildBody(rb: RequestBody | undefined): ContractPayload {
       return {
         kind: "json",
         required,
-        shape: schemaShape((media as MediaType).schema),
+        shape: buildContractType((media as MediaType).schema),
       }
     }
   }
@@ -184,7 +184,7 @@ function buildBody(rb: RequestBody | undefined): ContractPayload {
       return {
         kind: "passthrough",
         required,
-        shape: schemaShape((media as MediaType).schema),
+        shape: buildContractType((media as MediaType).schema),
       }
     }
   }

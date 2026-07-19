@@ -1,41 +1,49 @@
 import { describe, expect, it } from "vitest"
 import type { ContractSchema } from "../../../src/core/contract/contract"
-import { renderTypeNode, renderSchemas } from "../../../src/core/declarations/schema"
+import { renderContractType } from "../../../src/core/declarations/render-type"
+import { renderSchemas } from "../../../src/core/declarations/schema"
 
-describe("renderTypeNode: primitives/literals/refs", () => {
-  it("primitive name", () => {
-    expect(renderTypeNode({ kind: "primitive", name: "string" })).toBe("string")
-    expect(renderTypeNode({ kind: "primitive", name: "Blob" })).toBe("Blob")
+describe("renderContractType: primitives/literals/references", () => {
+  it("scalar name", () => {
+    expect(renderContractType({ kind: "scalar", name: "string" })).toBe("string")
+  })
+  it("binary renders Blob by default", () => {
+    expect(renderContractType({ kind: "binary" })).toBe("Blob")
   })
   it("string literal quoted", () => {
-    expect(renderTypeNode({ kind: "literal", value: "x" })).toBe('"x"')
+    expect(renderContractType({ kind: "literal", value: "x" })).toBe('"x"')
   })
   it("number literal", () => {
-    expect(renderTypeNode({ kind: "literal", value: 42 })).toBe("42")
+    expect(renderContractType({ kind: "literal", value: 42 })).toBe("42")
   })
   it("null literal", () => {
-    expect(renderTypeNode({ kind: "literal", value: null })).toBe("null")
+    expect(renderContractType({ kind: "literal", value: null })).toBe("null")
   })
-  it("ref emits identifier", () => {
-    expect(renderTypeNode({ kind: "ref", name: "User" })).toBe("User")
+  it("reference emits identifier", () => {
+    expect(renderContractType({ kind: "reference", name: "User" })).toBe("User")
+  })
+  it("reference honors the refPrefix option", () => {
+    expect(renderContractType({ kind: "reference", name: "User" }, { refPrefix: "Schemas." })).toBe(
+      "Schemas.User",
+    )
   })
 })
 
-describe("renderTypeNode: array/tuple/record", () => {
+describe("renderContractType: array/tuple/record", () => {
   it("array of strings", () => {
-    expect(renderTypeNode({ kind: "array", items: { kind: "primitive", name: "string" } })).toBe(
+    expect(renderContractType({ kind: "array", items: { kind: "scalar", name: "string" } })).toBe(
       "string[]",
     )
   })
   it("array of union → parenthesized", () => {
     expect(
-      renderTypeNode({
+      renderContractType({
         kind: "array",
         items: {
           kind: "union",
           members: [
-            { kind: "primitive", name: "string" },
-            { kind: "primitive", name: "number" },
+            { kind: "scalar", name: "string" },
+            { kind: "scalar", name: "number" },
           ],
         },
       }),
@@ -43,90 +51,136 @@ describe("renderTypeNode: array/tuple/record", () => {
   })
   it("tuple no rest", () => {
     expect(
-      renderTypeNode({
+      renderContractType({
         kind: "tuple",
         items: [
-          { kind: "primitive", name: "string" },
-          { kind: "primitive", name: "number" },
+          { kind: "scalar", name: "string" },
+          { kind: "scalar", name: "number" },
         ],
-        rest: null,
       }),
     ).toBe("[string, number]")
   })
   it("tuple with rest", () => {
     expect(
-      renderTypeNode({
+      renderContractType({
         kind: "tuple",
-        items: [{ kind: "primitive", name: "string" }],
-        rest: { kind: "primitive", name: "unknown" },
+        items: [{ kind: "scalar", name: "string" }],
+        rest: { kind: "unknown" },
       }),
     ).toBe("[string, ...unknown[]]")
   })
   it("record", () => {
-    expect(renderTypeNode({ kind: "record", values: { kind: "primitive", name: "number" } })).toBe(
+    expect(renderContractType({ kind: "record", values: { kind: "scalar", name: "number" } })).toBe(
       "Record<string, number>",
     )
   })
 })
 
-describe("renderTypeNode: union/intersection", () => {
+describe("renderContractType: union/intersection", () => {
   it("union", () => {
     expect(
-      renderTypeNode({
+      renderContractType({
         kind: "union",
         members: [
-          { kind: "primitive", name: "string" },
-          { kind: "primitive", name: "null" },
+          { kind: "scalar", name: "string" },
+          { kind: "scalar", name: "null" },
         ],
       }),
     ).toBe("string | null")
   })
   it("intersection", () => {
     expect(
-      renderTypeNode({
+      renderContractType({
         kind: "intersection",
         members: [
-          { kind: "ref", name: "A" },
-          { kind: "ref", name: "B" },
+          { kind: "reference", name: "A" },
+          { kind: "reference", name: "B" },
         ],
       }),
     ).toBe("A & B")
   })
+  it("deduplicates union members and collapses to one", () => {
+    expect(
+      renderContractType({
+        kind: "union",
+        members: [
+          { kind: "reference", name: "A" },
+          { kind: "reference", name: "A" },
+        ],
+      }),
+    ).toBe("A")
+  })
+  it("wraps intersection members inside unions", () => {
+    expect(
+      renderContractType({
+        kind: "union",
+        members: [
+          {
+            kind: "intersection",
+            members: [
+              { kind: "reference", name: "A" },
+              { kind: "reference", name: "B" },
+            ],
+          },
+          { kind: "scalar", name: "null" },
+        ],
+      }),
+    ).toBe("(A & B) | null")
+  })
 })
 
-describe("renderTypeNode: object", () => {
+describe("renderContractType: object", () => {
   it("inline object required field", () => {
     expect(
-      renderTypeNode({
+      renderContractType({
         kind: "object",
-        fields: [{ name: "a", required: true, type: { kind: "primitive", name: "number" } }],
-        index: null,
+        fields: [{ name: "a", required: true, shape: { kind: "scalar", name: "number" } }],
       }),
     ).toBe("{\n  a: number\n}")
   })
   it("optional field", () => {
     expect(
-      renderTypeNode({
+      renderContractType({
         kind: "object",
-        fields: [{ name: "a", required: false, type: { kind: "primitive", name: "number" } }],
-        index: null,
+        fields: [{ name: "a", required: false, shape: { kind: "scalar", name: "number" } }],
       }),
     ).toBe("{\n  a?: number\n}")
   })
-  it("with index signature", () => {
+  it("widens the index signature with declared field types", () => {
     expect(
-      renderTypeNode({
+      renderContractType({
         kind: "object",
-        fields: [{ name: "a", required: true, type: { kind: "primitive", name: "string" } }],
-        index: { kind: "primitive", name: "string" },
+        fields: [{ name: "a", required: true, shape: { kind: "scalar", name: "string" } }],
+        index: { kind: "scalar", name: "string" },
       }),
     ).toBe("{\n  a: string\n  [key: string]: string\n}")
   })
 })
 
-describe("renderTypeNode: raw", () => {
-  it("emits text verbatim", () => {
-    expect(renderTypeNode({ kind: "raw", text: "Date" })).toBe("Date")
+describe("renderContractType: format mappings", () => {
+  it("maps scalar formats through the formats option", () => {
+    expect(
+      renderContractType(
+        { kind: "scalar", name: "string", format: "date-time" },
+        { formats: { "date-time": "Date" } },
+      ),
+    ).toBe("Date")
+  })
+  it("ignores formats on non-mappable scalars", () => {
+    expect(
+      renderContractType(
+        { kind: "scalar", name: "boolean", format: "int64" },
+        { formats: { int64: "bigint" } },
+      ),
+    ).toBe("boolean")
+  })
+  it("lets a binary format mapping override Blob", () => {
+    expect(
+      renderContractType(
+        { kind: "binary", format: "binary" },
+        { formats: { binary: "Uint8Array" } },
+      ),
+    ).toBe("Uint8Array")
   })
 })
 
@@ -137,15 +191,19 @@ describe("renderSchemas: ordering (aliases first, interfaces second)", () => {
         name: "User",
         originalName: "User",
         kind: "interface",
-        fields: [
-          { name: "id", required: true, shape: { kind: "schema", schema: { type: "number" } } },
-        ],
+        fields: [{ name: "id", required: true, shape: { kind: "scalar", name: "number" } }],
       },
       {
         name: "Status",
         originalName: "Status",
         kind: "alias",
-        shape: { kind: "schema", schema: { enum: ["a", "b"] } },
+        shape: {
+          kind: "union",
+          members: [
+            { kind: "literal", value: "a" },
+            { kind: "literal", value: "b" },
+          ],
+        },
       },
     ]
     const out = renderSchemas(schemas)
@@ -156,35 +214,34 @@ describe("renderSchemas: ordering (aliases first, interfaces second)", () => {
   })
 })
 
-describe("renderSchemas: schema shape conversion", () => {
-  it("renders refs, format mappings, and index shapes from contract schema shapes", () => {
+describe("renderSchemas: contract type rendering", () => {
+  it("renders references, format mappings, and index types from contract schemas", () => {
     const schemas: ContractSchema[] = [
       {
         name: "User",
         originalName: "User",
         kind: "interface",
         fields: [
-          {
-            name: "id",
-            required: true,
-            shape: { kind: "schema", schema: { type: "integer" } },
-          },
+          { name: "id", required: true, shape: { kind: "scalar", name: "number" } },
           {
             name: "createdAt",
             required: false,
-            shape: { kind: "schema", schema: { type: "string", format: "date-time" } },
+            shape: { kind: "scalar", name: "string", format: "date-time" },
           },
         ],
-        index: { kind: "schema", schema: { anyOf: [{ type: "string" }, { type: "number" }] } },
+        index: {
+          kind: "union",
+          members: [
+            { kind: "scalar", name: "string" },
+            { kind: "scalar", name: "number" },
+          ],
+        },
       },
       {
         name: "UserList",
         originalName: "UserList",
         kind: "alias",
-        shape: {
-          kind: "schema",
-          schema: { type: "array", items: { $ref: "#/components/schemas/User" } },
-        },
+        shape: { kind: "array", items: { kind: "reference", name: "User" } },
       },
     ]
 

@@ -1,7 +1,7 @@
 import { appendPointer } from "../shared/pointer"
-import type { ContractShape, ContractOutcome } from "./contract"
+import type { ContractType, ContractOutcome } from "./contract"
 import type { OpenAPISchema, MediaType, Response } from "./openapi"
-import { primitiveShape, schemaShape } from "./shapes"
+import { buildContractType } from "./schema-type"
 
 export function buildResponses(
   responses: Record<string, Response>,
@@ -9,7 +9,7 @@ export function buildResponses(
 ): ContractOutcome[] {
   const out: ContractOutcome[] = []
   for (const [status, response] of Object.entries(responses)) {
-    const { shape, contentType } = pickResponseShape(response)
+    const { shape, contentType } = pickResponseType(response)
     out.push({
       status,
       shape,
@@ -28,40 +28,40 @@ export function isJsonContentType(ct: string): boolean {
   return subtype === "json" || subtype.endsWith("+json")
 }
 
-function pickResponseShape(response: Response | undefined): {
-  shape: ContractShape
+function pickResponseType(response: Response | undefined): {
+  shape: ContractType
   contentType?: string
 } {
-  if (!response?.content) return { shape: primitiveShape("void") }
-  return extractResponseType(response.content) ?? { shape: primitiveShape("void") }
+  if (!response?.content) return { shape: { kind: "void" } }
+  return extractResponseType(response.content) ?? { shape: { kind: "void" } }
 }
 
 function extractResponseType(content: Record<string, MediaType>): {
-  shape: ContractShape
+  shape: ContractType
   contentType?: string
 } | null {
   for (const ct of Object.keys(content)) {
     if (isJsonContentType(ct) && content[ct].schema) {
-      return { shape: schemaShape(content[ct].schema), contentType: ct }
+      return { shape: buildContractType(content[ct].schema), contentType: ct }
     }
   }
   for (const ct of Object.keys(content)) {
     if (isBinaryContentType(ct) || isBinarySchema(content[ct].schema)) {
-      return { shape: primitiveShape("Blob"), contentType: ct }
+      return { shape: { kind: "binary" }, contentType: ct }
     }
   }
   for (const ct of Object.keys(content)) {
     if (ct.toLowerCase().startsWith("text/")) {
-      return { shape: primitiveShape("string"), contentType: ct }
+      return { shape: { kind: "scalar", name: "string" }, contentType: ct }
     }
   }
   for (const ct of Object.keys(content)) {
     if (content[ct].schema) {
-      return { shape: schemaShape(content[ct].schema), contentType: ct }
+      return { shape: buildContractType(content[ct].schema), contentType: ct }
     }
   }
   const firstContentType = Object.keys(content)[0]
-  if (firstContentType) return { shape: primitiveShape("Blob"), contentType: firstContentType }
+  if (firstContentType) return { shape: { kind: "binary" }, contentType: firstContentType }
   return null
 }
 

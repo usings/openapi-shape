@@ -1,4 +1,4 @@
-import type { HttpMethod, OpenAPISchema } from "./openapi"
+import type { HttpMethod } from "../shared/http"
 
 /**
  * Normalized contract intermediate representation.
@@ -103,7 +103,7 @@ export type ContractOperation = EndpointOperation | WebhookOperation | CallbackO
 export interface ContractField {
   name: string
   required: boolean
-  shape: ContractShape
+  shape: ContractType
   docs?: DocBlock
 }
 
@@ -118,9 +118,9 @@ export type ContractPayload =
   /** No declared request body, or no request body schema that can be rendered. */
   | { kind: "none" }
   /** JSON-family request body, such as `application/json` or `application/problem+json`. */
-  | { kind: "json"; required: boolean; shape: ContractShape }
-  /** Non-JSON request body kept as its selected schema shape. */
-  | { kind: "passthrough"; required: boolean; shape: ContractShape }
+  | { kind: "json"; required: boolean; shape: ContractType }
+  /** Non-JSON request body kept as its selected schema type. */
+  | { kind: "passthrough"; required: boolean; shape: ContractType }
 
 /**
  * One OpenAPI response entry after media-type selection.
@@ -131,7 +131,7 @@ export interface ContractOutcome {
   /** OpenAPI response key, for example `"200"`, `"4XX"`, or `"default"`. */
   status: string
   /** Selected response type, or `void` when no usable content schema exists. */
-  shape: ContractShape
+  shape: ContractType
   /** Media type that produced `shape`, when a content entry was selected. */
   contentType?: string
   /** Source location of this response entry. */
@@ -160,38 +160,49 @@ export type ContractSchema = ContractSchemaBase &
     | {
         kind: "interface"
         fields: ContractField[]
-        /** Index-signature value type, when the object permits additional keys. */
-        index?: ContractShape
+        /** Unwidened index-signature value type, when the object permits additional keys. */
+        index?: ContractType
       }
     | {
         kind: "alias"
-        shape: ContractShape
+        shape: ContractType
       }
   )
 
-/**
- * Deferred type slot used by the declaration renderer.
- *
- * `schema` keeps the normalized OpenAPI schema available for later conversion to
- * TypeScript. `primitive` represents a contract-level decision that should render
- * verbatim, such as path and header parameters being strings.
- */
-export type ContractShape =
-  /** Type derived from an OpenAPI schema. `undefined` renders as `unknown`. */
-  | { kind: "schema"; schema: OpenAPISchema | undefined }
-  /** Type chosen directly by the contract builder. */
-  | { kind: "primitive"; name: PrimitiveName }
+/** Scalar type names shared by every target language renderer. */
+export type ScalarName = "string" | "number" | "boolean" | "null"
 
-/** TypeScript primitive or built-in names emitted verbatim by renderers. */
-export type PrimitiveName =
-  | "string"
-  | "number"
-  | "boolean"
-  | "null"
-  | "void"
-  | "unknown"
-  | "never"
-  | "Blob"
+/**
+ * Language-neutral type tree produced by contract building.
+ *
+ * All OpenAPI schema interpretation happens before this tree is built:
+ * `$ref`s are resolved to `reference` names, compositions become
+ * `union`/`intersection`, and object keywords become `object`/`record`.
+ * Renderers only decide target-language syntax, such as mapping `binary`
+ * to `Blob` or applying user `format` mappings to scalars.
+ */
+export type ContractType =
+  /** Unconstrained or unsupported schema. Renders as `unknown`. */
+  | { kind: "unknown" }
+  /** Unsatisfiable schema, such as `false` or an empty enum. */
+  | { kind: "never" }
+  /** Absent payload, such as a response without content. */
+  | { kind: "void" }
+  /** Primitive with its declared `format` kept for renderer mappings. */
+  | { kind: "scalar"; name: ScalarName; format?: string }
+  /** Binary payload. `format` is present when derived from a schema keyword. */
+  | { kind: "binary"; format?: "binary" | "byte" }
+  | { kind: "literal"; value: string | number | boolean | null }
+  /** Resolved and sanitized name of a `components.schemas` entry. */
+  | { kind: "reference"; name: string }
+  | { kind: "array"; items: ContractType }
+  | { kind: "tuple"; items: ContractType[]; rest?: ContractType }
+  /** Object with declared fields. `index` is the unwidened index value type. */
+  | { kind: "object"; fields: ContractField[]; index?: ContractType }
+  /** Object without declared fields, keyed by arbitrary strings. */
+  | { kind: "record"; values: ContractType }
+  | { kind: "union"; members: ContractType[] }
+  | { kind: "intersection"; members: ContractType[] }
 
 /** Documentation that can be rendered as a TypeScript JSDoc block. */
 export interface DocBlock {

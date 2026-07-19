@@ -26,7 +26,7 @@ describe("renderWebhooksInterface: default", () => {
     const out = renderWebhooksInterface([
       {
         ...baseWebhook,
-        body: { kind: "json", required: true, shape: { kind: "primitive", name: "string" } },
+        body: { kind: "json", required: true, shape: { kind: "scalar", name: "string" } },
       },
     ])
     expect(out).toContain("payload: string")
@@ -37,13 +37,13 @@ describe("renderWebhooksInterface: default", () => {
     const required = renderWebhooksInterface([
       {
         ...baseWebhook,
-        body: { kind: "json", required: true, shape: { kind: "primitive", name: "string" } },
+        body: { kind: "json", required: true, shape: { kind: "scalar", name: "string" } },
       },
     ])
     const optional = renderWebhooksInterface([
       {
         ...baseWebhook,
-        body: { kind: "json", required: false, shape: { kind: "primitive", name: "string" } },
+        body: { kind: "json", required: false, shape: { kind: "scalar", name: "string" } },
       },
     ])
     expect(required).toContain("payload: string")
@@ -54,7 +54,7 @@ describe("renderWebhooksInterface: default", () => {
     const out = renderWebhooksInterface([
       {
         ...baseWebhook,
-        responses: [{ status: "200", shape: { kind: "primitive", name: "boolean" } }],
+        responses: [{ status: "200", shape: { kind: "scalar", name: "boolean" } }],
       },
     ])
     expect(out).toContain('reply: { "200": boolean }')
@@ -66,9 +66,7 @@ describe("renderWebhooksInterface: default", () => {
       renderWebhooksInterface([
         {
           ...baseWebhook,
-          query: [
-            { name: "version", required: false, shape: { kind: "primitive", name: "string" } },
-          ],
+          query: [{ name: "version", required: false, shape: { kind: "scalar", name: "string" } }],
         },
       ]),
     ).toContain("query: { version?: string }")
@@ -78,7 +76,7 @@ describe("renderWebhooksInterface: default", () => {
     const out = renderWebhooksInterface([
       {
         ...baseWebhook,
-        query: [{ name: "x-trace", required: true, shape: { kind: "primitive", name: "string" } }],
+        query: [{ name: "x-trace", required: true, shape: { kind: "scalar", name: "string" } }],
       },
     ])
     expect(out).toContain('"x-trace": string')
@@ -93,9 +91,7 @@ describe("renderWebhooksInterface: default", () => {
 describe("renderWebhooksInterface: headers option", () => {
   const wh: WebhookOperation = {
     ...baseWebhook,
-    headers: [
-      { name: "X-Signature", required: true, shape: { kind: "primitive", name: "string" } },
-    ],
+    headers: [{ name: "X-Signature", required: true, shape: { kind: "scalar", name: "string" } }],
   }
   it("omits headers field by default", () => {
     expect(renderWebhooksInterface([wh])).not.toContain("headers:")
@@ -113,10 +109,10 @@ describe("renderWebhooksInterface: reply map", () => {
       {
         ...baseWebhook,
         responses: [
-          { status: "200", shape: { kind: "primitive", name: "boolean" } },
+          { status: "200", shape: { kind: "scalar", name: "boolean" } },
           {
             status: "400",
-            shape: { kind: "schema", schema: { $ref: "#/components/schemas/BadRequest" } },
+            shape: { kind: "reference", name: "BadRequest" },
           },
         ],
       },

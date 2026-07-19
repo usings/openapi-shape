@@ -77,7 +77,7 @@ describe("contract: params", () => {
       },
     })
     expect(endpointOperations(contract)[0].params).toStrictEqual([
-      { name: "id", required: true, shape: { kind: "primitive", name: "string" }, docs: undefined },
+      { name: "id", required: true, shape: { kind: "scalar", name: "string" }, docs: undefined },
     ])
   })
 
@@ -99,13 +99,13 @@ describe("contract: params", () => {
       {
         name: "limit",
         required: true,
-        shape: { kind: "schema", schema: { type: "integer" } },
+        shape: { kind: "scalar", name: "number" },
         docs: undefined,
       },
       {
         name: "tag",
         required: false,
-        shape: { kind: "schema", schema: { type: "string" } },
+        shape: { kind: "scalar", name: "string" },
         docs: undefined,
       },
     ])
@@ -126,7 +126,7 @@ describe("contract: params", () => {
     expect(endpointOperations(contract)[0].query[0]).toStrictEqual({
       name: "q",
       required: true,
-      shape: { kind: "schema", schema: { type: "integer" } },
+      shape: { kind: "scalar", name: "number" },
       docs: undefined,
     })
   })
@@ -157,7 +157,7 @@ describe("contract: body", () => {
     expect(endpointOperations(contract)[0].body).toStrictEqual({
       kind: "json",
       required: true,
-      shape: { kind: "schema", schema: { type: "string" } },
+      shape: { kind: "scalar", name: "string" },
     })
   })
 
@@ -234,7 +234,7 @@ describe("contract: response map", () => {
     })
     expect(endpointOperations(contract)[0].responses[0]).toStrictEqual({
       status: "200",
-      shape: { kind: "schema", schema: { type: "string" } },
+      shape: { kind: "scalar", name: "string" },
       contentType: "application/json",
       source: { location: "/paths/~1p/get/responses/200" },
     })
@@ -253,8 +253,7 @@ describe("contract: response map", () => {
       },
     })
     expect(endpointOperations(contract)[0].responses[0].shape).toStrictEqual({
-      kind: "primitive",
-      name: "Blob",
+      kind: "binary",
     })
   })
 
@@ -263,8 +262,7 @@ describe("contract: response map", () => {
       paths: { "/p": { delete: { responses: { "204": { description: "ok" } } } } },
     })
     expect(endpointOperations(contract)[0].responses[0].shape).toStrictEqual({
-      kind: "primitive",
-      name: "void",
+      kind: "void",
     })
   })
 
@@ -321,11 +319,11 @@ describe("contract: webhooks", () => {
     expect(webhookOperations(contract)[0].body).toStrictEqual({
       kind: "json",
       required: true,
-      shape: { kind: "schema", schema: { type: "string" } },
+      shape: { kind: "scalar", name: "string" },
     })
     expect(webhookOperations(contract)[0].responses[0]).toMatchObject({
       status: "200",
-      shape: { kind: "schema", schema: { type: "boolean" } },
+      shape: { kind: "scalar", name: "boolean" },
     })
   })
 

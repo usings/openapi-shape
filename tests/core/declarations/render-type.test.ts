@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest"
 import type { OpenAPISchema } from "../../../src/core/contract/openapi"
-import { renderTypeNode } from "../../../src/core/declarations/schema"
-import { schemaToTypeNode } from "../../../src/core/declarations/type-node"
+import { buildContractType } from "../../../src/core/contract/schema-type"
+import { renderContractType } from "../../../src/core/declarations/render-type"
 
+/**
+ * Integration of schema conversion and rendering. The string expectations
+ * predate the contract-type refactor and freeze end-to-end type output.
+ */
 function render(schema: OpenAPISchema): string {
-  return renderTypeNode(schemaToTypeNode(schema, {}))
+  return renderContractType(buildContractType(schema))
 }
 
-describe("schemaToTypeNode: enum with nullable type array", () => {
+describe("schema rendering: enum with nullable type array", () => {
   it("does not add null when the enum excludes it", () => {
     expect(render({ type: ["string", "null"], enum: ["red", "blue"] })).toBe('"red" | "blue"')
   })
@@ -21,7 +25,7 @@ describe("schemaToTypeNode: enum with nullable type array", () => {
   })
 })
 
-describe("schemaToTypeNode: composition keywords with siblings", () => {
+describe("schema rendering: composition keywords with siblings", () => {
   it("keeps sibling properties next to allOf as an intersection member", () => {
     expect(
       render({
@@ -85,7 +89,7 @@ describe("schemaToTypeNode: composition keywords with siblings", () => {
   })
 })
 
-describe("schemaToTypeNode: index signature widening", () => {
+describe("schema rendering: index signature widening", () => {
   it("emits an unknown index signature for additionalProperties: true", () => {
     expect(
       render({

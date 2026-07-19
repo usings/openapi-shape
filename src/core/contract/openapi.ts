@@ -8,18 +8,8 @@
  * pre-resolution `$ref` placeholders remain type-legal.
  */
 
-export type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace"
-
-export const HTTP_METHODS: HttpMethod[] = [
-  "get",
-  "put",
-  "post",
-  "delete",
-  "options",
-  "head",
-  "patch",
-  "trace",
-]
+export type { HttpMethod } from "../shared/http"
+export { HTTP_METHODS } from "../shared/http"
 
 /** Supported subset of an OpenAPI document after loader preparation. */
 export interface OpenAPIDocument {

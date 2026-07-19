@@ -1,14 +1,13 @@
 import type {
   ContractPayload,
-  ContractShape,
   ContractOperation,
   ContractOutcome,
   ContractField,
 } from "../contract/contract"
 import { safeKey } from "../shared/naming"
 import { indent, indentContinuation, jsdoc } from "./format"
-import { renderTypeNode, shapeToTypeNode } from "./schema"
-import type { RenderTypeNodeOptions } from "./schema"
+import type { RenderTypeOptions } from "./render-type"
+import { renderContractType } from "./render-type"
 
 const schemaRefOptions = { refPrefix: "Schemas." } as const
 
@@ -23,13 +22,13 @@ export function entryDocHeader(entry: ContractOperation): string {
   )
 }
 
-export function renderParam(fields: ContractField[], options: RenderTypeNodeOptions = {}): string {
+export function renderParam(fields: ContractField[], options: RenderTypeOptions = {}): string {
   if (fields.length === 0) return "void"
   const hasDocs = fields.some((f) => f.docs?.description || f.docs?.deprecated)
   const renderOptions = { ...options, ...schemaRefOptions }
-  const renderField = (f: { name: string; required: boolean; shape: ContractShape }) => {
+  const renderField = (f: ContractField) => {
     const opt = f.required ? "" : "?"
-    return `${safeKey(f.name)}${opt}: ${renderTypeNode(shapeToTypeNode(f.shape, renderOptions), renderOptions)}`
+    return `${safeKey(f.name)}${opt}: ${renderContractType(f.shape, renderOptions)}`
   }
   if (!hasDocs) return `{ ${fields.map((f) => renderField(f)).join("; ")} }`
   const body = fields.map((f) => `${jsdoc(f.docs ?? {})}${renderField(f)}`).join("\n")
@@ -39,26 +38,22 @@ export function renderParam(fields: ContractField[], options: RenderTypeNodeOpti
 export function renderBody(
   body: ContractPayload,
   key: string,
-  options: RenderTypeNodeOptions = {},
+  options: RenderTypeOptions = {},
 ): string {
   if (body.kind === "none") return `${key}: void`
   const renderOptions = { ...options, ...schemaRefOptions }
-  const t = indentContinuation(
-    renderTypeNode(shapeToTypeNode(body.shape, renderOptions), renderOptions),
-    "    ",
-  )
+  const t = indentContinuation(renderContractType(body.shape, renderOptions), "    ")
   return body.required ? `${key}: ${t}` : `${key}?: ${t}`
 }
 
 export function renderResponseMap(
   responses: ContractOutcome[],
-  options: RenderTypeNodeOptions = {},
+  options: RenderTypeOptions = {},
 ): string {
   if (responses.length === 0) return "unknown"
   const renderOptions = { ...options, ...schemaRefOptions }
   const entries = responses.map(
-    (r) =>
-      `"${r.status}": ${renderTypeNode(shapeToTypeNode(r.shape, renderOptions), renderOptions)}`,
+    (r) => `"${r.status}": ${renderContractType(r.shape, renderOptions)}`,
   )
   return `{ ${entries.join("; ")} }`
 }

@@ -3,7 +3,7 @@ import { buildContract } from "../../../src/core/contract/build"
 import { BuildError } from "../../../src/core/contract/errors"
 
 describe("contract: schema models", () => {
-  it("object schema becomes interface model with raw schema shapes", () => {
+  it("object schema becomes interface model with contract type fields", () => {
     const contract = buildContract({
       components: {
         schemas: {
@@ -27,13 +27,13 @@ describe("contract: schema models", () => {
           {
             name: "id",
             required: true,
-            shape: { kind: "schema", schema: { type: "integer" } },
+            shape: { kind: "scalar", name: "number" },
             docs: undefined,
           },
           {
             name: "name",
             required: false,
-            shape: { kind: "schema", schema: { type: "string" } },
+            shape: { kind: "scalar", name: "string" },
             docs: undefined,
           },
         ],
@@ -41,7 +41,7 @@ describe("contract: schema models", () => {
     ])
   })
 
-  it("non-object schema becomes alias model with raw schema shape", () => {
+  it("non-object schema becomes alias model with a contract type", () => {
     const contract = buildContract({
       components: { schemas: { Status: { enum: ["a", "b"] } } },
     })
@@ -50,7 +50,13 @@ describe("contract: schema models", () => {
       name: "Status",
       originalName: "Status",
       kind: "alias",
-      shape: { kind: "schema", schema: { enum: ["a", "b"] } },
+      shape: {
+        kind: "union",
+        members: [
+          { kind: "literal", value: "a" },
+          { kind: "literal", value: "b" },
+        ],
+      },
     })
   })
 
@@ -77,7 +83,7 @@ describe("contract: schema models", () => {
     ).toThrow(BuildError)
   })
 
-  it("interface schema carries index shape for patternProperties and additionalProperties", () => {
+  it("interface schema carries an index type for patternProperties and additionalProperties", () => {
     const contract = buildContract({
       components: {
         schemas: {
@@ -98,13 +104,16 @@ describe("contract: schema models", () => {
         {
           name: "id",
           required: true,
-          shape: { kind: "schema", schema: { type: "string" } },
+          shape: { kind: "scalar", name: "string" },
           docs: undefined,
         },
       ],
       index: {
-        kind: "schema",
-        schema: { anyOf: [{ type: "number" }, { type: "boolean" }] },
+        kind: "union",
+        members: [
+          { kind: "scalar", name: "number" },
+          { kind: "scalar", name: "boolean" },
+        ],
       },
     })
   })
