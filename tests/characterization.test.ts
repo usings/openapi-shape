@@ -282,6 +282,19 @@ describe("union and literal edge cases", () => {
     expect(code).toContain("export type None = never")
   })
 
+  it("renders an empty type array as never instead of invalid TypeScript", () => {
+    const code = generate({
+      components: {
+        schemas: {
+          Empty: { type: [] },
+          Box: { type: "object", properties: { v: { type: [] } } },
+        },
+      },
+    })
+    expect(code).toContain("export type Empty = never")
+    expect(code).toContain("v?: never")
+  })
+
   it("deduplicates repeated enum values", () => {
     const code = generate({
       components: { schemas: { Dup: { type: "string", enum: ["a", "a", "b"] } } },

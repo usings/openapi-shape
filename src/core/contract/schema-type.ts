@@ -95,6 +95,8 @@ function compositionSiblingType(schema: OpenAPISchemaObject): ContractType | nul
 
 function typeArrayType(schema: OpenAPISchemaObject): ContractType {
   const types = schema.type as string[]
+  // An empty type array permits no type at all, like an empty enum.
+  if (types.length === 0) return { kind: "never" }
   const nonNull = types.filter((t) => t !== "null")
   const includesNull = types.includes("null")
 
@@ -179,7 +181,7 @@ function objectType(schema: OpenAPISchemaObject): ContractType {
 
 /**
  * Combine `patternProperties` and schema-valued `additionalProperties` into an
- * unwidened index value type. Renderers widen it with declared field types as
+ * index value type, before widening. Renderers widen it with declared field types as
  * required by TypeScript index signatures.
  */
 export function objectIndexType(schema: OpenAPISchemaObject): ContractType | null {

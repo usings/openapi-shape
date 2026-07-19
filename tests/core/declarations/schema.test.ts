@@ -110,6 +110,11 @@ describe("renderContractType: union/intersection", () => {
       }),
     ).toBe("A")
   })
+  it("renders an empty union as never and an empty intersection as unknown", () => {
+    expect(renderContractType({ kind: "union", members: [] })).toBe("never")
+    expect(renderContractType({ kind: "intersection", members: [] })).toBe("unknown")
+  })
+
   it("wraps intersection members inside unions", () => {
     expect(
       renderContractType({

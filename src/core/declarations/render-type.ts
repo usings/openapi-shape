@@ -64,6 +64,8 @@ function renderNode(node: ContractType, options: RenderTypeOptions): Rendered {
       return renderUnion(node.members.map((m) => renderNode(m, options)))
     case "intersection": {
       const members = node.members.map((m) => renderNode(m, options))
+      // An empty intersection constrains nothing.
+      if (members.length === 0) return { text: "unknown", kind: "unknown" }
       if (members.length === 1) return members[0]
       const text = members.map((m) => (m.kind === "union" ? `(${m.text})` : m.text)).join(" & ")
       return { text, kind: node.kind }
@@ -111,6 +113,9 @@ function widenedIndexText(
  * to one member returns that member's kind so wrapping decisions stay correct.
  */
 function renderUnion(members: Rendered[]): Rendered {
+  // An empty union permits nothing. The contract builder never produces one,
+  // but rendering must not emit an empty type expression.
+  if (members.length === 0) return { text: "never", kind: "never" }
   const seen = new Set<string>()
   const dedup: Rendered[] = []
   for (const m of members) {

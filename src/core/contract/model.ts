@@ -160,7 +160,7 @@ export type ContractSchema = ContractSchemaBase &
     | {
         kind: "interface"
         fields: ContractField[]
-        /** Unwidened index-signature value type, when the object permits additional keys. */
+        /** Index-signature value type before widening, when the object permits additional keys. */
         index?: ContractType
       }
     | {
@@ -169,17 +169,21 @@ export type ContractSchema = ContractSchemaBase &
       }
   )
 
-/** Scalar type names shared by every target language renderer. */
+/** Scalar type names used by contract types, following TypeScript naming. */
 export type ScalarName = "string" | "number" | "boolean" | "null"
 
 /**
- * Language-neutral type tree produced by contract building.
+ * Type tree produced by contract building, decoupled from OpenAPI schemas.
  *
  * All OpenAPI schema interpretation happens before this tree is built:
  * `$ref`s are resolved to `reference` names, compositions become
  * `union`/`intersection`, and object keywords become `object`/`record`.
  * Renderers only decide target-language syntax, such as mapping `binary`
  * to `Blob` or applying user `format` mappings to scalars.
+ *
+ * The tree is not language-neutral: reference names are already sanitized
+ * TypeScript identifiers, `integer` is collapsed to `number`, and kind
+ * names follow TypeScript conventions.
  */
 export type ContractType =
   /** Unconstrained or unsupported schema. Renders as `unknown`. */
@@ -197,7 +201,7 @@ export type ContractType =
   | { kind: "reference"; name: string }
   | { kind: "array"; items: ContractType }
   | { kind: "tuple"; items: ContractType[]; rest?: ContractType }
-  /** Object with declared fields. `index` is the unwidened index value type. */
+  /** Object with declared fields. `index` is the index value type before widening. */
   | { kind: "object"; fields: ContractField[]; index?: ContractType }
   /** Object without declared fields, keyed by arbitrary strings. */
   | { kind: "record"; values: ContractType }

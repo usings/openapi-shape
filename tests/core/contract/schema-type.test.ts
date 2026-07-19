@@ -134,6 +134,10 @@ describe("buildContractType: type arrays", () => {
     })
   })
 
+  it("maps an empty type array to never", () => {
+    expect(buildContractType({ type: [] })).toStrictEqual({ kind: "never" })
+  })
+
   it("lets enum override the type array without adding null", () => {
     expect(buildContractType({ type: ["string", "null"], enum: ["red"] })).toStrictEqual({
       kind: "literal",
