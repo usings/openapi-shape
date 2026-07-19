@@ -20,7 +20,9 @@ describe("normalize: 3.0 nullable rewrite", () => {
       openapi: "3.0.3",
       components: { schemas: { X: { type: "string", nullable: true } } },
     })
-    expect(out.components?.schemas?.X).toStrictEqual({ type: ["string", "null"] })
+    expect(out.components?.schemas?.X).toStrictEqual({
+      anyOf: [{ type: "string" }, { type: "null" }],
+    })
   })
 
   it("rewrites nested nullable inside properties", () => {
@@ -36,7 +38,7 @@ describe("normalize: 3.0 nullable rewrite", () => {
       },
     })
     expect(out.components?.schemas?.X?.properties?.a).toStrictEqual({
-      type: ["integer", "null"],
+      anyOf: [{ type: "integer" }, { type: "null" }],
     })
   })
 
@@ -52,7 +54,24 @@ describe("normalize: 3.0 nullable rewrite", () => {
       },
     })
     expect(out.components?.schemas?.X?.oneOf?.[0]).toStrictEqual({
-      type: ["string", "null"],
+      anyOf: [{ type: "string" }, { type: "null" }],
+    })
+  })
+
+  it("walks into patternProperties values", () => {
+    const out = normalize({
+      openapi: "3.0.3",
+      components: {
+        schemas: {
+          X: {
+            type: "object",
+            patternProperties: { "^x-": { type: "string", nullable: true } },
+          },
+        },
+      },
+    })
+    expect(out.components?.schemas?.X?.patternProperties?.["^x-"]).toStrictEqual({
+      anyOf: [{ type: "string" }, { type: "null" }],
     })
   })
 
@@ -69,22 +88,47 @@ describe("normalize: 3.0 nullable rewrite", () => {
         },
       },
     })
-    expect(out.components?.schemas?.X?.items).toStrictEqual({ type: ["string", "null"] })
+    expect(out.components?.schemas?.X?.items).toStrictEqual({
+      anyOf: [{ type: "string" }, { type: "null" }],
+    })
     expect(out.components?.schemas?.Y?.prefixItems?.[0]).toStrictEqual({
-      type: ["string", "null"],
+      anyOf: [{ type: "string" }, { type: "null" }],
     })
   })
 
-  it("does NOT rewrite nullable on object/array (out of scope)", () => {
-    const input = {
+  it("rewrites nullable: true on object, keeping object keywords", () => {
+    const out = normalize({
       openapi: "3.0.3",
-      components: { schemas: { X: { type: "object", nullable: true, properties: {} } } },
-    }
-    const out = normalize(input)
+      components: {
+        schemas: { X: { type: "object", nullable: true, properties: { a: { type: "string" } } } },
+      },
+    })
     expect(out.components?.schemas?.X).toStrictEqual({
-      type: "object",
-      nullable: true,
-      properties: {},
+      anyOf: [{ type: "object", properties: { a: { type: "string" } } }, { type: "null" }],
+    })
+  })
+
+  it("rewrites nullable: true on array, keeping items", () => {
+    const out = normalize({
+      openapi: "3.0.3",
+      components: {
+        schemas: { X: { type: "array", nullable: true, items: { type: "string" } } },
+      },
+    })
+    expect(out.components?.schemas?.X).toStrictEqual({
+      anyOf: [{ type: "array", items: { type: "string" } }, { type: "null" }],
+    })
+  })
+
+  it("keeps enum alongside the rewritten nullable type", () => {
+    const out = normalize({
+      openapi: "3.0.3",
+      components: {
+        schemas: { X: { type: "string", enum: ["red", "blue"], nullable: true } },
+      },
+    })
+    expect(out.components?.schemas?.X).toStrictEqual({
+      anyOf: [{ type: "string", enum: ["red", "blue"] }, { type: "null" }],
     })
   })
 
@@ -110,7 +154,7 @@ describe("normalize: 3.0 nullable rewrite", () => {
       },
     })
     expect(out.paths?.["/x"]?.get?.parameters?.[0]?.schema).toStrictEqual({
-      type: ["string", "null"],
+      anyOf: [{ type: "string" }, { type: "null" }],
     })
   })
 
@@ -135,7 +179,7 @@ describe("normalize: 3.0 nullable rewrite", () => {
     expect(
       out.paths?.["/x"]?.post?.requestBody?.content?.["application/json"]?.schema,
     ).toStrictEqual({
-      type: ["string", "null"],
+      anyOf: [{ type: "string" }, { type: "null" }],
     })
   })
 })

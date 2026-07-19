@@ -3,17 +3,12 @@ import type { HttpMethod, OpenAPISchema } from "./openapi"
 /**
  * Normalized contract intermediate representation.
  *
- * This is the stable handoff from OpenAPI ingestion to declaration rendering. It is
- * built after reference resolution, OpenAPI 3.0 to 3.1 normalization, and
- * discriminator expansion, so downstream renderers can avoid re-reading the raw
- * OpenAPI document shape.
+ * Built after version normalization, reference resolution, and discriminator
+ * expansion so renderers do not need to interpret the raw document again.
  */
 export interface Contract {
-  /** Sanitized document metadata from the OpenAPI `info` object. */
   info: DocumentInfo
-  /** Named schemas collected from `components.schemas`, in source order. */
   schemas: ContractSchema[]
-  /** Endpoint and webhook operations collected from `paths` and `webhooks`. */
   operations: ContractOperation[]
 }
 
@@ -38,7 +33,6 @@ export interface SourceRef {
   location: string
 }
 
-/** Common operation metadata shared by endpoints and webhooks. */
 interface OperationBase {
   /**
    * Stable declaration key for this operation.
@@ -47,17 +41,11 @@ interface OperationBase {
    * `"GET /pets"` or `"POST pet.created"`.
    */
   key: string
-  /** Lowercase HTTP method as declared by the OpenAPI path item. */
   method: HttpMethod
-  /** Optional OpenAPI `operationId`, preserved for adapters that prefer it. */
   operationId?: string
-  /** OpenAPI operation tags, normalized to an empty array when absent. */
   tags: string[]
-  /** Short operation summary copied from OpenAPI. */
   summary?: string
-  /** Long operation description copied from OpenAPI. */
   description?: string
-  /** True only when OpenAPI marks the operation as deprecated. */
   deprecated: boolean
   /** Query-string parameters after path-level and operation-level merge. */
   query: ContractField[]
@@ -67,7 +55,6 @@ interface OperationBase {
   body: ContractPayload
   /** Declared responses, preserving OpenAPI response key order. */
   responses: ContractOutcome[]
-  /** Source location of the operation object. */
   source?: SourceRef
 }
 
@@ -103,13 +90,9 @@ export type ContractOperation = EndpointOperation | WebhookOperation
  * `required` is derived from the parent object's `required` array.
  */
 export interface ContractField {
-  /** Original parameter or property name before TypeScript key escaping. */
   name: string
-  /** Whether callers must provide this field. */
   required: boolean
-  /** Deferred type information for declaration rendering. */
   shape: ContractShape
-  /** Documentation attached to the parameter or property. */
   docs?: DocBlock
 }
 
@@ -198,10 +181,7 @@ export type PrimitiveName =
 
 /** Documentation that can be rendered as a TypeScript JSDoc block. */
 export interface DocBlock {
-  /** Short human-readable summary. */
   summary?: string
-  /** Longer markdown-capable description. */
   description?: string
-  /** Whether to emit an `@deprecated` tag. */
   deprecated?: boolean
 }

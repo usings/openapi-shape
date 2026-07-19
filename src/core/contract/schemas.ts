@@ -25,7 +25,9 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
   const result: ContractSchema[] = []
   for (const [originalName, schema] of Object.entries(raw)) {
     const name = safeIdentifier(originalName)
-    if (schema.type === "object" && schema.properties) {
+    // Interfaces cannot express composition alongside sibling properties.
+    const hasComposition = schema.allOf ?? schema.oneOf ?? schema.anyOf
+    if (schema.type === "object" && schema.properties && !hasComposition) {
       const required = new Set<string>(schema.required ?? [])
       const fields: ContractField[] = Object.entries(schema.properties).map(([fname, fschema]) => ({
         name: fname,

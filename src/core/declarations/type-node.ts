@@ -3,45 +3,35 @@ import { docBlock } from "../contract/doc"
 import type { OpenAPISchema } from "../contract/openapi"
 import { objectIndexSchemas } from "../contract/shapes"
 import { safeIdentifier } from "../shared/naming"
+import { isObjectAdditional } from "../shared/object"
 import type { DeclarationOptions } from "./options"
 
 /**
- * Renderer-friendly TypeScript type AST.
- *
- * This is the declaration layer's IR: schemas are converted into `TypeNode`
- * values first, then rendered to TypeScript source with formatting rules.
+ * Primitive emitted by the declaration renderer. `undefined` exists only here
+ * to widen index signatures; the contract IR never produces it.
  */
+export type DeclarationPrimitive = PrimitiveName | "undefined"
+
+/** Renderer-friendly TypeScript AST produced from normalized schemas. */
 export type TypeNode =
-  /** TypeScript primitive or built-in name emitted verbatim. */
-  | { kind: "primitive"; name: PrimitiveName }
-  /** String, number, boolean, or null literal type. */
+  | { kind: "primitive"; name: DeclarationPrimitive }
   | { kind: "literal"; value: string | number | boolean | null }
   /** Reference to a named schema. Renderers may prepend a namespace prefix. */
   | { kind: "ref"; name: string }
-  /** Homogeneous array type. */
   | { kind: "array"; items: TypeNode }
-  /** Tuple type, optionally with a rest item type. */
   | { kind: "tuple"; items: TypeNode[]; rest: TypeNode | null }
-  /** Object literal type with declared fields and an optional string index signature. */
   | { kind: "object"; fields: TypeField[]; index: TypeNode | null }
   /** `Record<string, T>` object shape used when an object has no declared properties. */
   | { kind: "record"; values: TypeNode }
-  /** TypeScript union. Empty source unions are normalized to `never` before this node. */
   | { kind: "union"; members: TypeNode[] }
-  /** TypeScript intersection, primarily from OpenAPI `allOf`. */
   | { kind: "intersection"; members: TypeNode[] }
   /** Raw TypeScript supplied by options, such as custom `format` mappings. */
   | { kind: "raw"; text: string }
 
-/** Object field in a rendered object or interface type. */
 export interface TypeField {
-  /** Original property name before TypeScript key escaping. */
   name: string
-  /** Whether the property is required. */
   required: boolean
-  /** Property value type. */
   type: TypeNode
-  /** Documentation copied from the source schema property. */
   docs?: DocBlock
 }
 
@@ -58,40 +48,76 @@ export function schemaToTypeNode(
 ): TypeNode {
   if (!schema || isEmptySchema(schema)) return primitiveNode("unknown")
 
+  if (schema.oneOf || schema.anyOf || schema.allOf) {
+    return compositionToTypeNode(schema, options)
+  }
+
   if ("const" in schema) return constToTypeNode(schema.const)
 
   if (Array.isArray(schema.type)) return typeArrayToNode(schema, options)
 
-  if (Array.isArray(schema.enum)) {
-    if (schema.enum.length === 0) return primitiveNode("never")
-    return uniqueUnion(schema.enum.map((v) => constToTypeNode(v)))
-  }
+  if (Array.isArray(schema.enum)) return enumToNode(schema.enum)
 
   if (schema.$ref) {
     const last = schema.$ref.split("/").at(-1) ?? schema.$ref
     return { kind: "ref", name: safeIdentifier(last) }
   }
 
-  if (schema.oneOf) {
-    if (schema.oneOf.length === 0) return primitiveNode("never")
-    return uniqueUnion(schema.oneOf.map((b) => schemaToTypeNode(b, options)))
-  }
-  if (schema.anyOf) {
-    if (schema.anyOf.length === 0) return primitiveNode("never")
-    return uniqueUnion(schema.anyOf.map((b) => schemaToTypeNode(b, options)))
-  }
-  if (schema.allOf) {
-    return {
-      kind: "intersection",
-      members: schema.allOf.map((b) => schemaToTypeNode(b, options)),
-    }
-  }
-
   return convertSingleType(schema, options)
 }
 
-/** Create a primitive TypeNode. */
-export function primitiveNode(name: PrimitiveName): TypeNode {
+/**
+ * Convert `oneOf`/`anyOf`/`allOf` plus any meaningful sibling keywords.
+ *
+ * JSON Schema applies composition keywords alongside sibling constraints, so
+ * sibling `properties`, `items`, and scalar types join the intersection instead
+ * of being dropped.
+ */
+function compositionToTypeNode(schema: OpenAPISchema, options: DeclarationOptions): TypeNode {
+  const members: TypeNode[] = []
+  if (schema.allOf) {
+    members.push(...schema.allOf.map((b) => schemaToTypeNode(b, options)))
+  }
+  for (const branches of [schema.oneOf, schema.anyOf]) {
+    if (!branches) continue
+    if (branches.length === 0) return primitiveNode("never")
+    members.push(uniqueUnion(branches.map((b) => schemaToTypeNode(b, options))))
+  }
+  const sibling = compositionSiblingNode(schema, options)
+  if (sibling) members.push(sibling)
+  if (members.length === 0) return primitiveNode("unknown")
+  if (members.length === 1) return members[0]
+  return { kind: "intersection", members }
+}
+
+function compositionSiblingNode(
+  schema: OpenAPISchema,
+  options: DeclarationOptions,
+): TypeNode | null {
+  const { oneOf: _o, anyOf: _a, allOf: _l, discriminator: _d, ...rest } = schema
+  if (
+    Array.isArray(rest.type) ||
+    Array.isArray(rest.enum) ||
+    "const" in rest ||
+    rest.$ref !== undefined
+  ) {
+    return schemaToTypeNode(rest, options)
+  }
+  const hasObjectContent =
+    rest.properties !== undefined ||
+    rest.patternProperties !== undefined ||
+    isObjectAdditional(rest.additionalProperties)
+  if (hasObjectContent) return schemaToTypeNode({ ...rest, type: "object" }, options)
+  if (rest.type === "array" || rest.items !== undefined || rest.prefixItems !== undefined) {
+    return schemaToTypeNode({ ...rest, type: "array" }, options)
+  }
+  if (typeof rest.type === "string" && rest.type !== "object") {
+    return schemaToTypeNode(rest, options)
+  }
+  return null
+}
+
+export function primitiveNode(name: DeclarationPrimitive): TypeNode {
   return { kind: "primitive", name }
 }
 
@@ -111,6 +137,9 @@ function typeArrayToNode(schema: OpenAPISchema, options: DeclarationOptions): Ty
   const types = schema.type as string[]
   const nonNull = types.filter((t) => t !== "null")
   const includesNull = types.includes("null")
+
+  // `enum` constrains the type array and must explicitly include `null`.
+  if (Array.isArray(schema.enum)) return enumToNode(schema.enum)
 
   if (
     schema.format !== undefined &&
@@ -182,14 +211,25 @@ function objectToNode(schema: OpenAPISchema, options: DeclarationOptions): TypeN
     type: schemaToTypeNode(value, options),
     docs: docBlock(value),
   }))
-  return { kind: "object", fields, index }
+  return { kind: "object", fields, index: index ? widenIndexNode(index, fields) : null }
 }
 
 /**
- * Convert object index-signature sources into a TypeNode.
- *
- * `patternProperties` and schema-valued `additionalProperties` are collected by
- * `objectIndexSchemas`; multiple value schemas become a union.
+ * Include every declared property type in an index signature, as required by
+ * TypeScript. Optional properties also contribute `undefined`.
+ */
+export function widenIndexNode(index: TypeNode, fields: TypeField[]): TypeNode {
+  const members: TypeNode[] = [
+    ...(index.kind === "union" ? index.members : [index]),
+    ...fields.map((f) => f.type),
+  ]
+  if (fields.some((f) => !f.required)) members.push(primitiveNode("undefined"))
+  return uniqueUnion(members)
+}
+
+/**
+ * Combine `patternProperties` and schema-valued `additionalProperties` into an
+ * index-signature value type.
  */
 export function objectIndexNode(
   schema: OpenAPISchema,
@@ -219,6 +259,12 @@ function primitiveStringToNode(t: string): TypeNode {
     default:
       return primitiveNode("unknown")
   }
+}
+
+function enumToNode(values: unknown[]): TypeNode {
+  if (values.length === 0) return primitiveNode("never")
+  const members = values.map((v) => constToTypeNode(v))
+  return uniqueUnion(members)
 }
 
 function constToTypeNode(value: unknown): TypeNode {

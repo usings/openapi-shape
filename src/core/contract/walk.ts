@@ -11,8 +11,6 @@ import type {
 } from "./openapi"
 import { HTTP_METHODS } from "./openapi"
 
-// A separate read-only walk lives in `discriminators.ts`; see docs/adr/0001 for why they
-// aren't unified.
 /**
  * Schema transformation callback used by document mapping helpers.
  *
@@ -24,20 +22,14 @@ export type SchemaMapper = (schema: OpenAPISchema) => OpenAPISchema
 /**
  * Visitor hooks for shallow OpenAPI document nodes.
  *
- * Hook locations are JSON Pointer-like strings for diagnostics. When a hook
- * returns an object with `$ref`, child traversal stops for that node so unresolved
- * references are not treated as concrete objects.
+ * Locations are JSON Pointer-like diagnostic paths. Traversal stops when a hook
+ * returns an object with `$ref`, because unresolved references have no local children.
  */
 export interface DocumentVisitor {
-  /** Visit path item objects in `paths`, `webhooks`, and `components.pathItems`. */
   pathItem?: (item: PathItem, location: string) => PathItem
-  /** Visit parameter objects before their schema child is visited. */
   parameter?: (param: Parameter, location: string) => Parameter
-  /** Visit request body objects before content schemas are visited. */
   requestBody?: (body: RequestBody, location: string) => RequestBody
-  /** Visit response objects before content schemas are visited. */
   response?: (resp: Response, location: string) => Response
-  /** Visit schema objects reachable through supported document locations. */
   schema?: (schema: OpenAPISchema, location: string) => OpenAPISchema
 }
 
@@ -69,8 +61,9 @@ export function mapDocument(doc: OpenAPIDocument, visitor: DocumentVisitor): Ope
  * Deep-map every supported schema in the document.
  *
  * `$ref` schema objects are left untouched. For non-ref schemas, nested
- * `properties`, `items`, `prefixItems`, `additionalProperties`, `oneOf`,
- * `anyOf`, and `allOf` schemas are mapped before the parent schema callback.
+ * `properties`, `patternProperties`, `items`, `prefixItems`,
+ * `additionalProperties`, `oneOf`, `anyOf`, and `allOf` schemas are mapped
+ * before the parent schema callback.
  */
 export function mapDocumentSchemas(doc: OpenAPIDocument, mapSchema: SchemaMapper): OpenAPIDocument {
   return mapDocument(doc, {
@@ -211,6 +204,15 @@ function mapSchemaDeep(schema: OpenAPISchema, mapSchema: SchemaMapper): OpenAPIS
     const newProps = mapValuesIdentity(next.properties, (v) => mapSchemaDeep(v, mapSchema))
     if (newProps !== next.properties) {
       next = { ...next, properties: newProps }
+      changed = true
+    }
+  }
+  if (next.patternProperties) {
+    const newPatterns = mapValuesIdentity(next.patternProperties, (v) =>
+      mapSchemaDeep(v, mapSchema),
+    )
+    if (newPatterns !== next.patternProperties) {
+      next = { ...next, patternProperties: newPatterns }
       changed = true
     }
   }

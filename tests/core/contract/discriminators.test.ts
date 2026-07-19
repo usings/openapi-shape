@@ -117,6 +117,75 @@ describe("discover: walks the document for discriminator branches", () => {
     })
     expect(found).toStrictEqual([])
   })
+
+  it("ignores discriminator-shaped objects outside schema positions", () => {
+    const doc = {
+      components: {
+        schemas: { A: { type: "object" } },
+        examples: {
+          sample: {
+            value: {
+              discriminator: { propertyName: "kind" },
+              oneOf: [{ type: "object" }],
+            },
+          },
+        },
+      },
+    } as unknown as Parameters<typeof discoverInjections>[0]
+    expect(discoverInjections(doc)).toStrictEqual([])
+  })
+
+  it("finds discriminators nested inside schema properties", () => {
+    const found = discoverInjections({
+      components: {
+        schemas: {
+          Owner: {
+            type: "object",
+            properties: {
+              pet: {
+                oneOf: [{ $ref: "#/components/schemas/Cat" }],
+                discriminator: { propertyName: "kind" },
+              },
+            },
+          },
+          Cat: { type: "object" },
+        },
+      },
+    })
+    expect(found).toStrictEqual([
+      {
+        schemaName: "Cat",
+        propertyName: "kind",
+        value: "Cat",
+        sourceLocation: "/components/schemas/Owner/properties/pet/oneOf[0]",
+      },
+    ])
+  })
+
+  it("finds discriminators in request body content schemas", () => {
+    const found = discoverInjections({
+      components: { schemas: { Cat: { type: "object" } } },
+      paths: {
+        "/x": {
+          post: {
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    anyOf: [{ $ref: "#/components/schemas/Cat" }],
+                    discriminator: { propertyName: "kind" },
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    })
+    expect(found).toHaveLength(1)
+    expect(found[0]).toMatchObject({ schemaName: "Cat", propertyName: "kind", value: "Cat" })
+  })
 })
 
 describe("reduce: folds Injection[] into a schema-keyed accumulator", () => {

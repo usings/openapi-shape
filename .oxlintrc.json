@@ -107,7 +107,7 @@
     "jsdoc/check-tag-names": "error",
     "jsdoc/empty-tags": "error",
 
-    "vitest/expect-expect": "error",
+    "vitest/expect-expect": ["error", { "assertFunctionNames": ["expect", "expectPassesTsc"] }],
     "vitest/hoisted-apis-on-top": "error",
     "vitest/no-commented-out-tests": "warn",
     "vitest/no-conditional-expect": "error",

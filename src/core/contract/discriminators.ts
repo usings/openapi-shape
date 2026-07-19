@@ -1,32 +1,20 @@
-import { isObject } from "../shared/object"
+import { isObject, isObjectAdditional } from "../shared/object"
 import { LoadError } from "./errors"
 import type { OpenAPIDocument, OpenAPISchema } from "./openapi"
+import { mapDocument } from "./walk"
 
-/**
- * A discriminator literal that should be injected into a component schema.
- *
- * Each injection is discovered from one branch of a `oneOf` or `anyOf` schema
- * that declares an OpenAPI discriminator.
- */
+/** Discriminator literal to inject into one referenced component schema. */
 export interface Injection {
-  /** Component schema name targeted by the discriminator branch. */
   schemaName: string
-  /** Discriminator property name to require on the target schema. */
   propertyName: string
-  /** String literal value expected for this branch. */
   value: string
-  /** Location of the branch that produced the injection, used in diagnostics. */
+  /** Branch location used in conflict diagnostics. */
   sourceLocation: string
 }
 
 type ReducedInjection = Pick<Injection, "value" | "sourceLocation">
 
-/**
- * Discriminator injections grouped by schema name and property name.
- *
- * The outer key is a component schema name; the inner key is the discriminator
- * property to inject into that schema.
- */
+/** Injections grouped first by component schema, then by discriminator property. */
 export type SchemaInjections = Map<string, Map<string, ReducedInjection>>
 
 /**
@@ -41,30 +29,59 @@ export function injectDiscriminators(doc: OpenAPIDocument): OpenAPIDocument {
 }
 
 /**
- * Walk the document and emit one `Injection` per discriminator branch.
- * Throws `LoadError` on structural problems (branch not `$ref`, ref outside `components.schemas`).
- * Does not detect value conflicts — that is `reduceInjections`'s job.
+ * Find discriminator branches in supported schema locations.
+ *
+ * Non-schema data is ignored. Structurally invalid branches throw `LoadError`;
+ * conflicts between otherwise valid injections are handled separately.
  */
 export function discoverInjections(doc: OpenAPIDocument): Injection[] {
   const out: Injection[] = []
-  walk(doc, "", out)
+  mapDocument(doc, {
+    schema: (schema, location) => {
+      walkSchema(schema, location, out)
+      return schema
+    },
+  })
   return out
 }
 
-function walk(node: unknown, location: string, out: Injection[]): void {
-  if (!isObject(node)) return
+function walkSchema(schema: OpenAPISchema, location: string, out: Injection[]): void {
+  if (!isObject(schema)) return
 
-  const disc = node.discriminator
+  const disc = schema.discriminator
   if (isObject(disc) && typeof disc.propertyName === "string") {
-    if (Array.isArray(node.oneOf)) {
-      collectFromDiscriminator(disc, node.oneOf, "oneOf", location, out)
-    } else if (Array.isArray(node.anyOf)) {
-      collectFromDiscriminator(disc, node.anyOf, "anyOf", location, out)
+    if (Array.isArray(schema.oneOf)) {
+      collectFromDiscriminator(disc, schema.oneOf, "oneOf", location, out)
+    } else if (Array.isArray(schema.anyOf)) {
+      collectFromDiscriminator(disc, schema.anyOf, "anyOf", location, out)
     }
   }
 
-  for (const [key, value] of Object.entries(node)) {
-    walk(value, `${location}/${key}`, out)
+  for (const key of ["properties", "patternProperties"] as const) {
+    const record = schema[key]
+    if (!record) continue
+    for (const [name, child] of Object.entries(record)) {
+      walkSchema(child, `${location}/${key}/${name}`, out)
+    }
+  }
+  if (typeof schema.items === "object" && schema.items !== null) {
+    walkSchema(schema.items, `${location}/items`, out)
+  }
+  if (Array.isArray(schema.prefixItems)) {
+    schema.prefixItems.forEach((child, index) => {
+      walkSchema(child, `${location}/prefixItems/${index}`, out)
+    })
+  }
+  if (isObjectAdditional<OpenAPISchema>(schema.additionalProperties)) {
+    walkSchema(schema.additionalProperties, `${location}/additionalProperties`, out)
+  }
+  for (const key of ["oneOf", "anyOf", "allOf"] as const) {
+    const branches = schema[key]
+    if (Array.isArray(branches)) {
+      branches.forEach((child, index) => {
+        walkSchema(child, `${location}/${key}/${index}`, out)
+      })
+    }
   }
 }
 
@@ -108,10 +125,7 @@ function findValueForBranch(
   return schemaName
 }
 
-/**
- * Fold a list of injections into the `SchemaInjections` accumulator.
- * Throws `LoadError` if two injections disagree on the value for the same `schemaName.propertyName`.
- */
+/** Group injections and reject conflicting values for the same property. */
 export function reduceInjections(injections: Injection[]): SchemaInjections {
   const out: SchemaInjections = new Map()
   for (const inj of injections) {
@@ -131,11 +145,7 @@ export function reduceInjections(injections: Injection[]): SchemaInjections {
   return out
 }
 
-/**
- * Produce a new document with discriminator literals applied to `components.schemas`.
- * Throws `LoadError` if an injection targets a schema that does not exist, or if injection
- * would conflict with an existing property type.
- */
+/** Apply discriminator literals, rejecting missing targets and incompatible properties. */
 export function applyInjections(
   doc: OpenAPIDocument,
   injections: SchemaInjections,

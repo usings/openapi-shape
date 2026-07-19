@@ -32,6 +32,14 @@ describe("generate (integration)", () => {
     await expectPassesTsc([code])
   })
 
+  it("YAML source generates identical output to the JSON source", async () => {
+    const [fromYaml, fromJson] = await Promise.all([
+      generate(join(import.meta.dirname, "fixtures/petstore.yaml")),
+      generate(join(import.meta.dirname, "fixtures/petstore.json")),
+    ])
+    expect(fromYaml).toBe(fromJson)
+  })
+
   it("generate(doc) accepts unresolved refs and resolves them", () => {
     const doc = {
       components: {
@@ -178,6 +186,116 @@ describe("generate (integration)", () => {
     )
     expect(code).toContain('headers: { "X-API-Key": string; "X-Trace-Id"?: string }')
     expect(code).toContain("headers: void")
+  })
+
+  it("3.0 nullable enum keeps literal types", () => {
+    const code = generate({
+      openapi: "3.0.3",
+      components: {
+        schemas: { Color: { type: "string", enum: ["red", "blue"], nullable: true } },
+      },
+    })
+    expect(code).toContain('export type Color = "red" | "blue" | null')
+  })
+
+  it("3.0 nullable object keeps null in the alias", () => {
+    const code = generate({
+      openapi: "3.0.3",
+      components: {
+        schemas: {
+          Box: { type: "object", nullable: true, properties: { a: { type: "string" } } },
+        },
+      },
+    })
+    expect(code).toContain("export type Box = {\n    a?: string\n  } | null")
+  })
+
+  it("3.0 nullable composition keeps the composition and null branches", () => {
+    const code = generate({
+      openapi: "3.0.3",
+      components: {
+        schemas: {
+          Base: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
+          Ext: {
+            type: "object",
+            nullable: true,
+            allOf: [{ $ref: "#/components/schemas/Base" }],
+            properties: { extra: { type: "string" } },
+            required: ["extra"],
+          },
+        },
+      },
+    })
+    expect(code).toContain("export type Ext = (Base & {\n    extra: string\n  }) | null")
+  })
+
+  it("3.1 nullable type does not add null to an enum that excludes it", () => {
+    const code = generate({
+      openapi: "3.1.0",
+      components: {
+        schemas: { Color: { type: ["string", "null"], enum: ["red"] } },
+      },
+    })
+    expect(code).toContain('export type Color = "red"')
+    expect(code).not.toContain('export type Color = "red" | null')
+  })
+
+  it("allOf with sibling properties keeps both", () => {
+    const code = generate({
+      components: {
+        schemas: {
+          Base: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
+          Ext: {
+            allOf: [{ $ref: "#/components/schemas/Base" }],
+            properties: { extra: { type: "string" } },
+            required: ["extra"],
+          },
+        },
+      },
+    })
+    expect(code).toContain("export type Ext = Base & {\n    extra: string\n  }")
+  })
+
+  it("object schema with explicit type and allOf keeps both as an alias", () => {
+    const code = generate({
+      components: {
+        schemas: {
+          Base: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
+          Ext: {
+            type: "object",
+            allOf: [{ $ref: "#/components/schemas/Base" }],
+            properties: { extra: { type: "string" } },
+            required: ["extra"],
+          },
+        },
+      },
+    })
+    expect(code).toContain("export type Ext = Base & {\n    extra: string\n  }")
+  })
+
+  it("conflicting index signature is widened and passes tsc", async () => {
+    const code = generate({
+      components: {
+        schemas: {
+          Mixed: {
+            type: "object",
+            properties: { id: { type: "number" } },
+            additionalProperties: { type: "string" },
+          },
+        },
+      },
+    })
+    expect(code).toContain("[key: string]: string | number | undefined")
+    await expectPassesTsc([code])
+  })
+
+  it("3.1 operation without responses is allowed", () => {
+    const code = generate({
+      openapi: "3.1.0",
+      paths: { "/ping": { get: { summary: "no responses" } } },
+    })
+    expect(code).toContain('"GET /ping"')
+    expect(code).toContain("response: unknown")
   })
 
   it("response field is a status-keyed map of every declared response", () => {

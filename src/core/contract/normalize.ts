@@ -25,10 +25,8 @@ export function normalize(raw: unknown): OpenAPIDocument {
 function rewrite30Schema(schema: OpenAPISchema): OpenAPISchema {
   if (!schema.nullable) return schema
   if (typeof schema.type !== "string") return schema
-  const t = schema.type
-  if (t === "string" || t === "number" || t === "integer" || t === "boolean") {
-    const { nullable: _n, ...rest } = schema
-    return { ...rest, type: [t, "null"] }
-  }
-  return schema
+  const { nullable: _n, ...nonNullSchema } = schema
+  // A type array would still require `null` to satisfy siblings such as `enum` and
+  // `allOf`; a separate branch makes the entire 3.0 schema nullable instead.
+  return { anyOf: [nonNullSchema, { type: "null" }] }
 }

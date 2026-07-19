@@ -27,7 +27,9 @@ describe("loadDocument: I/O", () => {
       }),
       async (path) => {
         const doc = await loadDocument(path)
-        expect(doc.components?.schemas?.X).toStrictEqual({ type: ["string", "null"] })
+        expect(doc.components?.schemas?.X).toStrictEqual({
+          anyOf: [{ type: "string" }, { type: "null" }],
+        })
         expect(doc.paths?.["/x"]?.get?.parameters?.[0]).toStrictEqual({
           name: "limit",
           in: "query",
@@ -45,6 +47,61 @@ describe("loadDocument: I/O", () => {
     await withTmpFile("{ not json }", async (path) => {
       await expect(loadDocument(path)).rejects.toBeInstanceOf(LoadError)
     })
+  })
+
+  it("parses .yaml sources as YAML", async () => {
+    await withTmpFile(
+      'openapi: "3.1.0"\ninfo:\n  title: Y\n',
+      async (path) => {
+        const doc = await loadDocument(path)
+        expect(doc.info?.title).toBe("Y")
+      },
+      { ext: ".yaml" },
+    )
+  })
+
+  it("parses .yml sources as YAML", async () => {
+    await withTmpFile(
+      'openapi: "3.1.0"\ninfo:\n  title: Y\n',
+      async (path) => {
+        const doc = await loadDocument(path)
+        expect(doc.info?.title).toBe("Y")
+      },
+      { ext: ".yml" },
+    )
+  })
+
+  it("keeps YAML date-like scalars as strings", async () => {
+    await withTmpFile(
+      "info:\n  title: 2020-01-01\n",
+      async (path) => {
+        const doc = await loadDocument(path)
+        expect(doc.info?.title).toBe("2020-01-01")
+      },
+      { ext: ".yaml" },
+    )
+  })
+
+  it("throws LoadError on invalid YAML", async () => {
+    await withTmpFile(
+      "a: [unclosed\n",
+      async (path) => {
+        await expect(loadDocument(path)).rejects.toBeInstanceOf(LoadError)
+        await expect(loadDocument(path)).rejects.toThrow(/as YAML/)
+      },
+      { ext: ".yaml" },
+    )
+  })
+
+  it("falls back to YAML when an unknown extension is not JSON", async () => {
+    await withTmpFile(
+      "info:\n  title: F\n",
+      async (path) => {
+        const doc = await loadDocument(path)
+        expect(doc.info?.title).toBe("F")
+      },
+      { ext: ".txt" },
+    )
   })
 
   it("accepts a file:// URL", async () => {
@@ -222,7 +279,7 @@ describe("prepareDocument: idempotence", () => {
     expect(
       out.webhooks?.event?.post?.requestBody?.content?.["application/json"]?.schema,
     ).toStrictEqual({
-      type: ["string", "null"],
+      anyOf: [{ type: "string" }, { type: "null" }],
     })
   })
 })

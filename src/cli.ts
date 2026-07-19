@@ -5,17 +5,15 @@ import { styleText } from "node:util"
 import { defineCommand, runMain } from "citty"
 import { generate } from "."
 
-// --- CLI command definition
-
 const main = defineCommand({
   meta: {
     name: "openapi-shape",
-    description: "Generate TypeScript declarations and API shapes from OpenAPI JSON",
+    description: "Generate TypeScript declarations and API shapes from OpenAPI 3.0/3.1 JSON/YAML",
   },
   args: {
     source: {
       type: "positional",
-      description: "Path to OpenAPI JSON file or HTTP(S) URL",
+      description: "Path to OpenAPI JSON/YAML file or HTTP(S) URL",
       required: true,
     },
     output: {
@@ -64,8 +62,6 @@ const main = defineCommand({
 })
 
 runMain(main)
-
-// --- Utility functions and types
 
 interface StaleReport {
   kind: "stale"

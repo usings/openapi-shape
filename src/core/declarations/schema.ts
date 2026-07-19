@@ -3,9 +3,8 @@ import { safeKey } from "../shared/naming"
 import { indent, jsdoc } from "./format"
 import type { DeclarationOptions } from "./options"
 import type { TypeNode, TypeField } from "./type-node"
-import { schemaToTypeNode } from "./type-node"
+import { schemaToTypeNode, widenIndexNode } from "./type-node"
 
-/** Options used while rendering declaration-layer TypeNodes. */
 export interface RenderTypeNodeOptions {
   /** Prefix to add to schema references, for example `Schemas.`. */
   refPrefix?: string
@@ -13,7 +12,6 @@ export interface RenderTypeNodeOptions {
   formats?: DeclarationOptions["formats"]
 }
 
-/** Render a TypeNode into TypeScript source. */
 export function renderTypeNode(node: TypeNode, options: RenderTypeNodeOptions = {}): string {
   switch (node.kind) {
     case "primitive":
@@ -73,18 +71,25 @@ function renderObject(
   index: TypeNode | null,
   options: RenderTypeNodeOptions,
 ): string {
-  const lines: string[] = []
-  for (const f of fields) {
-    const docHeader = f.docs ? jsdoc(f.docs) : ""
-    const opt = f.required ? "" : "?"
-    lines.push(`${docHeader}${safeKey(f.name)}${opt}: ${renderTypeNode(f.type, options)}`)
-  }
-  if (index) lines.push(`[key: string]: ${renderTypeNode(index, options)}`)
+  const lines = objectFieldLines(fields, index, options)
   if (lines.length === 0) return "{}"
   return `{\n${indent(lines.join("\n"))}\n}`
 }
 
-/** Convert a contract shape into the declaration-layer TypeNode IR. */
+function objectFieldLines(
+  fields: TypeField[],
+  index: TypeNode | null,
+  options: RenderTypeNodeOptions,
+): string[] {
+  const lines = fields.map((f) => {
+    const docHeader = f.docs ? jsdoc(f.docs) : ""
+    const opt = f.required ? "" : "?"
+    return `${docHeader}${safeKey(f.name)}${opt}: ${renderTypeNode(f.type, options)}`
+  })
+  if (index) lines.push(`[key: string]: ${renderTypeNode(index, options)}`)
+  return lines
+}
+
 export function shapeToTypeNode(
   shape: ContractShape,
   options: RenderTypeNodeOptions = {},
@@ -93,7 +98,6 @@ export function shapeToTypeNode(
   return schemaToTypeNode(shape.schema, options)
 }
 
-/** Render contract schemas into the generated `Schemas` namespace. */
 export function renderSchemas(
   schemas: ContractSchema[],
   options: RenderTypeNodeOptions = {},
@@ -112,7 +116,6 @@ export function renderSchemas(
       )
     }
   }
-  // Emit aliases before interfaces so referenced object shapes are declared last.
   return `export namespace Schemas {\n${indent([...aliases, ...interfaces].join("\n\n"))}\n}`
 }
 
@@ -121,11 +124,13 @@ function renderInterfaceBody(
   index: ContractShape | null,
   options: RenderTypeNodeOptions,
 ): string {
-  const lines = fields.map((f) => {
-    const docHeader = f.docs ? jsdoc(f.docs) : ""
-    const opt = f.required ? "" : "?"
-    return `${docHeader}${safeKey(f.name)}${opt}: ${renderTypeNode(shapeToTypeNode(f.shape, options))}`
-  })
-  if (index) lines.push(`[key: string]: ${renderTypeNode(shapeToTypeNode(index, options))}`)
-  return lines.join("\n")
+  const fieldNodes: TypeField[] = fields.map((f) => ({
+    name: f.name,
+    required: f.required,
+    type: shapeToTypeNode(f.shape, options),
+    docs: f.docs,
+  }))
+  const widened = index ? widenIndexNode(shapeToTypeNode(index, options), fieldNodes) : null
+  // References inside the namespace do not need the `Schemas.` prefix.
+  return objectFieldLines(fieldNodes, widened, {}).join("\n")
 }

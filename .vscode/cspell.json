@@ -1,4 +1,4 @@
 {
   "ignorePaths": ["node_modules", "dist"],
-  "words": ["bumpp", "changelogithub", "citty", "ofetch", "oxfmt", "oxlint"]
+  "words": ["bumpp", "changelogithub", "citty", "ofetch", "oxfmt", "oxlint", "unvalidated"]
 }

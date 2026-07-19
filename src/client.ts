@@ -44,8 +44,6 @@ export function createClient<
   return client
 }
 
-// --- internal utilities
-
 function splitEndpoint(endpoint: string): { method: string; path: string } {
   const space = endpoint.indexOf(" ")
   if (space <= 0 || space === endpoint.length - 1) {
@@ -117,7 +115,6 @@ function buildBody(body: unknown, serializer: BodySerializer | undefined): BodyS
     return { body: result.body, headers: result.headers ?? {} }
   }
 
-  if (typeof body === "string") return { body, headers: { "content-type": "text/plain" } }
   if (isPassthroughBody(body)) return { body, headers: {} }
 
   let serialized: string | undefined
@@ -165,8 +162,6 @@ function mergeAdapterOptions<TOptions>(
   return overrides
 }
 
-// --- internal types
-
 type FetchBodyInit = typeof globalThis extends {
   fetch: (input: never, init?: infer Init) => unknown
 }
@@ -211,8 +206,7 @@ interface BodySerializerResult {
 
 type QuerySerializerResult = string | { toString(): string }
 
-// `NonNullish extends TValue` means the field type is broad enough to accept
-// any defined value, so callers should not be forced to pass the option.
+// A field is optional when its type accepts every defined value.
 type RequestField<TKey extends string, TValue> = TValue extends void
   ? Partial<Record<TKey, never>>
   : undefined extends TValue
@@ -272,21 +266,13 @@ interface RuntimeRequestOptions<TOptions> {
   options?: TOptions
 }
 
-// ----- public types -----
-
-/**
- * Transport hook called with a normalized request.
- */
+/** Transport hook called with a normalized request. */
 export type Adapter<TOptions = unknown> = (request: AdapterRequest<TOptions>) => Promise<unknown>
 
-/**
- * Encode a defined request body and optional body-derived headers.
- */
+/** Encode a defined request body and optional body-derived headers. */
 export type BodySerializer = (body: unknown) => BodySerializerResult
 
-/**
- * Encode a query object into a query string-like value.
- */
+/** Encode a query object into a query string-like value. */
 export type QuerySerializer = (query: Record<string, unknown>) => QuerySerializerResult
 
 /**
@@ -327,28 +313,18 @@ export type Client<
 ) => Promise<SuccessOf<Endpoints[K]>>
 
 export interface ClientOptions<TOptions = unknown> {
-  /**
-   * Prefix for relative endpoint paths.
-   */
+  /** Prefix for relative endpoint paths. */
   baseURL?: string
 
-  /**
-   * Default headers merged before body-derived and per-call headers.
-   */
+  /** Default headers merged before body-derived and per-call headers. */
   headers?: Record<string, string>
 
-  /**
-   * Default adapter options. Plain objects are shallow-merged per call.
-   */
+  /** Default adapter options. Plain objects are shallow-merged per call. */
   options?: TOptions
 
-  /**
-   * Custom body serializer.
-   */
+  /** Custom body serializer. */
   serializeBody?: BodySerializer
 
-  /**
-   * Custom query serializer.
-   */
+  /** Custom query serializer. */
   serializeQuery?: QuerySerializer
 }

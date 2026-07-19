@@ -294,7 +294,7 @@ describe("createClient", () => {
     expect(call.headers).toStrictEqual({})
   })
 
-  it("passes string body through with content-type: text/plain", async () => {
+  it("serializes string body as JSON like any other declared value", async () => {
     const adapter = vi.fn<Adapter>().mockResolvedValue({})
     const api = createClient<{
       "POST /raw": {
@@ -308,8 +308,8 @@ describe("createClient", () => {
     await api("POST /raw", { body: "hello world" })
 
     const call = adapter.mock.calls[0][0]
-    expect(call.body).toBe("hello world")
-    expect(call.headers).toStrictEqual({ "content-type": "text/plain" })
+    expect(call.body).toBe('"hello world"')
+    expect(call.headers).toStrictEqual({ "content-type": "application/json" })
   })
 
   it("omits body and headers for no body", async () => {

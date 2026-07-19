@@ -5,13 +5,13 @@
 [![bundle][bundle-src]][bundle-href]
 [![License][license-src]][license-href]
 
-Generate TypeScript declarations from OpenAPI 3.x JSON, plus optional typed request shapes for your own HTTP client.
+Generate TypeScript declarations from OpenAPI 3.0/3.1 JSON or YAML, plus optional typed request shapes for your own HTTP client.
 
 Use `openapi-shape` when OpenAPI is your type contract, but your app should still own fetch/axios/ky/ofetch, auth, retries, caching, and response parsing.
 
 ## Quick Start
 
-Generate declarations from a local JSON file or HTTP(S) URL:
+Generate declarations from a local JSON/YAML file or HTTP(S) URL:
 
 ```sh
 npx openapi-shape ./openapi.json -o src/api.d.ts
@@ -20,11 +20,13 @@ npx openapi-shape ./openapi.json -o src/api.d.ts
 For scripts and CI, install it as a dev dependency:
 
 ```sh
-pnpm add -D openapi-shape # Install it as a runtime dependency only if you import the optional client.
+pnpm add -D openapi-shape
 pnpm exec openapi-shape ./openapi.json -o src/api.d.ts
 ```
 
-> Requires Node >= 22 and TypeScript >= 5.
+Install it as a runtime dependency instead when your deployed application imports `openapi-shape/client` directly.
+
+> Requires Node >= 22.
 
 ## What It Generates
 
@@ -107,17 +109,19 @@ function onPetCreated(payload: Webhooks["POST pet.created"]["payload"]) {
 ## CLI
 
 ```text
+Generate TypeScript declarations and API shapes from OpenAPI 3.0/3.1 JSON/YAML (openapi-shape)
+
 USAGE openapi-shape [OPTIONS] <SOURCE> --output=<output>
 
 ARGUMENTS
 
-  SOURCE    Path to OpenAPI JSON file or HTTP(S) URL
+  SOURCE    Path to OpenAPI JSON/YAML file or HTTP(S) URL (Required)
 
 OPTIONS
 
-  -o, --output=<output>    Output file path
-                --check    Exit non-zero if --output is missing or stale
-              --headers    Emit typed header parameters per endpoint/webhook
+  -o, --output=<output>    Output file path (Required)
+                --check    Exit non-zero if --output is missing or stale (CI)
+              --headers    Emit a typed `headers` field per entry from `in: header` parameters
 ```
 
 Typical package script:
@@ -207,13 +211,13 @@ await api("GET /pets", {
 
 The optional client builds adapter input with these rules:
 
-| Field     | Behavior                                                                                                                                                                                                                                                      |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `method`  | Read from the endpoint key, such as `GET /pets`.                                                                                                                                                                                                              |
-| `url`     | `baseURL` plus path params and query string. Path params are URL-encoded. Query arrays become repeated keys, for example `tags=a&tags=b`. `null` and `undefined` query values are skipped. Absolute `http://` and `https://` endpoint paths bypass `baseURL`. |
-| `body`    | `undefined` stays `undefined`. `string`, `FormData`, `URLSearchParams`, `Blob`, `ArrayBuffer`, typed arrays, and `ReadableStream` pass through unchanged. Other defined bodies are JSON-stringified.                                                          |
-| `headers` | JSON bodies get `content-type: application/json`. Passthrough bodies get no automatic content type. Per-call headers override automatic headers case-insensitively. Adapter headers use lowercase names.                                                      |
-| `options` | Passed through to your adapter after default/per-call merging. Object options are shallow-merged; non-object options are replaced by the per-call value.                                                                                                      |
+| Field     | Behavior                                                                                                                                                                                                                                                        |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `method`  | Read from the endpoint key, such as `GET /pets`.                                                                                                                                                                                                                |
+| `url`     | `baseURL` plus path params and query string. Path params are URL-encoded. Query arrays become repeated keys, for example `tags=a&tags=b`. `null` and `undefined` query values are skipped. Absolute `http://` and `https://` endpoint paths bypass `baseURL`.   |
+| `body`    | `undefined` stays `undefined`. `FormData`, `URLSearchParams`, `Blob`, `ArrayBuffer`, `ArrayBuffer` views (including typed arrays and `DataView`), and `ReadableStream` pass through unchanged. Other defined bodies — including strings — are JSON-stringified. |
+| `headers` | JSON bodies get `content-type: application/json`. Passthrough bodies get no automatic content type. Per-call headers override automatic headers case-insensitively. Adapter headers use lowercase names.                                                        |
+| `options` | Passed through to your adapter after default/per-call merging. Object options are shallow-merged; non-object options are replaced by the per-call value.                                                                                                        |
 
 Customize serialization when your API does not use the defaults:
 
@@ -242,7 +246,7 @@ export const api = createClient<Endpoints>(adapter, {
 ```
 
 - `serializeQuery` receives the raw query object and returns a query string or `URLSearchParams`.
-- `serializeBody` receives each non-`undefined` body and returns the adapter body plus optional headers.
+- `serializeBody` receives each non-`undefined` body and returns the adapter body plus optional headers. Use it when an endpoint expects raw text instead of JSON, as in the `text/plain` example above.
 - Per-call headers still override headers returned by `serializeBody`.
 
 ## Integration Examples
@@ -440,7 +444,7 @@ import { writeFile } from "node:fs/promises"
 
 const code = await generate("./openapi.json", {
   headers: true,
-  formats: { "date-time": "Date", "uuid": "UUID" },
+  formats: { "date-time": "Date", "uuid": "string" },
 })
 
 await writeFile("src/api.d.ts", code)
@@ -456,33 +460,35 @@ const code = generate(openapi)
 
 Options:
 
-| Option    | Default | Description                                                                                                                                                                                                                                           |
-| --------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `formats` | `{}`    | Maps OpenAPI `format` values to raw TypeScript type expressions. Applies to schemas with `type: "string" \| "number" \| "integer"` and nullable variants such as `["string", "null"]`. User mappings override the built-in `binary`/`byte` -> `Blob`. |
-| `headers` | `false` | Adds a typed `headers` field to each endpoint/webhook from `in: header` parameters. When false, callers may still pass arbitrary runtime headers through the client.                                                                                  |
+| Option    | Default | Description                                                                                                                                                                                                   |
+| --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `formats` | `{}`    | Maps OpenAPI `format` values to raw TypeScript expressions. Applies to `string`, `number`, and `integer` schemas, including nullable variants. User mappings override the built-in `binary`/`byte` -> `Blob`. |
+| `headers` | `false` | Adds a typed `headers` field to each endpoint/webhook from `in: header` parameters. When false, callers may still pass arbitrary runtime headers through the client.                                          |
 
 ## Supported OpenAPI Features
 
-OpenAPI 3.0 and 3.1 JSON documents are supported.
+OpenAPI 3.0 and 3.1 JSON and YAML documents are supported.
 
-| Feature                              | Output / behavior                                                                                                                       |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `components.schemas`                 | Named declarations in `export namespace Schemas`, emitted as `interface` for object models or `type` for aliases/unions/primitives.     |
-| Schema `$ref`                        | Named TypeScript references to `Schemas.*`; schema refs are preserved instead of inlined.                                               |
-| Component `$ref`                     | `$ref` parameters, request bodies, responses, and path items are resolved before endpoint generation.                                   |
-| `oneOf` / `anyOf`                    | TypeScript unions, with duplicate members collapsed where possible.                                                                     |
-| `allOf`                              | TypeScript intersections.                                                                                                               |
-| `discriminator` on `oneOf` / `anyOf` | Required string literal discriminator properties injected into branch schemas for narrowable unions.                                    |
-| `enum` / `const`                     | Literal types and literal unions.                                                                                                       |
-| OpenAPI 3.0 `nullable`               | Normalized to OpenAPI 3.1-style nullable type arrays.                                                                                   |
-| OpenAPI 3.1 `type: ["T", "null"]`    | TypeScript unions with `null`.                                                                                                          |
-| Arrays and tuples                    | `items` becomes arrays; `prefixItems` becomes tuples, with optional rest from `items`.                                                  |
-| `additionalProperties`               | `Record<string, T>` for dictionary objects, or an index signature on objects with explicit properties.                                  |
-| `patternProperties`                  | Folded into the same index signature; multiple patterns become a union of value types.                                                  |
-| OpenAPI 3.1 `webhooks`               | A parallel `Webhooks` interface with `payload` and `reply` entries.                                                                     |
-| `requestBody.required`               | Missing or `false` emits `body?: T`; `true` emits `body: T`.                                                                            |
-| Response maps                        | Responses are emitted as maps keyed by OpenAPI response keys, e.g. `"200"`, `"4XX"`, and `"default"`.                                   |
-| Client success type                  | `SuccessOf<T>` is the union of all `2xx` response entries; when there is no `2xx`, sole `default` is used as the fallback success type. |
+| Feature                              | Output / behavior                                                                                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `components.schemas`                 | Named declarations in `export namespace Schemas`, emitted as `interface` for object models or `type` for aliases/unions/primitives.                                                                                 |
+| Schema `$ref`                        | Named TypeScript references to `Schemas.*`; schema refs are preserved instead of inlined.                                                                                                                           |
+| Component `$ref`                     | `$ref` parameters, request bodies, responses, and path items are resolved before endpoint generation.                                                                                                               |
+| `oneOf` / `anyOf`                    | Approximated as TypeScript unions, with duplicate members collapsed where possible. TypeScript does not preserve `oneOf` exclusivity.                                                                               |
+| `allOf`                              | TypeScript intersections. Sibling `properties` beside `allOf`/`oneOf`/`anyOf` are kept as an extra intersection member.                                                                                             |
+| `discriminator` on `oneOf` / `anyOf` | Required string literal discriminator properties injected into branch schemas for narrowable unions.                                                                                                                |
+| `enum` / `const`                     | Literal types and literal unions.                                                                                                                                                                                   |
+| OpenAPI 3.0 `nullable`               | Normalized to an explicit union with `null`, preserving sibling constraints such as `enum` and `allOf`.                                                                                                             |
+| OpenAPI 3.1 `type: ["T", "null"]`    | TypeScript unions with `null`, unless another constraint such as `enum` excludes it.                                                                                                                                |
+| Arrays and tuples                    | `items` becomes arrays; `prefixItems` becomes tuples, with optional rest from `items`.                                                                                                                              |
+| `additionalProperties`               | `Record<string, T>` for dictionary objects, or an index signature on objects with explicit properties. The index value type is widened with the declared property types so the emitted declaration always compiles. |
+| `patternProperties`                  | Folded into the same index signature; multiple patterns become a union of value types.                                                                                                                              |
+| OpenAPI 3.1 `webhooks`               | A parallel `Webhooks` interface with `payload` and `reply` entries.                                                                                                                                                 |
+| `requestBody.required`               | Missing or `false` emits `body?: T`; `true` emits `body: T`.                                                                                                                                                        |
+| Parameter types                      | Query parameters use their schemas. Path and header parameters are emitted as strings; cookie parameters are ignored.                                                                                               |
+| Content selection                    | Generated request and response types prefer JSON-family media types. Responses then prefer binary (`Blob`), text (`string`), and finally the first schema-bearing content entry.                                    |
+| Response maps                        | Responses are emitted as maps keyed by OpenAPI response keys, e.g. `"200"`, `"4XX"`, and `"default"`. A 3.1 operation with no responses emits `response: unknown`; 3.0 requires `responses`.                        |
+| Client success type                  | `SuccessOf<T>` is the union of all `2xx` response entries; when there is no `2xx`, sole `default` is used as the fallback success type.                                                                             |
 
 Identifier handling:
 
@@ -493,15 +499,15 @@ Identifier handling:
 ## Not Supported Yet
 
 - Swagger 2.0. Convert to OpenAPI 3 first.
-- YAML input.
+- OpenAPI 3.2.
 - `readOnly` / `writeOnly` request and response variants.
 - External `$ref` targets such as remote URLs or separate files.
+- Cookie parameters (`in: cookie`). They are parsed but not emitted.
+- JSON Schema keywords outside the supported feature table, such as `not`, `if`/`then`/`else`, and `unevaluatedProperties`.
 
 ## License
 
 [MIT](./LICENSE) License
-
-<!-- Badges -->
 
 [npm-version-src]: https://img.shields.io/npm/v/openapi-shape?style=flat&colorA=080f12&colorB=1fa669
 [npm-version-href]: https://npmx.dev/package/openapi-shape

@@ -15,9 +15,10 @@ import { buildResponses, isJsonContentType } from "./outcomes"
 import { schemaShape } from "./shapes"
 
 export function buildOperations(doc: OpenAPIDocument): ContractOperation[] {
+  const responsesRequired = /^3\.0\.\d+$/.test(doc.openapi ?? "")
   return [
-    ...walkPathItems(doc.paths ?? {}, "endpoint", "/paths"),
-    ...walkPathItems(doc.webhooks ?? {}, "webhook", "/webhooks"),
+    ...walkPathItems(doc.paths ?? {}, "endpoint", "/paths", responsesRequired),
+    ...walkPathItems(doc.webhooks ?? {}, "webhook", "/webhooks", responsesRequired),
   ]
 }
 
@@ -25,6 +26,7 @@ function walkPathItems(
   items: Record<string, PathItem>,
   kind: "endpoint" | "webhook",
   locationRoot: "/paths" | "/webhooks",
+  responsesRequired: boolean,
 ): ContractOperation[] {
   const out: ContractOperation[] = []
   for (const [label, pathItem] of Object.entries(items)) {
@@ -33,7 +35,7 @@ function walkPathItems(
     for (const method of HTTP_METHODS) {
       const op = pathItem[method]
       if (!op) continue
-      if (!op.responses) {
+      if (responsesRequired && !op.responses) {
         throw new BuildError(
           `Operation is missing required responses at ${locationRoot}/${label}/${method}`,
         )

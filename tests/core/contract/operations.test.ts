@@ -42,9 +42,18 @@ describe("contract: endpoint key/method/path/meta", () => {
     })
   })
 
-  it("throws when an operation is missing responses", () => {
+  it("3.1 missing responses yields an empty responses list", () => {
+    const contract = buildContract({
+      openapi: "3.1.0",
+      paths: { "/pets": { get: {} } },
+    })
+    expect(endpointOperations(contract)[0].responses).toStrictEqual([])
+  })
+
+  it("3.0 requires responses", () => {
     expect(() =>
       buildContract({
+        openapi: "3.0.3",
         paths: { "/pets": { get: {} } },
       }),
     ).toThrow(BuildError)
@@ -327,12 +336,11 @@ describe("contract: webhooks", () => {
     })
   })
 
-  it("throws when a webhook operation is missing responses", () => {
-    expect(() =>
-      buildContract({
-        webhooks: { ping: { post: {} } },
-      }),
-    ).toThrow(BuildError)
+  it("webhook missing responses yields an empty responses list", () => {
+    const contract = buildContract({
+      webhooks: { ping: { post: {} } },
+    })
+    expect(webhookOperations(contract)[0].responses).toStrictEqual([])
   })
 
   it("paths and webhooks build independently into one operations collection", () => {

@@ -1,16 +1,13 @@
 /**
  * Minimal OpenAPI 3.0/3.1 model consumed by openapi-shape.
  *
- * Loader stages prepare this shape before Contract building:
- * - 3.0 primitive `nullable` schemas become 3.1 type arrays.
- * - Supported component `$ref`s are resolved before rendering.
+ * Before contract building, OpenAPI 3.0 `nullable` schemas become explicit
+ * unions and supported component `$ref`s are resolved.
  *
- * Fields that may carry $ref pre-resolution declare $ref as optional.
- * Identifying fields such as Parameter.name and Parameter.in stay optional so
+ * Fields that may carry pre-resolution `$ref`s keep identifying fields optional so
  * pre-resolution `$ref` placeholders remain type-legal.
  */
 
-/** HTTP methods supported by OpenAPI path items and emitted contract operations. */
 export type HttpMethod = "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "trace"
 
 export const HTTP_METHODS: HttpMethod[] = [
@@ -26,15 +23,10 @@ export const HTTP_METHODS: HttpMethod[] = [
 
 /** Supported subset of an OpenAPI document after loader preparation. */
 export interface OpenAPIDocument {
-  /** OpenAPI version string, for example `3.0.3` or `3.1.0`. */
   openapi?: string
-  /** Document metadata surfaced into the generated declarations header. */
   info?: Info
-  /** HTTP endpoint path map. */
   paths?: Record<string, PathItem>
-  /** Reusable component definitions consumed by the loader and contract builder. */
   components?: Components
-  /** OpenAPI 3.1 webhook map. */
   webhooks?: Record<string, PathItem>
 }
 
@@ -47,15 +39,10 @@ export interface Info {
 
 /** Reusable OpenAPI components supported by the preparation pipeline. */
 export interface Components {
-  /** Named schemas emitted under the generated `Schemas` namespace. */
   schemas?: Record<string, OpenAPISchema>
-  /** Parameter components eligible for `$ref` resolution. */
   parameters?: Record<string, Parameter>
-  /** Request body components eligible for `$ref` resolution. */
   requestBodies?: Record<string, RequestBody>
-  /** Response components eligible for `$ref` resolution. */
   responses?: Record<string, Response>
-  /** Path item components eligible for `$ref` resolution. */
   pathItems?: Record<string, PathItem>
 }
 
@@ -77,15 +64,10 @@ export interface PathItem {
 
 /** OpenAPI operation object consumed by contract operation building. */
 export interface Operation {
-  /** Optional OpenAPI operation identifier preserved on the contract. */
   operationId?: string
-  /** Optional grouping tags preserved on the contract. */
   tags?: string[]
-  /** Short text copied into operation documentation. */
   summary?: string
-  /** Long text copied into operation documentation. */
   description?: string
-  /** Deprecation marker copied into operation documentation. */
   deprecated?: boolean
   /** Operation-level parameters, merged over path-level parameters. */
   parameters?: Parameter[]
@@ -103,13 +85,10 @@ export interface Parameter {
   name?: string
   /** Parameter location. Cookies are parsed but not emitted into the contract. */
   in?: "path" | "query" | "header" | "cookie"
-  /** Whether the parameter is required. Path parameters are forced required later. */
   required?: boolean
   /** Parameter schema used for query parameters; path/header parameters render as strings. */
   schema?: OpenAPISchema
-  /** Parameter description copied into field documentation. */
   description?: string
-  /** Parameter deprecation marker copied into field documentation. */
   deprecated?: boolean
 }
 
@@ -117,7 +96,6 @@ export interface Parameter {
 export interface RequestBody {
   /** Component reference resolved before contract building. */
   $ref?: string
-  /** Whether callers must send the request body. */
   required?: boolean
   /** Media type map used to select the request payload shape. */
   content?: Record<string, MediaType>
@@ -142,9 +120,8 @@ export interface MediaType {
 
 /** OpenAPI discriminator metadata used to inject string literal tags into branches. */
 export interface Discriminator {
-  /** Property name that identifies a `oneOf` or `anyOf` branch. */
   propertyName: string
-  /** Optional discriminator value to `$ref` target mapping. */
+  /** Maps discriminator values to branch `$ref` targets. */
   mapping?: Record<string, string>
 }
 
@@ -166,37 +143,30 @@ export interface OpenAPISchema {
   /** JSON Schema const value rendered as a TypeScript literal when supported. */
   const?: unknown
 
-  /** Union-like alternatives rendered as a TypeScript union. */
+  /** Exclusive alternatives; rendered as a TypeScript union. */
   oneOf?: OpenAPISchema[]
-  /** Union-like alternatives rendered as a TypeScript union. */
+  /** Inclusive alternatives; rendered as a TypeScript union. */
   anyOf?: OpenAPISchema[]
   /** Composition rendered as a TypeScript intersection. */
   allOf?: OpenAPISchema[]
 
-  /** Object property schemas. */
   properties?: Record<string, OpenAPISchema>
   /** Pattern property schemas folded into an index signature value type. */
   patternProperties?: Record<string, OpenAPISchema>
-  /** Required object property names. */
   required?: string[]
   /** Additional property policy or schema for object index signatures. */
   additionalProperties?: boolean | OpenAPISchema
 
   /** Array item schema, or `true` for unconstrained tuple rest items. */
   items?: OpenAPISchema | boolean
-  /** Tuple prefix item schemas. */
   prefixItems?: OpenAPISchema[]
 
-  /** Discriminator metadata used before contract building. */
   discriminator?: Discriminator
 
-  /** OpenAPI 3.0 nullable marker; normalized to 3.1 type arrays. */
+  /** OpenAPI 3.0 marker normalized to an explicit union with `null`. */
   nullable?: boolean
 
-  /** Schema description copied into generated JSDoc when supported. */
   description?: string
-  /** Schema summary copied into generated JSDoc when supported. */
   summary?: string
-  /** Schema deprecation marker copied into generated JSDoc when supported. */
   deprecated?: boolean
 }
