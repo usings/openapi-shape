@@ -10,8 +10,8 @@ import type {
   MediaType,
   OpenAPISchema,
   Callback,
-} from "./openapi"
-import { HTTP_METHODS, isCallbackReference, isSchemaObject } from "./openapi"
+} from "./types"
+import { HTTP_METHODS, isCallbackReference, isSchemaObject } from "./types"
 
 /**
  * Schema transformation callback used by document mapping helpers.

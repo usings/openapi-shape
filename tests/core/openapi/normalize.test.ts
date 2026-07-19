@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { LoadError } from "../../../src/core/contract/errors"
-import { normalize } from "../../../src/core/contract/normalize"
-import type { OpenAPISchemaObject } from "../../../src/core/contract/openapi"
+import { LoadError } from "../../../src/core/openapi/errors"
+import { normalize } from "../../../src/core/openapi/normalize"
+import type { OpenAPISchemaObject } from "../../../src/core/openapi/types"
 
 function schemaObject(schema: unknown): OpenAPISchemaObject {
   return schema as OpenAPISchemaObject

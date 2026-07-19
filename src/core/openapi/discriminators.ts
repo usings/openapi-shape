@@ -1,8 +1,8 @@
 import { isObject } from "../shared/object"
 import { LoadError } from "./errors"
-import { isSchemaObject } from "./openapi"
-import type { OpenAPIDocument, OpenAPISchema, OpenAPISchemaObject } from "./openapi"
 import { schemaNameFromRef } from "./schema-ref"
+import { isSchemaObject } from "./types"
+import type { OpenAPIDocument, OpenAPISchema, OpenAPISchemaObject } from "./types"
 import { mapDocument, mapDocumentSchemas } from "./walk"
 
 /** Discriminator literal to inject into one referenced component schema. */

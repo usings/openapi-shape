@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { LoadError } from "../src/core/contract/errors"
+import { LoadError } from "../src/core/openapi/errors"
 import { generate } from "../src/index"
 import { expectPassesTsc } from "./_helpers/tsc"
 

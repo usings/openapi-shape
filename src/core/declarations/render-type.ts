@@ -1,4 +1,4 @@
-import type { ContractField, ContractType } from "../contract/contract"
+import type { ContractField, ContractType } from "../contract/model"
 import { safeKey } from "../shared/naming"
 import { indent, jsdoc } from "./format"
 

@@ -1,4 +1,4 @@
-import type { DocumentInfo } from "../contract/contract"
+import type { DocumentInfo } from "../contract/model"
 
 export function renderInfo(info: DocumentInfo): string {
   const lines: string[] = []

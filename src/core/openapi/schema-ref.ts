@@ -1,7 +1,7 @@
 import { decodePointerSegment } from "../shared/pointer"
 import { LoadError } from "./errors"
-import type { OpenAPIDocument, OpenAPISchema } from "./openapi"
-import { isSchemaObject } from "./openapi"
+import type { OpenAPIDocument, OpenAPISchema } from "./types"
+import { isSchemaObject } from "./types"
 import { mapDocumentSchemas } from "./walk"
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/"

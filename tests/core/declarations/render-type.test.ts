@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { OpenAPISchema } from "../../../src/core/contract/openapi"
 import { buildContractType } from "../../../src/core/contract/schema-type"
 import { renderContractType } from "../../../src/core/declarations/render-type"
+import type { OpenAPISchema } from "../../../src/core/openapi/types"
 
 /**
  * Integration of schema conversion and rendering. The string expectations

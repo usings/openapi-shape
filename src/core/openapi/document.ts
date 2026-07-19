@@ -1,9 +1,9 @@
 import { injectDiscriminators } from "./discriminators"
 import { normalize } from "./normalize"
-import type { OpenAPIDocument } from "./openapi"
 import { resolveRefs } from "./refs"
 import { validateSchemaRefs } from "./schema-ref"
 import { readSource } from "./source"
+import type { OpenAPIDocument } from "./types"
 
 /** Load and prepare an OpenAPI document. */
 export async function loadDocument(source: string | URL): Promise<OpenAPIDocument> {

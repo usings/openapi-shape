@@ -3,7 +3,7 @@ import type {
   Contract,
   EndpointOperation,
   WebhookOperation,
-} from "../contract/contract"
+} from "../contract/model"
 import { renderCallbacksInterface } from "./callback"
 import { renderEndpointsInterface } from "./endpoint"
 import { renderInfo } from "./info"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { EndpointOperation } from "../../../src/core/contract/contract"
+import type { EndpointOperation } from "../../../src/core/contract/model"
 import { entryDocHeader } from "../../../src/core/declarations/entry"
 
 const base: EndpointOperation = {

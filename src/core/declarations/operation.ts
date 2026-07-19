@@ -1,4 +1,4 @@
-import type { ContractField, ContractOperation } from "../contract/contract"
+import type { ContractField, ContractOperation } from "../contract/model"
 import { safeKey } from "../shared/naming"
 import { entryDocHeader, renderBody, renderParam, renderResponseMap } from "./entry"
 import { indentContinuation } from "./format"

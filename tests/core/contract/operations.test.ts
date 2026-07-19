@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { buildContract } from "../../../src/core/contract/build"
-import type { Contract } from "../../../src/core/contract/contract"
 import { BuildError } from "../../../src/core/contract/errors"
+import type { Contract } from "../../../src/core/contract/model"
 
 function endpointOperations(contract: Contract) {
   return contract.operations.filter((operation) => operation.kind === "endpoint")

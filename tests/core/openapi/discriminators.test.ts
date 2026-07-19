@@ -3,10 +3,10 @@ import {
   applyInjections,
   discoverInjections,
   reduceInjections,
-} from "../../../src/core/contract/discriminators"
-import type { Injection, SchemaInjections } from "../../../src/core/contract/discriminators"
-import { LoadError } from "../../../src/core/contract/errors"
-import type { OpenAPISchemaObject } from "../../../src/core/contract/openapi"
+} from "../../../src/core/openapi/discriminators"
+import type { Injection, SchemaInjections } from "../../../src/core/openapi/discriminators"
+import { LoadError } from "../../../src/core/openapi/errors"
+import type { OpenAPISchemaObject } from "../../../src/core/openapi/types"
 
 function schemaObject(value: unknown): OpenAPISchemaObject {
   if (typeof value !== "object" || value === null) throw new Error("expected schema object")

@@ -1,4 +1,4 @@
-import type { EndpointOperation } from "../contract/contract"
+import type { EndpointOperation } from "../contract/model"
 import { renderOperationEntry } from "./operation"
 import type { DeclarationOptions } from "./options"
 

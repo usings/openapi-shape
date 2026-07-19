@@ -1,6 +1,6 @@
+import type { OpenAPISchema, MediaType, Response } from "../openapi/types"
 import { appendPointer } from "../shared/pointer"
-import type { ContractType, ContractOutcome } from "./contract"
-import type { OpenAPISchema, MediaType, Response } from "./openapi"
+import type { ContractType, ContractOutcome } from "./model"
 import { buildContractType } from "./schema-type"
 
 export function buildResponses(

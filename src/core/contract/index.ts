@@ -1,6 +1,6 @@
+import { loadDocument, prepareDocument } from "../openapi/document"
 import { buildContract } from "./build"
-import type { Contract } from "./contract"
-import { loadDocument, prepareDocument } from "./document"
+import type { Contract } from "./model"
 
 /**
  * Read an OpenAPI source and build the normalized contract IR.

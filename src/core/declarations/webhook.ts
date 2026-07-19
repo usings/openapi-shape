@@ -1,4 +1,4 @@
-import type { WebhookOperation } from "../contract/contract"
+import type { WebhookOperation } from "../contract/model"
 import { renderOperationEntry } from "./operation"
 import type { DeclarationOptions } from "./options"
 

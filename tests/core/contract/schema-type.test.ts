@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import type { ContractType } from "../../../src/core/contract/contract"
-import { LoadError } from "../../../src/core/contract/errors"
+import type { ContractType } from "../../../src/core/contract/model"
 import { buildContractType } from "../../../src/core/contract/schema-type"
+import { LoadError } from "../../../src/core/openapi/errors"
 
 const unknown: ContractType = { kind: "unknown" }
 

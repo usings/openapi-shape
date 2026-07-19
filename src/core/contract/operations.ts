@@ -1,6 +1,3 @@
-import { appendPointer } from "../shared/pointer"
-import type { ContractOperation, ContractField, ContractPayload, DocBlock } from "./contract"
-import { BuildError } from "./errors"
 import type {
   OpenAPIDocument,
   Operation,
@@ -10,8 +7,11 @@ import type {
   MediaType,
   HttpMethod,
   Callback,
-} from "./openapi"
-import { HTTP_METHODS, isCallbackReference } from "./openapi"
+} from "../openapi/types"
+import { HTTP_METHODS, isCallbackReference } from "../openapi/types"
+import { appendPointer } from "../shared/pointer"
+import { BuildError } from "./errors"
+import type { ContractOperation, ContractField, ContractPayload, DocBlock } from "./model"
 import { buildResponses, isJsonContentType } from "./outcomes"
 import { buildContractType } from "./schema-type"
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { ContractSchema } from "../../../src/core/contract/contract"
+import type { ContractSchema } from "../../../src/core/contract/model"
 import { renderContractType } from "../../../src/core/declarations/render-type"
 import { renderSchemas } from "../../../src/core/declarations/schema"
 

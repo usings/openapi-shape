@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { loadDocument, prepareDocument } from "../../../src/core/contract/document"
-import { LoadError } from "../../../src/core/contract/errors"
-import type { OpenAPISchemaObject } from "../../../src/core/contract/openapi"
+import { loadDocument, prepareDocument } from "../../../src/core/openapi/document"
+import { LoadError } from "../../../src/core/openapi/errors"
+import type { OpenAPISchemaObject } from "../../../src/core/openapi/types"
 import { withTmpFile } from "../../_helpers/tmp"
 
 function schemaObject(value: unknown): OpenAPISchemaObject {

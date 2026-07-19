@@ -1,5 +1,5 @@
-import type { DocBlock } from "./contract"
-import type { OpenAPISchema } from "./openapi"
+import type { OpenAPISchema } from "../openapi/types"
+import type { DocBlock } from "./model"
 
 export function docBlock(s: OpenAPISchema | undefined): DocBlock | undefined {
   if (!s || typeof s === "boolean") return undefined

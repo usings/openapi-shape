@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { WebhookOperation } from "../../../src/core/contract/contract"
+import type { WebhookOperation } from "../../../src/core/contract/model"
 import { renderWebhooksInterface } from "../../../src/core/declarations/webhook"
 
 const baseWebhook: WebhookOperation = {

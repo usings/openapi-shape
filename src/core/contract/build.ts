@@ -1,5 +1,5 @@
-import type { Contract } from "./contract"
-import type { OpenAPIDocument } from "./openapi"
+import type { OpenAPIDocument } from "../openapi/types"
+import type { Contract } from "./model"
 import { buildOperations } from "./operations"
 import { buildSchemas } from "./schemas"
 

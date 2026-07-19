@@ -1,4 +1,4 @@
-import type { ContractSchema } from "../contract/contract"
+import type { ContractSchema } from "../contract/model"
 import { indent, jsdoc } from "./format"
 import type { RenderTypeOptions } from "./render-type"
 import { objectFieldLines, renderContractType } from "./render-type"

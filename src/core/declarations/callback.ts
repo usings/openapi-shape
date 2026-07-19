@@ -1,4 +1,4 @@
-import type { CallbackOperation } from "../contract/contract"
+import type { CallbackOperation } from "../contract/model"
 import { renderOperationEntry } from "./operation"
 import type { DeclarationOptions } from "./options"
 

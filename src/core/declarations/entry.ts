@@ -3,7 +3,7 @@ import type {
   ContractOperation,
   ContractOutcome,
   ContractField,
-} from "../contract/contract"
+} from "../contract/model"
 import { safeKey } from "../shared/naming"
 import { indent, indentContinuation, jsdoc } from "./format"
 import type { RenderTypeOptions } from "./render-type"

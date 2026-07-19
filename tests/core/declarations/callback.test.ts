@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { CallbackOperation } from "../../../src/core/contract/contract"
+import type { CallbackOperation } from "../../../src/core/contract/model"
 import { renderCallbacksInterface } from "../../../src/core/declarations/callback"
 
 const callback: CallbackOperation = {

@@ -1,9 +1,9 @@
+import type { OpenAPIDocument } from "../openapi/types"
 import { safeIdentifier } from "../shared/naming"
 import { escapePointerSegment } from "../shared/pointer"
-import type { ContractSchema, ContractField } from "./contract"
 import { docBlock } from "./doc"
 import { BuildError } from "./errors"
-import type { OpenAPIDocument } from "./openapi"
+import type { ContractSchema, ContractField } from "./model"
 import { buildContractType, objectIndexType } from "./schema-type"
 
 export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {

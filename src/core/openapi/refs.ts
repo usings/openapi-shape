@@ -1,14 +1,7 @@
 import { isObject } from "../shared/object"
 import { decodePointerSegment } from "../shared/pointer"
 import { LoadError } from "./errors"
-import type {
-  Callback,
-  OpenAPIDocument,
-  PathItem,
-  Parameter,
-  RequestBody,
-  Response,
-} from "./openapi"
+import type { Callback, OpenAPIDocument, PathItem, Parameter, RequestBody, Response } from "./types"
 import { mapDocument } from "./walk"
 
 const REF_BUCKETS = {

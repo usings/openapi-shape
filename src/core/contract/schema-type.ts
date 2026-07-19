@@ -1,9 +1,9 @@
+import { schemaNameFromRef } from "../openapi/schema-ref"
+import type { OpenAPISchema, OpenAPISchemaObject } from "../openapi/types"
 import { safeIdentifier } from "../shared/naming"
 import { isObjectAdditional } from "../shared/object"
-import type { ContractField, ContractType, ScalarName } from "./contract"
 import { docBlock } from "./doc"
-import type { OpenAPISchema, OpenAPISchemaObject } from "./openapi"
-import { schemaNameFromRef } from "./schema-ref"
+import type { ContractField, ContractType, ScalarName } from "./model"
 
 /**
  * Convert a supported OpenAPI schema into the language-neutral contract type.
