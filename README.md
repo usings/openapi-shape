@@ -173,6 +173,8 @@ A typical `package.json` setup keeps generation and verification separate:
 
 `openapi-shape/client` creates one typed request function from the generated `Endpoints` map. It handles URL and request construction; your adapter performs the HTTP call and parses the response.
 
+The client provides compile-time types only. Values returned by the adapter are trusted and are not validated against the OpenAPI schemas at runtime.
+
 ```ts
 import { createClient, type Adapter } from "openapi-shape/client"
 import type { Endpoints } from "./api"
@@ -244,6 +246,8 @@ await api("GET /pets", {
 ## Request Building
 
 The optional client builds adapter input with these rules:
+
+OpenAPI request media types inform the generated body type, but they do not configure runtime serialization. The default client serialization is described below; use `serializeBody` for media types such as `text/plain` that need different encoding.
 
 | Field     | Behavior                                                                                                                                                                                                                                                        |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -334,7 +338,6 @@ const adapter: Adapter = async ({ method, url, body, headers }) => {
 
 export const api = createClient<Endpoints>(adapter, {
   baseURL: "https://api.example.com",
-  headers: { Authorization: "Bearer token" },
 })
 ```
 
@@ -550,6 +553,7 @@ Options:
 - Non-component discriminator `$ref` branches. Inline branches without an existing single-string `const` or `enum` are preserved but cannot be augmented with an inferred discriminator value.
 - Cookie parameters (`in: cookie`). They are parsed but not emitted.
 - Response headers and reusable `components.headers`.
+- Parameter `content`; parameters must provide a `schema` to contribute a generated type.
 - Parameter serialization keywords such as `style`, `explode`, and `allowReserved`.
 - `additionalProperties: false` cannot enforce exact object types under TypeScript's structural type system.
 - Without `prefixItems`, boolean `items: false` is currently approximated as `unknown[]` rather than an element-free array.
