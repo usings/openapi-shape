@@ -5,14 +5,11 @@
 [![bundle][bundle-src]][bundle-href]
 [![License][license-src]][license-href]
 
-Generate TypeScript API contracts from OpenAPI 3.0/3.1 JSON or YAML—without generating an entire SDK.
+Generate compact TypeScript API contracts from OpenAPI 3.0/3.1 JSON or YAML—without generating an entire SDK.
 
-`openapi-shape` turns operations and schemas into a compact declaration file. Use those types directly, or pair them with the optional transport-agnostic client while keeping fetch, axios, ky, ofetch, authentication, retries, caching, and response parsing under your control.
-
-- **Contract-first:** endpoint keys, request inputs, response status maps, schemas, webhooks, and callbacks stay aligned with your OpenAPI document.
-- **Client-agnostic:** bring your existing HTTP stack instead of adopting generated runtime code.
+- **Predictable types:** operations, schemas, webhooks, and callbacks stay aligned with your OpenAPI document.
+- **Bring your own client:** use the declarations directly or pair them with the optional transport-agnostic client.
 - **CI-friendly:** generate from a local file or URL and detect stale output with `--check`.
-- **Small runtime footprint:** generated declarations have no runtime dependency; install the client only when you need it.
 
 ## Contents
 
@@ -20,8 +17,6 @@ Generate TypeScript API contracts from OpenAPI 3.0/3.1 JSON or YAML—without ge
 - [Generated Types](#generated-types)
 - [CLI](#cli)
 - [Typed Client (Optional)](#typed-client-optional)
-- [Request Building](#request-building)
-- [Integration Examples](#integration-examples)
 - [Programmatic API](#programmatic-api)
 - [OpenAPI Support](#openapi-support)
 - [Limitations](#limitations)
@@ -30,26 +25,37 @@ Generate TypeScript API contracts from OpenAPI 3.0/3.1 JSON or YAML—without ge
 
 Requires Node.js 22 or later.
 
-Generate declarations from a local JSON/YAML file or an HTTP(S) URL:
+### Install
 
-```sh
-npx openapi-shape ./openapi.yaml -o src/api.d.ts
-```
-
-For scripts and CI, install it as a dev dependency:
+Install `openapi-shape` as a development dependency when you only generate declarations during development or CI:
 
 ```sh
 pnpm add -D openapi-shape
+```
+
+If deployed code imports `openapi-shape/client`, install it as a regular dependency with `pnpm add openapi-shape` instead.
+
+### Generate
+
+Generate declarations from a local JSON/YAML file or an HTTP(S) URL:
+
+```sh
 pnpm exec openapi-shape ./openapi.yaml -o src/api.d.ts
 ```
 
-Commit the generated file, or verify it in CI without modifying it:
+Commit the generated file, or append `--check` in CI to verify that it is up to date without modifying it.
 
-```sh
-pnpm exec openapi-shape ./openapi.yaml -o src/api.d.ts --check
+### Use the generated types
+
+Import the generated declarations directly—no runtime import from `openapi-shape` is required:
+
+```ts
+import type { Endpoints, Schemas } from "./api"
+
+type ListPetsQuery = Endpoints["GET /pets"]["query"]
+type ListPetsResponse = Endpoints["GET /pets"]["response"]["200"]
+type Pet = Schemas.Pet
 ```
-
-Install `openapi-shape` as a regular dependency instead if deployed code imports `openapi-shape/client` at runtime.
 
 ## Generated Types
 
@@ -96,7 +102,6 @@ The shape is intentionally predictable:
 - `response` is a map keyed by OpenAPI response keys such as `"200"`, `"404"`, or `"default"`.
 - OpenAPI `components.schemas` are grouped under `Schemas`.
 - In request slots, `void` means the operation does not use that input. In a response map, it means that status has no response body.
-- The generated file can be committed or regenerated in CI.
 
 ### Webhooks
 
@@ -117,7 +122,7 @@ Webhook entries use the receiving side's vocabulary:
 - `payload` is the incoming request body.
 - `reply` is the handler's outgoing response.
 - `params` is omitted because webhook names do not have URL templates.
-- `query` and `headers` describe what the third party sends.
+- `query` (and `headers` when generation uses `--headers`) describes what the third party sends.
 
 Example handler type:
 
@@ -175,6 +180,8 @@ A typical `package.json` setup keeps generation and verification separate:
 
 The client provides compile-time types only. Values returned by the adapter are trusted and are not validated against the OpenAPI schemas at runtime.
 
+This minimal adapter expects JSON success bodies and returns `undefined` for empty responses:
+
 ```ts
 import { createClient, type Adapter } from "openapi-shape/client"
 import type { Endpoints } from "./api"
@@ -182,8 +189,10 @@ import type { Endpoints } from "./api"
 const adapter: Adapter = async ({ method, url, body, headers }) => {
   const response = await fetch(url, { method, body, headers })
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
-  if (response.status === 204) return undefined
-  return response.json()
+
+  if (method === "HEAD" || response.status === 204 || response.status === 205) return undefined
+  const text = await response.text()
+  return text === "" ? undefined : JSON.parse(text)
 }
 
 export const api = createClient<Endpoints>(adapter, {
@@ -243,11 +252,9 @@ await api("GET /pets", {
 })
 ```
 
-## Request Building
+### Request Building
 
 The optional client builds adapter input with these rules:
-
-OpenAPI request media types inform the generated body type, but they do not configure runtime serialization. The default client serialization is described below; use `serializeBody` for media types such as `text/plain` that need different encoding.
 
 | Field     | Behavior                                                                                                                                                                                                                                                                           |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -257,7 +264,7 @@ OpenAPI request media types inform the generated body type, but they do not conf
 | `headers` | Client-level defaults are merged before body-derived headers and per-call headers. JSON bodies get `content-type: application/json`; passthrough bodies get no automatic content type. Later values override earlier ones case-insensitively. Adapter headers use lowercase names. |
 | `options` | Passed through to your adapter after default/per-call merging. Object options are shallow-merged; non-object options are replaced by the per-call value.                                                                                                                           |
 
-Customize serialization when your API does not use the defaults:
+OpenAPI request media types inform the generated body type, but they do not configure runtime serialization. Customize serialization when your API does not use the defaults above—for example, media types such as `text/plain` that need different encoding:
 
 ```ts
 export const api = createClient<Endpoints>(adapter, {
@@ -287,7 +294,7 @@ export const api = createClient<Endpoints>(adapter, {
 - `serializeBody` receives each non-`undefined` body and returns the adapter body plus optional headers. Use it when an endpoint expects raw text instead of JSON, as in the `text/plain` example above.
 - Per-call headers still override headers returned by `serializeBody`.
 
-## Integration Examples
+### Integration Examples
 
 These examples are recipes. They map the same adapter input to fetch or third-party HTTP clients; keep auth, retries, hooks, and error handling in your adapter or HTTP client.
 
@@ -326,7 +333,12 @@ const adapter: Adapter = async ({ method, url, body, headers }) => {
   }
 
   const contentLength = response.headers.get("content-length")
-  if (response.status === 204 || contentLength === "0") {
+  if (
+    method === "HEAD" ||
+    response.status === 204 ||
+    response.status === 205 ||
+    contentLength === "0"
+  ) {
     return undefined
   }
 
