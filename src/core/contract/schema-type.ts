@@ -98,12 +98,12 @@ function typeArrayType(schema: OpenAPISchemaObject): ContractType {
   // Defensively map an invalid empty type array to `never` instead of producing
   // an empty union that would render invalid TypeScript.
   if (types.length === 0) return { kind: "never" }
-  const nonNull = types.filter((t) => t !== "null")
-  const includesNull = types.includes("null")
 
   // `enum` constrains the type array and must explicitly include `null`.
   if (Array.isArray(schema.enum)) return enumType(schema.enum)
 
+  const nonNull = types.filter((t) => t !== "null")
+  const includesNull = types.includes("null")
   const inner: ContractType[] = nonNull.map((t) => singleType({ ...schema, type: t }))
   if (includesNull) inner.push({ kind: "scalar", name: "null" })
   if (inner.length === 1) return inner[0]
@@ -154,6 +154,8 @@ function arrayType(schema: OpenAPISchemaObject): ContractType {
     }
     return rest ? { kind: "tuple", items, rest } : { kind: "tuple", items }
   }
+  // `items: false` forbids all elements, so the only valid value is an empty array.
+  if (schema.items === false) return { kind: "tuple", items: [] }
   const items =
     typeof schema.items === "object" && schema.items !== null
       ? buildContractType(schema.items)

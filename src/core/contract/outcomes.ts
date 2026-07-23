@@ -8,8 +8,9 @@ import { buildContractType } from "./schema-type"
  *
  * For each response, content is selected by category rather than raw declaration
  * order: JSON-family entries with schemas first, then binary media/schema entries,
- * `text/*`, other entries with schemas, and finally the first untyped entry as
- * binary. A response without usable content becomes `void`.
+ * `text/*` (declared schemas win; schema-less entries become `string`), other
+ * entries with schemas, and finally the first untyped entry as binary. A response
+ * without usable content becomes `void`.
  */
 export function buildResponses(
   responses: Record<string, Response>,
@@ -30,11 +31,16 @@ export function buildResponses(
 
 /** Return whether a media type has a `json` or `+json` subtype, ignoring parameters. */
 export function isJsonContentType(ct: string): boolean {
-  const essence = ct.split(";", 1)[0].trim().toLowerCase()
+  const essence = mediaTypeEssence(ct)
   const slash = essence.indexOf("/")
   if (slash === -1) return false
   const subtype = essence.slice(slash + 1)
   return subtype === "json" || subtype.endsWith("+json")
+}
+
+/** Lowercased media type without parameters, such as `charset`. */
+function mediaTypeEssence(ct: string): string {
+  return ct.split(";", 1)[0].trim().toLowerCase()
 }
 
 function pickResponseType(response: Response | undefined): {
@@ -56,15 +62,19 @@ function extractResponseType(content: Record<string, MediaType>): {
   }
   for (const ct of Object.keys(content)) {
     const schema = content[ct].schema
-    if (isBinaryContentType(ct) || isBinarySchema(schema)) {
+    const format = binarySchemaFormat(schema)
+    if (isBinaryContentType(ct) || format !== undefined) {
       if (schema === false) return { type: buildContractType(schema), contentType: ct }
-      return { type: { kind: "binary" }, contentType: ct }
+      return {
+        type: format !== undefined ? { kind: "binary", format } : { kind: "binary" },
+        contentType: ct,
+      }
     }
   }
   for (const ct of Object.keys(content)) {
     if (ct.toLowerCase().startsWith("text/")) {
       const schema = content[ct].schema
-      if (schema === false) return { type: buildContractType(schema), contentType: ct }
+      if (schema !== undefined) return { type: buildContractType(schema), contentType: ct }
       return { type: { kind: "scalar", name: "string" }, contentType: ct }
     }
   }
@@ -79,7 +89,7 @@ function extractResponseType(content: Record<string, MediaType>): {
 }
 
 function isBinaryContentType(ct: string): boolean {
-  const c = ct.toLowerCase()
+  const c = mediaTypeEssence(ct)
   return (
     c === "application/octet-stream" ||
     c === "application/pdf" ||
@@ -90,6 +100,7 @@ function isBinaryContentType(ct: string): boolean {
   )
 }
 
-function isBinarySchema(s: OpenAPISchema | undefined): boolean {
-  return typeof s === "object" && (s.format === "binary" || s.format === "byte")
+function binarySchemaFormat(s: OpenAPISchema | undefined): "binary" | "byte" | undefined {
+  if (typeof s !== "object" || s === null) return undefined
+  return s.format === "binary" || s.format === "byte" ? s.format : undefined
 }

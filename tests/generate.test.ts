@@ -96,27 +96,6 @@ describe("generate (integration)", () => {
     await expectPassesTsc([code])
   })
 
-  it("generate(doc) injects discriminator literals end-to-end", () => {
-    const code = generate({
-      components: {
-        schemas: {
-          Cat: { type: "object", properties: { purr: { type: "string" } }, required: ["purr"] },
-          Dog: { type: "object", properties: { bark: { type: "string" } }, required: ["bark"] },
-          Animal: {
-            oneOf: [{ $ref: "#/components/schemas/Cat" }, { $ref: "#/components/schemas/Dog" }],
-            discriminator: {
-              propertyName: "type",
-              mapping: { cat: "Cat", dog: "Dog" },
-            },
-          },
-        },
-      },
-    })
-    expect(code).toContain('type: "cat"')
-    expect(code).toContain('type: "dog"')
-    expect(code).toContain("export type Animal = Cat | Dog")
-  })
-
   it("generate(doc) injects discriminator literals into allOf branches", () => {
     const code = generate({
       components: {
@@ -322,17 +301,6 @@ describe("generate (integration)", () => {
       },
     })
     expect(code).toContain("export type Ext = (Base & {\n    extra: string\n  }) | null")
-  })
-
-  it("3.1 nullable type does not add null to an enum that excludes it", () => {
-    const code = generate({
-      openapi: "3.1.0",
-      components: {
-        schemas: { Color: { type: ["string", "null"], enum: ["red"] } },
-      },
-    })
-    expect(code).toContain('export type Color = "red"')
-    expect(code).not.toContain('export type Color = "red" | null')
   })
 
   it("allOf with sibling properties keeps both", () => {

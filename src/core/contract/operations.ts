@@ -1,5 +1,6 @@
 import type {
   OpenAPIDocument,
+  OpenAPISchema,
   Operation,
   Parameter,
   PathItem,
@@ -16,13 +17,12 @@ import { buildResponses, isJsonContentType } from "./outcomes"
 import { buildContractType } from "./schema-type"
 
 /**
- * Build endpoint, webhook, and direct callback operations in declaration order.
+ * Build endpoint, webhook, and callback operations in declaration order.
  *
  * Operation-level parameters replace path-level parameters with the same
- * `in:name` identity. Path and header parameters become strings, query parameters
- * retain their schema types, and callbacks are flattened beside their parent
- * operations. OpenAPI 3.0 operations must declare `responses`; 3.1 operations may
- * omit them.
+ * `in:name` identity; `paramFields` documents per-location typing. Callbacks,
+ * including nested ones, are flattened beside their parent operations. OpenAPI
+ * 3.0 operations must declare `responses`; 3.1 operations may omit them.
  */
 export function buildOperations(doc: OpenAPIDocument): ContractOperation[] {
   const responsesRequired = /^3\.0\.\d+$/.test(doc.openapi ?? "")
@@ -37,13 +37,16 @@ function walkCallbacks(
   parentKey: string,
   parentLocation: string,
   responsesRequired: boolean,
+  seen: ReadonlySet<Callback> = new Set(),
 ): ContractOperation[] {
-  // Only callbacks declared directly by endpoints and webhooks are flattened.
-  // Callback operations may contain callbacks in the source, but nested callbacks
-  // are outside the supported contract model and are not traversed here.
+  // Nested callbacks are flattened recursively with chained keys. A chain stops
+  // when a callback object repeats within it, which reference resolution and
+  // YAML anchors can otherwise turn into an infinite expansion.
   const out: ContractOperation[] = []
   for (const [callbackName, callback] of Object.entries(callbacks)) {
     if (isCallbackReference(callback)) continue
+    if (seen.has(callback)) continue
+    const chain = new Set(seen).add(callback)
     for (const [expression, callbackPathItem] of Object.entries(callback)) {
       if (!callbackPathItem || typeof callbackPathItem !== "object") continue
       const pathParams = callbackPathItem.parameters ?? []
@@ -60,15 +63,20 @@ function walkCallbacks(
         requireResponses(op, location, responsesRequired, "Callback operation")
         const merged = mergeParameters(pathParams, op.parameters ?? [])
         const base = buildBase(method, expression, merged, op, location)
+        const key = `${parentKey} > ${callbackName} > ${base.key}`
         out.push({
           ...base,
           kind: "callback",
-          key: `${parentKey} > ${callbackName} > ${base.key}`,
+          key,
           parentKey,
           callbackName,
           expression,
+          params: paramFields(merged, "path"),
           source: { location },
         })
+        if (op.callbacks) {
+          out.push(...walkCallbacks(op.callbacks, key, location, responsesRequired, chain))
+        }
       }
     }
   }
@@ -105,7 +113,7 @@ function walkPathItems(
       const source = { location }
       out.push(
         kind === "endpoint"
-          ? { ...base, kind: "endpoint", path: label, params: buildParams(merged), source }
+          ? { ...base, kind: "endpoint", path: label, params: paramFields(merged, "path"), source }
           : { ...base, kind: "webhook", name: label, source },
       )
       if (op.callbacks)
@@ -130,8 +138,9 @@ function buildBase(
     summary: op.summary,
     description: op.description,
     deprecated: op.deprecated === true,
-    query: buildQuery(merged),
-    headers: buildHeaders(merged),
+    query: paramFields(merged, "query"),
+    headers: paramFields(merged, "header"),
+    cookies: paramFields(merged, "cookie"),
     body: buildBody(op.requestBody),
     responses: buildResponses(op.responses ?? {}, appendPointer(location, "responses")),
   }
@@ -146,61 +155,65 @@ function mergeParameters(a: Parameter[], b: Parameter[]): Parameter[] {
   return [...seen.values()]
 }
 
-function buildParams(parameters: Parameter[]): ContractField[] {
+/**
+ * Build contract fields for one parameter location.
+ *
+ * Path and header parameters render as strings regardless of schema type;
+ * query and cookie parameters retain their schema types. Path parameters are
+ * always required.
+ */
+function paramFields(
+  parameters: Parameter[],
+  location: "path" | "query" | "header" | "cookie",
+): ContractField[] {
+  const typed = location === "query" || location === "cookie"
   return parameters
-    .filter((p) => p.in === "path")
-    .map((p) => ({
-      name: p.name as string,
-      required: true,
-      type: { kind: "scalar", name: "string" } as const,
-      docs: docBlockFromParameter(p),
-    }))
+    .filter((p) => p.in === location)
+    .map((p) => {
+      const field: ContractField = {
+        name: p.name as string,
+        required: location === "path" || p.required === true,
+        type: typed ? buildContractType(parameterSchema(p)) : { kind: "scalar", name: "string" },
+      }
+      const docs = docBlockFromParameter(p)
+      if (docs !== undefined) field.docs = docs
+      return field
+    })
 }
 
-function buildQuery(parameters: Parameter[]): ContractField[] {
-  return parameters
-    .filter((p) => p.in === "query")
-    .map((p) => ({
-      name: p.name as string,
-      required: p.required === true,
-      type: buildContractType(p.schema),
-      docs: docBlockFromParameter(p),
-    }))
+/**
+ * Select the schema of a parameter declared with either `schema` or `content`.
+ * Content entries prefer JSON media types, mirroring request body selection.
+ */
+function parameterSchema(p: Parameter): OpenAPISchema | undefined {
+  if (p.schema !== undefined || !p.content) return p.schema
+  return selectMediaSchema(p.content)?.schema
 }
 
-function buildHeaders(parameters: Parameter[]): ContractField[] {
-  return parameters
-    .filter((p) => p.in === "header")
-    .map((p) => ({
-      name: p.name as string,
-      required: p.required === true,
-      type: { kind: "scalar", name: "string" },
-      docs: docBlockFromParameter(p),
-    }))
+/** First JSON-family media entry with a schema, else the first entry with a schema. */
+function selectMediaSchema(
+  content: Record<string, MediaType>,
+): { schema: OpenAPISchema; json: boolean } | null {
+  for (const [ct, media] of Object.entries(content)) {
+    if (isJsonContentType(ct) && media.schema !== undefined) {
+      return { schema: media.schema, json: true }
+    }
+  }
+  for (const media of Object.values(content)) {
+    if (media.schema !== undefined) return { schema: media.schema, json: false }
+  }
+  return null
 }
 
 function buildBody(rb: RequestBody | undefined): ContractPayload {
   if (!rb?.content) return { kind: "none" }
-  const required = rb.required === true
-  for (const [ct, media] of Object.entries(rb.content)) {
-    if (isJsonContentType(ct) && (media as MediaType).schema !== undefined) {
-      return {
-        kind: "json",
-        required,
-        type: buildContractType((media as MediaType).schema),
-      }
-    }
+  const selected = selectMediaSchema(rb.content)
+  if (!selected) return { kind: "none" }
+  return {
+    kind: selected.json ? "json" : "passthrough",
+    required: rb.required === true,
+    type: buildContractType(selected.schema),
   }
-  for (const [, media] of Object.entries(rb.content)) {
-    if ((media as MediaType).schema !== undefined) {
-      return {
-        kind: "passthrough",
-        required,
-        type: buildContractType((media as MediaType).schema),
-      }
-    }
-  }
-  return { kind: "none" }
 }
 
 function docBlockFromParameter(p: Parameter): DocBlock | undefined {

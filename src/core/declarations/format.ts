@@ -6,7 +6,7 @@ export function indent(text: string, depth: number = 1): string {
     .join("\n")
 }
 
-export function escapeCommentText(text: string): string {
+function escapeCommentText(text: string): string {
   return text.replaceAll("*/", "*\\/")
 }
 

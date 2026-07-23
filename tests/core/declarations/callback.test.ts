@@ -11,8 +11,10 @@ const callback: CallbackOperation = {
   method: "post",
   tags: [],
   deprecated: false,
+  params: [],
   query: [],
   headers: [],
+  cookies: [],
   body: { kind: "none" },
   responses: [],
 }
@@ -20,8 +22,18 @@ const callback: CallbackOperation = {
 describe("renderCallbacksInterface", () => {
   it("uses receiving-side payload and reply vocabulary", () => {
     expect(renderCallbacksInterface([callback])).toBe(
-      `export interface Callbacks {\n  "POST /subscribe > onEvent > POST {$request.body#/callbackUrl}": {\n    query: void\n    payload: void\n    reply: unknown\n  }\n}`,
+      `export interface Callbacks {\n  "POST /subscribe > onEvent > POST {$request.body#/callbackUrl}": {\n    params: void\n    query: void\n    payload: void\n    reply: unknown\n  }\n}`,
     )
+  })
+
+  it("renders callback path parameters", () => {
+    const out = renderCallbacksInterface([
+      {
+        ...callback,
+        params: [{ name: "petId", required: true, type: { kind: "scalar", name: "string" } }],
+      },
+    ])
+    expect(out).toContain("params: { petId: string }")
   })
 
   it("renders typed headers when enabled", () => {

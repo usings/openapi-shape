@@ -212,7 +212,6 @@ describe("renderSchemas: ordering (aliases first, interfaces second)", () => {
       },
     ]
     const out = renderSchemas(schemas)
-    expect(out.indexOf("export type Status")).toBeLessThan(out.indexOf("export interface User"))
     expect(out).toBe(
       `export namespace Schemas {\n  export type Status = "a" | "b"\n\n  export interface User {\n    id: number\n  }\n}`,
     )

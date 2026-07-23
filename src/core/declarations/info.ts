@@ -10,6 +10,8 @@ export function renderInfo(info: DocumentInfo): string {
   return lines.map((line) => `// ${line}`).join("\n")
 }
 
+// Collapse all whitespace, including `\r` and Unicode line separators, which
+// are JS line terminators and would otherwise escape the `//` comment.
 function singleLine(s: string): string {
-  return s.replaceAll(/\s*\n\s*/g, " ").trim()
+  return s.replaceAll(/\s+/g, " ").trim()
 }

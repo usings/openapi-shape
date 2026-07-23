@@ -13,8 +13,19 @@ export function normalize(raw: unknown): OpenAPIDocument {
   const doc = raw as OpenAPIDocument
   const version = typeof doc.openapi === "string" ? doc.openapi : ""
 
+  // Swagger 2.0 documents have no `openapi` field and would otherwise be
+  // silently accepted as 3.1 documents. Unquoted YAML parses `swagger: 2.0`
+  // as a number, so any defined value counts as a Swagger declaration.
+  const swagger = (raw as { swagger?: unknown }).swagger
+  if (version === "" && swagger !== undefined) {
+    throw new LoadError(
+      `Unsupported Swagger version: ${String(swagger)}. Supported: OpenAPI 3.0.x, 3.1.x.`,
+    )
+  }
+
+  // 3.1 documents need no schema rewrite; skip the traversal entirely.
   if (version === "" || /^3\.1\.\d+$/.test(version)) {
-    return mapDocumentSchemas(doc, (s) => s)
+    return doc
   }
   if (/^3\.0\.\d+$/.test(version)) {
     return mapDocumentSchemas(doc, rewrite30Schema)

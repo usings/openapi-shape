@@ -4,6 +4,10 @@ export interface DeclarationOptions {
    */
   headers?: boolean
   /**
+   * Emit typed `in: cookie` parameters for endpoints, webhooks, and callbacks.
+   */
+  cookies?: boolean
+  /**
    * Map OpenAPI formats to TypeScript expressions. User mappings override
    * built-ins such as `binary` → `Blob`.
    */

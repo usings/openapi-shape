@@ -52,6 +52,8 @@ interface OperationBase {
   query: ContractField[]
   /** Header parameters after path-level and operation-level merge. */
   headers: ContractField[]
+  /** Cookie parameters after path-level and operation-level merge. */
+  cookies: ContractField[]
   /** Request payload selected from the operation request body. */
   body: ContractPayload
   /** Declared responses, preserving OpenAPI response key order. */
@@ -83,17 +85,19 @@ export interface WebhookOperation extends OperationBase {
 /**
  * An operation declared inside an OpenAPI callback expression.
  *
- * Callback path parameters are currently not represented in the contract IR;
- * query and header parameters are retained.
+ * Nested callbacks are flattened beside their parents with chained keys, and a
+ * callback chain stops when a callback object repeats within it.
  */
 export interface CallbackOperation extends OperationBase {
   kind: "callback"
-  /** Key of the endpoint or webhook operation that declares the callback. */
+  /** Key of the operation that declares the callback, possibly itself a callback. */
   parentKey: string
   /** Name of the callback on the parent operation. */
   callbackName: string
   /** Runtime expression or URL used as the callback path-item key. */
   expression: string
+  /** Path parameters. They are rendered as strings regardless of schema type. */
+  params: ContractField[]
 }
 
 /** Endpoint, webhook, or callback operation. Narrow with the `kind` discriminator. */

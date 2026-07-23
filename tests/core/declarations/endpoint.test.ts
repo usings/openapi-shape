@@ -12,6 +12,7 @@ const endpoint: EndpointOperation = {
   params: [],
   query: [],
   headers: [],
+  cookies: [],
   body: { kind: "none" },
   responses: [],
 }

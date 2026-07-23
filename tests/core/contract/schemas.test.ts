@@ -22,19 +22,16 @@ describe("contract: schema models", () => {
         originalName: "User",
         kind: "interface",
         source: { location: "/components/schemas/User" },
-        docs: undefined,
         fields: [
           {
             name: "id",
             required: true,
             type: { kind: "scalar", name: "number" },
-            docs: undefined,
           },
           {
             name: "name",
             required: false,
             type: { kind: "scalar", name: "string" },
-            docs: undefined,
           },
         ],
       },
@@ -105,7 +102,6 @@ describe("contract: schema models", () => {
           name: "id",
           required: true,
           type: { kind: "scalar", name: "string" },
-          docs: undefined,
         },
       ],
       index: {

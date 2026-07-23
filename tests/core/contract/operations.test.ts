@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { buildContract } from "../../../src/core/contract/build"
 import { BuildError } from "../../../src/core/contract/errors"
 import type { Contract } from "../../../src/core/contract/model"
+import type { PathItem } from "../../../src/core/openapi/types"
 
 function endpointOperations(contract: Contract) {
   return contract.operations.filter((operation) => operation.kind === "endpoint")
@@ -77,7 +78,7 @@ describe("contract: params", () => {
       },
     })
     expect(endpointOperations(contract)[0].params).toStrictEqual([
-      { name: "id", required: true, type: { kind: "scalar", name: "string" }, docs: undefined },
+      { name: "id", required: true, type: { kind: "scalar", name: "string" } },
     ])
   })
 
@@ -100,15 +101,90 @@ describe("contract: params", () => {
         name: "limit",
         required: true,
         type: { kind: "scalar", name: "number" },
-        docs: undefined,
       },
       {
         name: "tag",
         required: false,
         type: { kind: "scalar", name: "string" },
-        docs: undefined,
       },
     ])
+  })
+
+  it("cookie params retain schema types like query params", () => {
+    const contract = buildContract({
+      paths: {
+        "/p": {
+          get: {
+            parameters: [
+              { name: "session", in: "cookie", required: true, schema: { type: "string" } },
+              { name: "count", in: "cookie", schema: { type: "integer" } },
+            ],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    })
+    expect(endpointOperations(contract)[0].cookies).toStrictEqual([
+      {
+        name: "session",
+        required: true,
+        type: { kind: "scalar", name: "string" },
+      },
+      {
+        name: "count",
+        required: false,
+        type: { kind: "scalar", name: "number" },
+      },
+    ])
+  })
+
+  it("query param declared with content uses the JSON media type schema", () => {
+    const contract = buildContract({
+      paths: {
+        "/p": {
+          get: {
+            parameters: [
+              {
+                name: "filter",
+                in: "query",
+                content: { "application/json": { schema: { type: "integer" } } },
+              },
+            ],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    })
+    expect(endpointOperations(contract)[0].query[0].type).toStrictEqual({
+      kind: "scalar",
+      name: "number",
+    })
+  })
+
+  it("query param content falls back to the first media type with a schema", () => {
+    const contract = buildContract({
+      paths: {
+        "/p": {
+          get: {
+            parameters: [
+              {
+                name: "filter",
+                in: "query",
+                content: {
+                  "text/plain": {},
+                  "application/xml": { schema: { type: "string" } },
+                },
+              },
+            ],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    })
+    expect(endpointOperations(contract)[0].query[0].type).toStrictEqual({
+      kind: "scalar",
+      name: "string",
+    })
   })
 
   it("operation params override path-item params on same in:name", () => {
@@ -127,7 +203,6 @@ describe("contract: params", () => {
       name: "q",
       required: true,
       type: { kind: "scalar", name: "number" },
-      docs: undefined,
     })
   })
 })
@@ -408,5 +483,87 @@ describe("contract: callbacks", () => {
       expression: "{$request.body#/callbackUrl}",
       body: { kind: "json", required: true },
     })
+  })
+
+  it("callback path item parameters become callback params typed string", () => {
+    const contract = buildContract({
+      paths: {
+        "/subscribe": {
+          post: {
+            callbacks: {
+              onEvent: {
+                "{$request.body#/callbackUrl}/pets/{petId}": {
+                  parameters: [
+                    { name: "petId", in: "path", required: true, schema: { type: "integer" } },
+                  ],
+                  post: { responses: { "204": { description: "ok" } } },
+                },
+              },
+            },
+            responses: { "202": { description: "subscribed" } },
+          },
+        },
+      },
+    })
+    expect(callbackOperations(contract)[0].params).toStrictEqual([
+      { name: "petId", required: true, type: { kind: "scalar", name: "string" } },
+    ])
+  })
+
+  it("flattens nested callbacks with chained keys", () => {
+    const contract = buildContract({
+      paths: {
+        "/subscribe": {
+          post: {
+            callbacks: {
+              onEvent: {
+                "{$url}": {
+                  post: {
+                    callbacks: {
+                      onNested: {
+                        "{$nested}": {
+                          post: { responses: { "204": { description: "ok" } } },
+                        },
+                      },
+                    },
+                    responses: { "204": { description: "ok" } },
+                  },
+                },
+              },
+            },
+            responses: { "202": { description: "subscribed" } },
+          },
+        },
+      },
+    })
+    expect(callbackOperations(contract).map((op) => op.key)).toStrictEqual([
+      "POST /subscribe > onEvent > POST {$url}",
+      "POST /subscribe > onEvent > POST {$url} > onNested > POST {$nested}",
+    ])
+    expect(callbackOperations(contract)[1]).toMatchObject({
+      parentKey: "POST /subscribe > onEvent > POST {$url}",
+      callbackName: "onNested",
+      expression: "{$nested}",
+    })
+  })
+
+  it("stops flattening when a callback object repeats in its own chain", () => {
+    const callback: Record<string, PathItem> = {}
+    callback["{$url}"] = {
+      post: { callbacks: { self: callback }, responses: { "204": { description: "ok" } } },
+    }
+    const contract = buildContract({
+      paths: {
+        "/subscribe": {
+          post: {
+            callbacks: { self: callback },
+            responses: { "202": { description: "subscribed" } },
+          },
+        },
+      },
+    })
+    expect(callbackOperations(contract).map((op) => op.key)).toStrictEqual([
+      "POST /subscribe > self > POST {$url}",
+    ])
   })
 })

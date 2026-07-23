@@ -83,11 +83,13 @@ export interface Parameter {
   $ref?: string
   /** Parameter name as declared by OpenAPI. Optional to allow unresolved refs. */
   name?: string
-  /** Parameter location. Cookies are parsed but not emitted into the contract. */
+  /** Parameter location. */
   in?: "path" | "query" | "header" | "cookie"
   required?: boolean
-  /** Parameter schema used for query parameters; path/header parameters render as strings. */
+  /** Parameter schema. Query and cookie parameters keep it; path/header parameters render as strings. */
   schema?: OpenAPISchema
+  /** Media type map used when the parameter is declared with `content` instead of `schema`. */
+  content?: Record<string, MediaType>
   description?: string
   deprecated?: boolean
 }

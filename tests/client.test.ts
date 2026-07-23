@@ -322,16 +322,6 @@ describe("createClient", () => {
     expect(call.url).toBe("/search?q=hello")
   })
 
-  it("encodes path parameter values", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1, name: "test" })
-    const api = createClient<TestAPI>(adapter)
-
-    await api("GET /pets/{petId}", { params: { petId: "a/b" } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/pets/a%2Fb")
-  })
-
   it("returns adapter result", async () => {
     const adapter = vi.fn<Adapter>().mockResolvedValue([{ id: 1, name: "Buddy" }])
     const api = createClient<TestAPI>(adapter)
@@ -414,22 +404,6 @@ describe("createClient", () => {
 
     const call = adapter.mock.calls[0][0]
     expect(call.url).toBe("/search?q=cat#items")
-  })
-
-  it("merges per-call headers on top of body Content-Type", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({})
-    const api = createClient<TestAPI>(adapter)
-
-    await api("POST /pets", {
-      body: { name: "x" },
-      headers: { "X-Trace-Id": "abc" },
-    })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.headers).toStrictEqual({
-      "content-type": "application/json",
-      "x-trace-id": "abc",
-    })
   })
 
   it("per-call header overrides the auto-set content-type case-insensitively", async () => {

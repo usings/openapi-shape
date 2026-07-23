@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { LoadError } from "../../../src/core/openapi/errors"
 import { normalize } from "../../../src/core/openapi/normalize"
-import type { OpenAPISchemaObject } from "../../../src/core/openapi/types"
+import type { OpenAPISchemaObject, PathItem } from "../../../src/core/openapi/types"
 
 function schemaObject(schema: unknown): OpenAPISchemaObject {
   return schema as OpenAPISchemaObject
@@ -12,10 +12,26 @@ describe("normalize: version handling", () => {
     expect(() => normalize({ openapi: version })).toThrow(LoadError)
   })
 
+  it("throws LoadError on Swagger 2.0 documents instead of treating them as 3.1", () => {
+    expect(() => normalize({ swagger: "2.0" })).toThrow(LoadError)
+    expect(() => normalize({ swagger: "2.0" })).toThrow(/Swagger/)
+  })
+
+  it("detects Swagger even when unquoted YAML parses the version as a number", () => {
+    expect(() => normalize({ swagger: 2 })).toThrow(/Swagger version: 2/)
+  })
+
   it("throws LoadError when input is not an object", () => {
     expect(() => normalize(null)).toThrow(LoadError)
     expect(() => normalize("hi")).toThrow(LoadError)
     expect(() => normalize(42)).toThrow(LoadError)
+  })
+})
+
+describe("normalize: 3.1 pass-through", () => {
+  it("returns 3.1 documents by identity without rewriting", () => {
+    const doc = { openapi: "3.1.0", components: { schemas: { X: { type: "string" } } } }
+    expect(normalize(doc)).toBe(doc)
   })
 })
 
@@ -146,6 +162,25 @@ describe("normalize: 3.0 nullable rewrite", () => {
     expect(out.components?.schemas?.X).toBe(inner)
   })
 
+  it("rewrites nullable inside components.pathItems", () => {
+    const out = normalize({
+      openapi: "3.0.3",
+      components: {
+        pathItems: {
+          Pet: {
+            get: {
+              parameters: [{ name: "id", in: "query", schema: { type: "string", nullable: true } }],
+              responses: {},
+            },
+          },
+        },
+      },
+    })
+    expect(out.components?.pathItems?.Pet?.get?.parameters?.[0]?.schema).toStrictEqual({
+      anyOf: [{ type: "string" }, { type: "null" }],
+    })
+  })
+
   it("rewrites nullable in parameter schemas (path/query)", () => {
     const out = normalize({
       openapi: "3.0.3",
@@ -159,6 +194,77 @@ describe("normalize: 3.0 nullable rewrite", () => {
       },
     })
     expect(out.paths?.["/x"]?.get?.parameters?.[0]?.schema).toStrictEqual({
+      anyOf: [{ type: "string" }, { type: "null" }],
+    })
+  })
+
+  it("rewrites nullable in parameter content schemas", () => {
+    const out = normalize({
+      openapi: "3.0.3",
+      paths: {
+        "/x": {
+          get: {
+            parameters: [
+              {
+                name: "filter",
+                in: "query",
+                content: {
+                  "application/json": { schema: { type: "string", nullable: true } },
+                },
+              },
+            ],
+            responses: {},
+          },
+        },
+      },
+    })
+    expect(
+      out.paths?.["/x"]?.get?.parameters?.[0]?.content?.["application/json"]?.schema,
+    ).toStrictEqual({
+      anyOf: [{ type: "string" }, { type: "null" }],
+    })
+  })
+
+  it("rewrites nullable inside nested callback operations", () => {
+    const out = normalize({
+      openapi: "3.0.3",
+      paths: {
+        "/x": {
+          post: {
+            callbacks: {
+              onEvent: {
+                "{$url}": {
+                  post: {
+                    callbacks: {
+                      onNested: {
+                        "{$nested}": {
+                          post: {
+                            requestBody: {
+                              content: {
+                                "application/json": {
+                                  schema: { type: "string", nullable: true },
+                                },
+                              },
+                            },
+                            responses: {},
+                          },
+                        },
+                      },
+                    },
+                    responses: {},
+                  },
+                },
+              },
+            },
+            responses: {},
+          },
+        },
+      },
+    })
+    const onEvent = out.paths?.["/x"]?.post?.callbacks?.onEvent as Record<string, PathItem>
+    const onNested = onEvent?.["{$url}"]?.post?.callbacks?.onNested as Record<string, PathItem>
+    const nested = onNested?.["{$nested}"]?.post
+    expect(nested?.requestBody?.content?.["application/json"]?.schema).toStrictEqual({
       anyOf: [{ type: "string" }, { type: "null" }],
     })
   })

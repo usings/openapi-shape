@@ -87,6 +87,30 @@ describe("isJsonContentType", () => {
     },
   )
 
+  it("honors a declared schema on text content instead of flattening to string", () => {
+    expect(
+      responseType({ "text/plain": { schema: { type: "string", enum: ["a", "b"] } } }),
+    ).toStrictEqual({
+      kind: "union",
+      members: [
+        { kind: "literal", value: "a" },
+        { kind: "literal", value: "b" },
+      ],
+    })
+  })
+
+  it("recognizes binary content types carrying media type parameters", () => {
+    expect(
+      responseType({ "application/octet-stream; foo=bar": { schema: { type: "object" } } }),
+    ).toStrictEqual({ kind: "binary" })
+  })
+
+  it("keeps the binary schema format for renderer format mappings", () => {
+    expect(
+      responseType({ "application/octet-stream": { schema: { type: "string", format: "byte" } } }),
+    ).toStrictEqual({ kind: "binary", format: "byte" })
+  })
+
   it.each([
     ["binary content without a schema", "application/octet-stream", undefined, { kind: "binary" }],
     ["text content", "text/plain", undefined, { kind: "scalar", name: "string" }],

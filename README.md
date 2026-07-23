@@ -2,6 +2,7 @@
 
 [![npm version][npm-version-src]][npm-version-href]
 [![npm downloads][npm-downloads-src]][npm-downloads-href]
+[![Node.js][node-src]][node-href]
 [![bundle][bundle-src]][bundle-href]
 [![License][license-src]][license-href]
 
@@ -22,8 +23,6 @@ Generate compact TypeScript API contracts from OpenAPI 3.0/3.1 JSON or YAML—wi
 - [Limitations](#limitations)
 
 ## Quick Start
-
-Requires Node.js 22 or later.
 
 ### Install
 
@@ -122,7 +121,7 @@ Webhook entries use the receiving side's vocabulary:
 - `payload` is the incoming request body.
 - `reply` is the handler's outgoing response.
 - `params` is omitted because webhook names do not have URL templates.
-- `query` (and `headers` when generation uses `--headers`) describes what the third party sends.
+- `query` (plus `headers` with `--headers` and `cookies` with `--cookies`) describes what the third party sends.
 
 Example handler type:
 
@@ -141,6 +140,7 @@ OpenAPI callbacks are emitted in a parallel `Callbacks` interface. Each key incl
 ```ts
 export interface Callbacks {
   "POST /subscriptions > onEvent > POST {$request.body#/callbackUrl}": {
+    params: void
     query: void
     payload: Schemas.Event
     reply: { "204": void }
@@ -148,7 +148,7 @@ export interface Callbacks {
 }
 ```
 
-Callback entries use the same receiving-side `payload` and `reply` vocabulary as webhooks. Inline callbacks and local references to `components.callbacks` are supported.
+Callback entries use the same receiving-side `payload` and `reply` vocabulary as webhooks, plus `params` for path parameters declared on the callback path item. Inline callbacks and local references to `components.callbacks` are supported. Callbacks nested inside callback operations are flattened beside their parents with chained keys; a chain stops if the same callback object repeats within it.
 
 ## CLI
 
@@ -162,6 +162,7 @@ openapi-shape [options] <source> --output <file>
 | `-o, --output <file>` | Required output path for the generated declaration file.              |
 | `--check`             | Exit with a non-zero status when the output file is missing or stale. |
 | `--headers`           | Generate typed `headers` fields from OpenAPI `in: header` parameters. |
+| `--cookies`           | Generate typed `cookies` fields from OpenAPI `in: cookie` parameters. |
 
 A typical `package.json` setup keeps generation and verification separate:
 
@@ -514,47 +515,127 @@ Options:
 | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `formats` | `{}`    | Maps OpenAPI `format` values to raw TypeScript expressions. Applies to `string`, `number`, and `integer` schemas, including nullable variants. User mappings override the built-in `binary`/`byte` -> `Blob`. |
 | `headers` | `false` | Adds a typed `headers` field to each endpoint, webhook, and callback from `in: header` parameters. When false, callers may still pass arbitrary runtime headers through the client.                           |
+| `cookies` | `false` | Adds a typed `cookies` field to each endpoint, webhook, and callback from `in: cookie` parameters. Cookie fields retain their schema types; the client never sends cookies itself.                            |
 
 ## OpenAPI Support
 
-`openapi-shape` supports a focused subset of OpenAPI 3.0.x and 3.1.x. It reads JSON or YAML and generates types for operations, callbacks, reusable schemas, and OpenAPI 3.1 webhooks; it is not a full OpenAPI or JSON Schema implementation.
+`openapi-shape` supports a focused subset of OpenAPI 3.0.x and 3.1.x. It converts
+API operations and reusable schemas into TypeScript declarations; it does not
+validate the complete OpenAPI or JSON Schema specifications.
 
-### Documents and operations
+### Compatibility at a glance
 
-| Feature                 | Generated behavior                                                                                                                                                                                                                                                                                                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Paths and HTTP methods  | `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, and `trace` operations become `"METHOD /path"` entries in `Endpoints`.                                                                                                                                                                                                                                              |
-| Parameters              | Path parameters are required strings. Query parameters retain their schema types and requiredness. Header parameters become strings when generation uses `headers: true` or `--headers`. Cookie parameters are ignored.                                                                                                                                                         |
-| Request bodies          | JSON-family media types are preferred, followed by the first media type with a schema. `requestBody.required: true` emits `body: T`; otherwise it emits `body?: T`. An absent or schema-less body emits `body: void`.                                                                                                                                                           |
-| Responses               | OpenAPI response keys are preserved, including `"200"`, `"4XX"`, and `"default"`. Selection prefers JSON-family content with a schema, followed by binary (`Blob`), text (`string`), and then the first other schema-bearing media type. If content exists but none of its media types has a schema, the first entry becomes `Blob`; a response without content becomes `void`. |
-| Missing responses       | OpenAPI 3.0 operations must declare `responses`. In OpenAPI 3.1, a missing or empty response map emits `response: unknown`.                                                                                                                                                                                                                                                     |
-| OpenAPI 3.1 `webhooks`  | Webhook operations become entries in a parallel `Webhooks` interface, using `payload` for the incoming body and `reply` for responses.                                                                                                                                                                                                                                          |
-| Callbacks               | Inline callbacks and local `components.callbacks` references become entries in a parallel `Callbacks` interface, using receiving-side `payload` and `reply` fields.                                                                                                                                                                                                             |
-| Local component `$ref`s | Local references to component path items, parameters, request bodies, responses, and callbacks are resolved before generation. Schema references are validated and remain named `Schemas.*` references.                                                                                                                                                                         |
-| Documentation metadata  | Document info, operation/schema/property descriptions, summaries, and deprecation markers are retained where they map to the generated declaration.                                                                                                                                                                                                                             |
+| Area                 | Support                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| Versions             | OpenAPI 3.0.x and 3.1.x. Documents without `openapi` are treated as 3.1-style input. |
+| Sources              | Parsed objects, local paths, `file:` URLs, and HTTP(S) URLs.                         |
+| Formats              | JSON and YAML. Unknown file extensions try JSON first, then YAML.                    |
+| Operations           | Paths, OpenAPI 3.1 webhooks, and callbacks.                                          |
+| HTTP methods         | `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, and `trace`.             |
+| Reusable schemas     | Local `components.schemas` entries and references.                                   |
+| Component references | Local path item, parameter, request body, response, and callback references.         |
+| Metadata             | Document info, descriptions, summaries, and deprecation markers where applicable.    |
 
-### Schemas
+### Generated declarations
 
-| Feature                    | TypeScript output                                                                                                                                                                                                               |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `components.schemas`       | Named declarations under `export namespace Schemas`. Simple object models become `interface`s; aliases, primitives, unions, and composed schemas become `type`s.                                                                |
-| Primitive and object types | `string`, `number`/`integer`, `boolean`, `null`, object properties, and required properties map to their TypeScript equivalents. Boolean schemas map `true` to `unknown` and `false` to `never`.                                |
-| `enum` / `const`           | Primitive values become literal types and literal unions. Empty enums become `never`; unsupported literal values become `unknown`.                                                                                              |
-| `oneOf` / `anyOf`          | Approximated as deduplicated TypeScript unions. TypeScript does not preserve `oneOf` exclusivity.                                                                                                                               |
-| `allOf`                    | TypeScript intersections. Meaningful sibling constraints beside `allOf`, `oneOf`, or `anyOf` are retained as an additional intersection member.                                                                                 |
-| `discriminator`            | For component `$ref` branches, required string literals are injected and explicit mappings are honored. Inline branches are accepted; an existing single-string `const` or `enum` discriminator is made required for narrowing. |
-| OpenAPI 3.0 `nullable`     | Typed nullable schemas become an explicit union with `null`, retaining constraints such as `enum` and composition.                                                                                                              |
-| OpenAPI 3.1 type arrays    | `type: ["T", "null"]` and other type arrays become TypeScript unions. An `enum` remains authoritative, so `null` is included only when it appears in the enum.                                                                  |
-| Arrays and tuples          | Schema-valued `items` becomes an array element type. `prefixItems` becomes a tuple head, with an optional rest element derived from `items`; `items: true` produces an `unknown` rest element.                                  |
-| `additionalProperties`     | `true` produces an `unknown` index signature. Schema-valued entries use `T`; dictionary-only objects become `Record<string, T>`, while declared objects receive a compatible index signature.                                   |
-| `patternProperties`        | Pattern value schemas are folded into a string index signature. When multiple patterns exist, their value types become a union; regular-expression key constraints are not preserved by TypeScript.                             |
-| Formats                    | `binary` and `byte` map to `Blob`. The programmatic `formats` option can map other string, number, or integer formats to custom TypeScript expressions.                                                                         |
+| OpenAPI source         | TypeScript declaration | Entry shape                                                            |
+| ---------------------- | ---------------------- | ---------------------------------------------------------------------- |
+| `paths`                | `Endpoints`            | `"METHOD /path"` with `params`, `query`, `body`, and `response`.       |
+| OpenAPI 3.1 `webhooks` | `Webhooks`             | `"METHOD name"` with `query`, `payload`, and `reply`.                  |
+| Operation `callbacks`  | `Callbacks`            | A chained callback key with `params`, `query`, `payload`, and `reply`. |
+| `components.schemas`   | `Schemas` namespace    | Named interfaces and type aliases used by operation declarations.      |
 
-### Identifier handling
+### Operation rules
 
-- Invalid object property and parameter names are quoted, for example `"user-id"?: string`.
-- Invalid or reserved schema names are sanitized, for example `User-Profile` -> `User_Profile` and `class` -> `_class`.
-- Schema name collisions after sanitization throw an error.
+#### Parameters
+
+| Location | Generated behavior                                                     |
+| -------- | ---------------------------------------------------------------------- |
+| Path     | Required `string` fields under `params`.                               |
+| Query    | Schema-derived fields under `query`, preserving requiredness.          |
+| Header   | Opt-in `string` fields under `headers`.                                |
+| Cookie   | Opt-in schema-derived fields under `cookies`, preserving requiredness. |
+
+Operation-level parameters replace path-level parameters with the same `in` and
+`name`. A parameter declared with `content` uses its media type schema when
+`schema` is absent.
+
+#### Request bodies
+
+A request body selects the first JSON-family media type with a schema, then the
+first remaining media type with a schema. JSON-family means a `json` or `+json`
+subtype.
+
+- `requestBody.required: true` becomes `body: T` for endpoints or `payload: T` for
+  webhooks and callbacks.
+- An optional request body becomes `body?: T` or `payload?: T`.
+- A missing or schema-less request body becomes `body: void` or `payload: void`.
+
+#### Responses
+
+Response keys are preserved exactly as declared, including `"200"`, `"4XX"`, and
+`"default"`. One media type is selected for each response in this order:
+
+1. A JSON-family media type with a schema.
+2. Binary content or a `binary` / `byte` schema, emitted as `Blob`.
+3. Text content, using its schema or `string` when schema-less.
+4. The first remaining media type with a schema.
+5. The first schema-less media type, emitted as `Blob`.
+
+A response without content becomes `void`. OpenAPI 3.0 operations must declare
+`responses`. For OpenAPI 3.1-style input, a missing or empty response map becomes
+`response: unknown` or `reply: unknown`.
+
+### Schema mapping
+
+Named schemas are emitted under `export namespace Schemas`. A schema with an
+explicit object type and properties becomes an `interface`; other schemas become
+type aliases.
+
+| OpenAPI schema feature    | TypeScript output                                                                                              |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Primitive types           | `string`, `number` / `integer`, `boolean`, and `null`.                                                         |
+| Object properties         | Object fields with OpenAPI `required` reflected as required TypeScript properties.                             |
+| Boolean schemas           | `true` becomes `unknown`; `false` becomes `never`.                                                             |
+| `enum` / `const`          | Primitive literals and unions; an empty enum becomes `never`, and unsupported literal values become `unknown`. |
+| `oneOf` / `anyOf`         | Deduplicated TypeScript unions.                                                                                |
+| `allOf`                   | TypeScript intersections.                                                                                      |
+| Composition siblings      | Meaningful sibling constraints become an additional intersection member.                                       |
+| OpenAPI 3.0 `nullable`    | An explicit union with `null`, retaining enum and composition constraints.                                     |
+| OpenAPI 3.1 type arrays   | TypeScript unions; an `enum` remains authoritative when present.                                               |
+| `items`                   | An array element type; missing or unconstrained items become `unknown`.                                        |
+| `prefixItems`             | A tuple head, optionally followed by a rest type derived from `items`.                                         |
+| `items: false`            | An empty tuple without `prefixItems`; otherwise no tuple rest element.                                         |
+| `additionalProperties`    | A `Record` or compatible index signature; `true` uses `unknown` values.                                        |
+| `patternProperties`       | A string index signature whose value is the union of the pattern schemas.                                      |
+| `binary` / `byte` formats | `Blob`.                                                                                                        |
+| Custom formats            | User-provided TypeScript expressions for string, number, and integer formats.                                  |
+
+For discriminated `oneOf` and `anyOf` unions, local component `$ref` branches
+receive required string literals and explicit mappings are honored. An inline
+branch is narrowable when it already declares a single string `const` or
+single-value `enum` for the discriminator property.
+
+### References and validation
+
+Local component references to path items, parameters, request bodies, responses,
+and callbacks are resolved before generation. Schema references remain named
+`Schemas.*` references and must point directly to an existing
+`components.schemas` entry.
+
+Generation fails for:
+
+- Unsupported document versions.
+- Missing reference targets or references to the wrong component section.
+- External, nested, or otherwise unsupported schema references.
+- Circular non-schema component references.
+- Conflicting or invalid discriminator injections.
+- Schema names that collide after identifier sanitization.
+- OpenAPI 3.0 operations without `responses`.
+
+Invalid property and parameter names are quoted, for example
+`"user-id"?: string`. Invalid or reserved schema names are sanitized, for example
+`User-Profile` becomes `User_Profile` and `class` becomes `_class`.
 
 ## Limitations
 
@@ -562,22 +643,28 @@ Options:
 
 - Swagger 2.0 and OpenAPI 3.2.
 - External `$ref` targets such as remote URLs or separate files.
+- Schema `$ref`s to nested values or component sections other than
+  `components.schemas`.
 
-### Features not generated
+### Ignored features
+
+These fields do not affect the generated declarations:
 
 - `readOnly` / `writeOnly` request and response variants.
-- Cookie parameters and parameter `content`.
 - Response headers and reusable `components.headers`.
 - Parameter serialization keywords such as `style`, `explode`, and `allowReserved`.
-- Path parameters on callback path items and callbacks nested inside callback operations.
-- Sections such as `servers`, `security`, `securitySchemes`, `links`, and `examples`.
+- `servers`, `security`, `securitySchemes`, `links`, and `examples`.
+- JSON Schema keywords such as `not`, `if` / `then` / `else`, and
+  `unevaluatedProperties`.
 
-### Type system approximations
+### TypeScript approximations
 
-- `oneOf` exclusivity and exact objects with `additionalProperties: false` cannot be enforced by TypeScript.
-- Non-component discriminator references cannot receive inferred discriminator values.
-- Without `prefixItems`, `items: false` is approximated as `unknown[]`.
-- Unsupported JSON Schema keywords include `not`, `if` / `then` / `else`, and `unevaluatedProperties`.
+- `oneOf` becomes a union, but TypeScript cannot preserve its exclusivity.
+- `additionalProperties: false` cannot enforce exact object types.
+- `patternProperties` value types are preserved, but regular-expression key
+  constraints are not.
+- Non-component discriminator references cannot receive inferred discriminator
+  values.
 
 ## License
 
@@ -587,6 +674,8 @@ Options:
 [npm-version-href]: https://npmx.dev/package/openapi-shape
 [npm-downloads-src]: https://img.shields.io/npm/dm/openapi-shape?style=flat&colorA=080f12&colorB=1fa669
 [npm-downloads-href]: https://npmx.dev/package/openapi-shape
+[node-src]: https://img.shields.io/node/v/openapi-shape?style=flat&colorA=080f12&colorB=1fa669
+[node-href]: https://nodejs.org
 [bundle-src]: https://img.shields.io/bundlephobia/minzip/openapi-shape?style=flat&colorA=080f12&colorB=1fa669&label=minzip
 [bundle-href]: https://bundlephobia.com/result?p=openapi-shape
 [license-src]: https://img.shields.io/github/license/usings/openapi-shape.svg?style=flat&colorA=080f12&colorB=1fa669

@@ -1,13 +1,15 @@
 import type { WebhookOperation } from "../contract/model"
-import { renderOperationEntry } from "./operation"
+import { renderOperationEntry, renderOperationsInterface } from "./operation"
 import type { DeclarationOptions } from "./options"
 
 export function renderWebhooksInterface(
   webhooks: WebhookOperation[],
   options: DeclarationOptions = {},
 ): string {
-  const entries = webhooks.map((e) => renderWebhookEntry(e, options))
-  return `export interface Webhooks {\n${entries.join("\n")}\n}`
+  return renderOperationsInterface(
+    "Webhooks",
+    webhooks.map((e) => renderWebhookEntry(e, options)),
+  )
 }
 
 function renderWebhookEntry(webhook: WebhookOperation, options: DeclarationOptions): string {

@@ -11,6 +11,7 @@ const webhook: WebhookOperation = {
   deprecated: false,
   query: [],
   headers: [],
+  cookies: [],
   body: { kind: "none" },
   responses: [],
 }

@@ -45,13 +45,13 @@ describe("discover: walks the document for discriminator branches", () => {
         schemaName: "Cat",
         propertyName: "type",
         value: "cat",
-        sourceLocation: "/components/schemas/Animal/oneOf[0]",
+        sourceLocation: "/components/schemas/Animal/oneOf/0",
       },
       {
         schemaName: "Dog",
         propertyName: "type",
         value: "dog",
-        sourceLocation: "/components/schemas/Animal/oneOf[1]",
+        sourceLocation: "/components/schemas/Animal/oneOf/1",
       },
     ])
   })
@@ -141,14 +141,14 @@ describe("discover: walks the document for discriminator branches", () => {
     expect(discoverInjections(doc)).toStrictEqual([])
   })
 
-  it("finds discriminators nested inside schema properties", () => {
+  it("finds discriminators nested inside properties, escaping location segments", () => {
     const found = discoverInjections({
       components: {
         schemas: {
           Owner: {
             type: "object",
             properties: {
-              pet: {
+              "a/b": {
                 oneOf: [{ $ref: "#/components/schemas/Cat" }],
                 discriminator: { propertyName: "kind" },
               },
@@ -163,9 +163,24 @@ describe("discover: walks the document for discriminator branches", () => {
         schemaName: "Cat",
         propertyName: "kind",
         value: "Cat",
-        sourceLocation: "/components/schemas/Owner/properties/pet/oneOf[0]",
+        sourceLocation: "/components/schemas/Owner/properties/a~1b/oneOf/0",
       },
     ])
+  })
+
+  it("ignores an array-valued discriminator mapping", () => {
+    const found = discoverInjections({
+      components: {
+        schemas: {
+          X: {
+            oneOf: [{ $ref: "#/components/schemas/Cat" }],
+            discriminator: { propertyName: "kind", mapping: ["Cat"] as unknown as undefined },
+          },
+          Cat: { type: "object" },
+        },
+      },
+    })
+    expect(found[0].value).toBe("Cat")
   })
 
   it("finds discriminators in request body content schemas", () => {
@@ -289,6 +304,15 @@ describe("apply: produces a new document with literals injected", () => {
   it("throws when an injection targets a schema not in components.schemas", () => {
     expect(() =>
       applyInjections({ components: { schemas: {} } }, injectionsOf([["Missing", "kind", "a"]])),
+    ).toThrow(LoadError)
+  })
+
+  it("throws for a missing schema named like an Object.prototype key", () => {
+    expect(() =>
+      applyInjections(
+        { components: { schemas: {} } },
+        injectionsOf([["constructor", "kind", "a"]]),
+      ),
     ).toThrow(LoadError)
   })
 

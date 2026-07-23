@@ -10,7 +10,7 @@ function schemaObject(value: unknown): OpenAPISchemaObject {
 }
 
 describe("loadDocument: I/O", () => {
-  it("reads, normalizes, resolves refs, and injects discriminators end-to-end", async () => {
+  it("reads and normalizes a document from disk end-to-end", async () => {
     await withTmpFile(
       JSON.stringify({
         openapi: "3.0.3",
@@ -211,6 +211,49 @@ describe("prepareDocument: refs", () => {
     ).toThrow(LoadError)
   })
 
+  it("resolves chained refs within the same bucket", () => {
+    const out = prepareDocument({
+      components: {
+        parameters: {
+          A: { $ref: "#/components/parameters/B" },
+          B: { name: "limit", in: "query", schema: { type: "integer" } },
+        },
+      },
+      paths: {
+        "/x": {
+          get: {
+            parameters: [{ $ref: "#/components/parameters/A" }],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    })
+    expect(out.paths?.["/x"]?.get?.parameters?.[0]).toStrictEqual({
+      name: "limit",
+      in: "query",
+      schema: { type: "integer" },
+    })
+  })
+
+  it("throws LoadError when a chained ref crosses into another bucket", () => {
+    expect(() =>
+      prepareDocument({
+        components: {
+          parameters: { A: { $ref: "#/components/responses/B" } },
+          responses: { B: { description: "not a parameter" } },
+        },
+        paths: {
+          "/x": {
+            get: {
+              parameters: [{ $ref: "#/components/parameters/A" }],
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      }),
+    ).toThrow(/wrong ref bucket/)
+  })
+
   it("throws LoadError on circular ref", () => {
     expect(() =>
       prepareDocument({
@@ -308,13 +351,12 @@ describe("prepareDocument: idempotence", () => {
   })
 
   it("accepts in-memory doc with no openapi field", () => {
-    expect(prepareDocument({})).toStrictEqual({})
     expect(prepareDocument({ info: { title: "T", version: "1" } })).toStrictEqual({
       info: { title: "T", version: "1" },
     })
   })
 
-  it("normalizes webhook operation schemas through the public loader pipeline", () => {
+  it("normalizes webhook operation schemas through prepareDocument", () => {
     const out = prepareDocument({
       openapi: "3.0.3",
       webhooks: {

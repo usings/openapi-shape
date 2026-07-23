@@ -1,13 +1,15 @@
 import type { EndpointOperation } from "../contract/model"
-import { renderOperationEntry } from "./operation"
+import { renderOperationEntry, renderOperationsInterface } from "./operation"
 import type { DeclarationOptions } from "./options"
 
 export function renderEndpointsInterface(
   endpoints: EndpointOperation[],
   options: DeclarationOptions = {},
 ): string {
-  const entries = endpoints.map((e) => renderEndpointEntry(e, options))
-  return `export interface Endpoints {\n${entries.join("\n")}\n}`
+  return renderOperationsInterface(
+    "Endpoints",
+    endpoints.map((e) => renderEndpointEntry(e, options)),
+  )
 }
 
 function renderEndpointEntry(endpoint: EndpointOperation, options: DeclarationOptions): string {

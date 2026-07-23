@@ -8,6 +8,10 @@ function render(schema: OpenAPISchema): string {
 }
 
 describe("OpenAPI schema to TypeScript rendering", () => {
+  it("applies the binary format mapping to media-derived binary nodes", () => {
+    expect(renderContractType({ kind: "binary" }, { formats: { binary: "Buffer" } })).toBe("Buffer")
+  })
+
   it("parenthesizes oneOf before intersecting sibling properties", () => {
     expect(
       render({

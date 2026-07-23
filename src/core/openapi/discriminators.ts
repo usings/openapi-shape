@@ -1,9 +1,10 @@
 import { isObject } from "../shared/object"
+import { appendPointer } from "../shared/pointer"
 import { LoadError } from "./errors"
 import { schemaNameFromRef } from "./schema-ref"
 import { isSchemaObject } from "./types"
 import type { OpenAPIDocument, OpenAPISchema, OpenAPISchemaObject } from "./types"
-import { mapDocument, mapDocumentSchemas } from "./walk"
+import { mapDocumentSchemas } from "./walk"
 
 /** Discriminator literal to inject into one referenced component schema. */
 export interface Injection {
@@ -48,10 +49,10 @@ function normalizeInlineBranches(schema: OpenAPISchema): OpenAPISchema {
   const propertyName = schema.discriminator?.propertyName
   if (typeof propertyName !== "string") return schema
 
-  const key = Array.isArray(schema.oneOf) ? "oneOf" : Array.isArray(schema.anyOf) ? "anyOf" : null
-  if (!key) return schema
+  const selected = discriminatorBranches(schema)
+  if (!selected) return schema
 
-  const original = schema[key] ?? []
+  const [key, original] = selected
   const branches = original.map((branch) => requireInlineLiteral(branch, propertyName))
   const changed = branches.some((branch, index) => branch !== original[index])
   return changed ? { ...schema, [key]: branches } : schema
@@ -80,53 +81,28 @@ function hasSingleStringLiteral(schema: OpenAPISchema | undefined): boolean {
  */
 export function discoverInjections(doc: OpenAPIDocument): Injection[] {
   const out: Injection[] = []
-  mapDocument(doc, {
-    schema: (schema, location) => {
-      walkSchema(schema, location, out)
-      return schema
-    },
+  mapDocumentSchemas(doc, (schema, location) => {
+    collectDiscriminator(schema, location, out)
+    return schema
   })
   return out
 }
 
-function walkSchema(schema: OpenAPISchema, location: string, out: Injection[]): void {
+/** Select the composition branches an existing discriminator applies to. */
+function discriminatorBranches(
+  schema: OpenAPISchemaObject,
+): ["oneOf" | "anyOf", OpenAPISchema[]] | null {
+  if (Array.isArray(schema.oneOf)) return ["oneOf", schema.oneOf]
+  if (Array.isArray(schema.anyOf)) return ["anyOf", schema.anyOf]
+  return null
+}
+
+function collectDiscriminator(schema: OpenAPISchema, location: string, out: Injection[]): void {
   if (!isSchemaObject(schema)) return
-
   const disc = schema.discriminator
-  if (isObject(disc) && typeof disc.propertyName === "string") {
-    if (Array.isArray(schema.oneOf)) {
-      collectFromDiscriminator(disc, schema.oneOf, "oneOf", location, out)
-    } else if (Array.isArray(schema.anyOf)) {
-      collectFromDiscriminator(disc, schema.anyOf, "anyOf", location, out)
-    }
-  }
-
-  for (const key of ["properties", "patternProperties"] as const) {
-    const record = schema[key]
-    if (!record) continue
-    for (const [name, child] of Object.entries(record)) {
-      walkSchema(child, `${location}/${key}/${name}`, out)
-    }
-  }
-  if (typeof schema.items === "object" && schema.items !== null) {
-    walkSchema(schema.items, `${location}/items`, out)
-  }
-  if (Array.isArray(schema.prefixItems)) {
-    schema.prefixItems.forEach((child, index) => {
-      walkSchema(child, `${location}/prefixItems/${index}`, out)
-    })
-  }
-  if (isSchemaObject(schema.additionalProperties)) {
-    walkSchema(schema.additionalProperties, `${location}/additionalProperties`, out)
-  }
-  for (const key of ["oneOf", "anyOf", "allOf"] as const) {
-    const branches = schema[key]
-    if (Array.isArray(branches)) {
-      branches.forEach((child, index) => {
-        walkSchema(child, `${location}/${key}/${index}`, out)
-      })
-    }
-  }
+  if (!isObject(disc) || typeof disc.propertyName !== "string") return
+  const selected = discriminatorBranches(schema)
+  if (selected) collectFromDiscriminator(disc, selected[1], selected[0], location, out)
 }
 
 function collectFromDiscriminator(
@@ -137,10 +113,13 @@ function collectFromDiscriminator(
   out: Injection[],
 ): void {
   const propertyName = disc.propertyName as string
-  const mapping = isObject(disc.mapping) ? (disc.mapping as Record<string, string>) : {}
+  const mapping =
+    isObject(disc.mapping) && !Array.isArray(disc.mapping)
+      ? (disc.mapping as Record<string, string>)
+      : {}
 
   branches.forEach((branch, index) => {
-    const branchLocation = `${location}/${containerKey}[${index}]`
+    const branchLocation = appendPointer(location, containerKey, index)
     if (!isObject(branch)) return
     if (typeof branch.$ref !== "string") return
     const ref = branch.$ref
@@ -191,7 +170,7 @@ export function applyInjections(
   if (!schemas) return doc
 
   for (const name of injections.keys()) {
-    if (!(name in schemas)) {
+    if (!Object.hasOwn(schemas, name)) {
       throw new LoadError(
         `Discriminator branch references unknown schema "${name}" (at /components/schemas/${name})`,
       )

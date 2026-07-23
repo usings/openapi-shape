@@ -226,6 +226,13 @@ describe("buildContractType: arrays and tuples", () => {
     })
   })
 
+  it("maps items: false without prefixItems to an empty tuple", () => {
+    expect(buildContractType({ type: "array", items: false })).toStrictEqual({
+      kind: "tuple",
+      items: [],
+    })
+  })
+
   it("maps prefixItems to tuples with optional rest", () => {
     expect(
       buildContractType({

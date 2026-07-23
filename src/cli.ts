@@ -30,6 +30,10 @@ const main = defineCommand({
       type: "boolean",
       description: "Emit a typed `headers` field per entry from `in: header` parameters",
     },
+    cookies: {
+      type: "boolean",
+      description: "Emit a typed `cookies` field per entry from `in: cookie` parameters",
+    },
   },
   async run({ args }) {
     const start = performance.now()
@@ -38,7 +42,7 @@ const main = defineCommand({
     info(`output: ${args.output}${args.check ? " (check)" : ""}`)
 
     const target = resolve(args.output)
-    const generateOptions = { headers: args.headers }
+    const generateOptions = { headers: args.headers, cookies: args.cookies }
 
     if (args.check) {
       const [code, existing] = await Promise.all([

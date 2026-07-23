@@ -35,7 +35,9 @@ function renderNode(node: ContractType, options: RenderTypeOptions): Rendered {
     case "scalar":
       return { text: scalarText(node.name, node.format, options), kind: node.kind }
     case "binary":
-      return { text: formatMapping(node.format, options) ?? "Blob", kind: node.kind }
+      // Media-type-derived binary nodes carry no format; the `binary` mapping
+      // still applies so user format overrides reach binary response bodies.
+      return { text: formatMapping(node.format ?? "binary", options) ?? "Blob", kind: node.kind }
     case "literal":
       return { text: literalToTs(node.value), kind: node.kind }
     case "reference":
@@ -84,26 +86,26 @@ export function objectFieldLines(
   index: ContractType | undefined,
   options: RenderTypeOptions,
 ): string[] {
-  const lines = fields.map((f) => {
+  const renderedFields = fields.map((f) => renderNode(f.type, options))
+  const lines = fields.map((f, i) => {
     const docHeader = f.docs ? jsdoc(f.docs) : ""
     const opt = f.required ? "" : "?"
-    return `${docHeader}${safeKey(f.name)}${opt}: ${renderNode(f.type, options).text}`
+    return `${docHeader}${safeKey(f.name)}${opt}: ${renderedFields[i].text}`
   })
-  if (index) lines.push(`[key: string]: ${widenedIndexText(index, fields, options)}`)
+  if (index)
+    lines.push(`[key: string]: ${widenedIndexText(index, fields, renderedFields, options)}`)
   return lines
 }
 
 function widenedIndexText(
   index: ContractType,
   fields: ContractField[],
+  renderedFields: Rendered[],
   options: RenderTypeOptions,
 ): string {
   if (index.kind === "unknown") return "unknown"
   const members = index.kind === "union" ? index.members : [index]
-  const rendered: Rendered[] = [
-    ...members.map((m) => renderNode(m, options)),
-    ...fields.map((f) => renderNode(f.type, options)),
-  ]
+  const rendered: Rendered[] = [...members.map((m) => renderNode(m, options)), ...renderedFields]
   if (fields.some((f) => !f.required)) rendered.push({ text: "undefined", kind: "scalar" })
   return renderUnion(rendered).text
 }

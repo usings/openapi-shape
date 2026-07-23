@@ -41,8 +41,8 @@ export interface DocumentVisitor {
  *
  * The original object graph is reused when all visitors return the same objects.
  * Components, `paths`, and `webhooks` are walked; schema recursion is shallow
- * unless callers use `mapDocumentSchemas`. Callback path items are visited one
- * level deep; callbacks declared by callback operations are intentionally skipped.
+ * unless callers use `mapDocumentSchemas`. Callback path items are walked
+ * recursively; a callback object repeating within its own chain stops the walk.
  */
 export function mapDocument(doc: OpenAPIDocument, visitor: DocumentVisitor): OpenAPIDocument {
   let out = doc
@@ -102,6 +102,12 @@ function mapComponents(components: Components, visitor: DocumentVisitor): Compon
     )
     if (next !== components.responses) out = { ...out, responses: next }
   }
+  if (components.pathItems) {
+    const next = mapValuesIdentity(components.pathItems, (item, name) =>
+      mapPathItem(item, visitor, appendPointer("/components/pathItems", name)),
+    )
+    if (next !== components.pathItems) out = { ...out, pathItems: next }
+  }
   if (components.callbacks) {
     const next = mapValuesIdentity(components.callbacks, (callback, name) =>
       mapCallback(callback, visitor, appendPointer("/components/callbacks", name)),
@@ -125,7 +131,7 @@ function mapPathItem(
   item: PathItem,
   visitor: DocumentVisitor,
   location: string,
-  walkCallbacks = true,
+  seenCallbacks: ReadonlySet<Callback> = new Set(),
 ): PathItem {
   const visited = visitor.pathItem ? visitor.pathItem(item, location) : item
   if (visited.$ref !== undefined) return visited
@@ -140,7 +146,7 @@ function mapPathItem(
   for (const method of HTTP_METHODS) {
     const op = visited[method]
     if (!op) continue
-    const next = mapOperation(op, visitor, appendPointer(location, method), walkCallbacks)
+    const next = mapOperation(op, visitor, appendPointer(location, method), seenCallbacks)
     if (next !== op) out = { ...out, [method]: next }
   }
   return out
@@ -150,7 +156,7 @@ function mapOperation(
   op: Operation,
   visitor: DocumentVisitor,
   location: string,
-  walkCallbacks: boolean,
+  seenCallbacks: ReadonlySet<Callback>,
 ): Operation {
   let out = op
   if (op.parameters) {
@@ -169,23 +175,31 @@ function mapOperation(
     )
     if (next !== op.responses) out = { ...out, responses: next }
   }
-  if (walkCallbacks && op.callbacks) {
+  if (op.callbacks) {
     const next = mapValuesIdentity(op.callbacks, (callback, name) =>
-      mapCallback(callback, visitor, appendPointer(location, "callbacks", name)),
+      mapCallback(callback, visitor, appendPointer(location, "callbacks", name), seenCallbacks),
     )
     if (next !== op.callbacks) out = { ...out, callbacks: next }
   }
   return out
 }
 
-function mapCallback(callback: Callback, visitor: DocumentVisitor, location: string): Callback {
+function mapCallback(
+  callback: Callback,
+  visitor: DocumentVisitor,
+  location: string,
+  seen: ReadonlySet<Callback> = new Set(),
+): Callback {
   const visited = visitor.callback ? visitor.callback(callback, location) : callback
   if (isCallbackReference(visited)) return visited
 
-  // Nested callbacks are outside the supported traversal depth. Passing `false`
-  // prevents callback operations from recursively walking their own callbacks.
+  // Nested callbacks are walked recursively. A repeated callback object within
+  // its own chain stops the walk, which reference resolution and YAML anchors
+  // can otherwise turn into infinite recursion.
+  if (seen.has(visited)) return visited
+  const chain = new Set(seen).add(visited)
   return mapValuesIdentity(visited as Record<string, PathItem>, (item, expression) =>
-    mapPathItem(item, visitor, appendPointer(location, expression), false),
+    mapPathItem(item, visitor, appendPointer(location, expression), chain),
   )
 }
 
@@ -195,6 +209,10 @@ function mapParameter(p: Parameter, visitor: DocumentVisitor, location: string):
   if (current.schema !== undefined && visitor.schema) {
     const next = visitor.schema(current.schema, appendPointer(location, "schema"))
     if (next !== current.schema) current = { ...current, schema: next }
+  }
+  if (current.content) {
+    const next = mapMediaContent(current.content, visitor, appendPointer(location, "content"))
+    if (next !== current.content) current = { ...current, content: next }
   }
   return current
 }
@@ -242,7 +260,6 @@ function mapSchemaDeep(
   if (schema.$ref !== undefined) return mapSchema(schema, location)
 
   let next = schema
-  let changed = false
 
   if (next.properties) {
     const newProps = mapValuesIdentity(next.properties, (value, name) =>
@@ -250,7 +267,6 @@ function mapSchemaDeep(
     )
     if (newProps !== next.properties) {
       next = { ...next, properties: newProps }
-      changed = true
     }
   }
   if (next.patternProperties) {
@@ -259,14 +275,12 @@ function mapSchemaDeep(
     )
     if (newPatterns !== next.patternProperties) {
       next = { ...next, patternProperties: newPatterns }
-      changed = true
     }
   }
   if (next.items && typeof next.items === "object") {
     const nextItems = mapSchemaDeep(next.items, mapSchema, appendPointer(location, "items"))
     if (nextItems !== next.items) {
       next = { ...next, items: nextItems }
-      changed = true
     }
   }
   if (next.prefixItems) {
@@ -275,7 +289,6 @@ function mapSchemaDeep(
     )
     if (nextItems !== next.prefixItems) {
       next = { ...next, prefixItems: nextItems }
-      changed = true
     }
   }
   if (next.additionalProperties && typeof next.additionalProperties === "object") {
@@ -286,7 +299,6 @@ function mapSchemaDeep(
     )
     if (nextAP !== next.additionalProperties) {
       next = { ...next, additionalProperties: nextAP }
-      changed = true
     }
   }
   for (const key of ["oneOf", "anyOf", "allOf"] as const) {
@@ -297,14 +309,13 @@ function mapSchemaDeep(
       )
       if (nextBranches !== branches) {
         next = { ...next, [key]: nextBranches }
-        changed = true
       }
     }
   }
 
-  const mapped = mapSchema(next, location)
-  if (mapped !== next) return mapped
-  return changed ? next : schema
+  // `next` preserves identity when no child changed, so mapping it keeps the
+  // structural-sharing guarantee.
+  return mapSchema(next, location)
 }
 
 function mapValuesIdentity<T>(

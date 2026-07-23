@@ -4,12 +4,9 @@ import type {
   ContractOutcome,
   ContractField,
 } from "../contract/model"
-import { safeKey } from "../shared/naming"
 import { indent, indentContinuation, jsdoc } from "./format"
 import type { RenderTypeOptions } from "./render-type"
-import { renderContractType } from "./render-type"
-
-const schemaRefOptions = { refPrefix: "Schemas." } as const
+import { objectFieldLines, renderContractType } from "./render-type"
 
 export function entryDocHeader(entry: ContractOperation): string {
   return jsdoc(
@@ -22,17 +19,12 @@ export function entryDocHeader(entry: ContractOperation): string {
   )
 }
 
+/** Callers pass fully resolved render options, including the schema ref prefix. */
 export function renderParam(fields: ContractField[], options: RenderTypeOptions = {}): string {
   if (fields.length === 0) return "void"
-  const hasDocs = fields.some((f) => f.docs?.description || f.docs?.deprecated)
-  const renderOptions = { ...options, ...schemaRefOptions }
-  const renderField = (f: ContractField) => {
-    const opt = f.required ? "" : "?"
-    return `${safeKey(f.name)}${opt}: ${renderContractType(f.type, renderOptions)}`
-  }
-  if (!hasDocs) return `{ ${fields.map((f) => renderField(f)).join("; ")} }`
-  const body = fields.map((f) => `${jsdoc(f.docs ?? {})}${renderField(f)}`).join("\n")
-  return `{\n${indent(body)}\n}`
+  const lines = objectFieldLines(fields, undefined, options)
+  if (!fields.some((f) => f.docs)) return `{ ${lines.join("; ")} }`
+  return `{\n${indent(lines.join("\n"))}\n}`
 }
 
 export function renderBody(
@@ -41,8 +33,7 @@ export function renderBody(
   options: RenderTypeOptions = {},
 ): string {
   if (body.kind === "none") return `${key}: void`
-  const renderOptions = { ...options, ...schemaRefOptions }
-  const t = indentContinuation(renderContractType(body.type, renderOptions), "    ")
+  const t = indentContinuation(renderContractType(body.type, options), "    ")
   return body.required ? `${key}: ${t}` : `${key}?: ${t}`
 }
 
@@ -51,9 +42,6 @@ export function renderResponseMap(
   options: RenderTypeOptions = {},
 ): string {
   if (responses.length === 0) return "unknown"
-  const renderOptions = { ...options, ...schemaRefOptions }
-  const entries = responses.map(
-    (r) => `"${r.status}": ${renderContractType(r.type, renderOptions)}`,
-  )
+  const entries = responses.map((r) => `"${r.status}": ${renderContractType(r.type, options)}`)
   return `{ ${entries.join("; ")} }`
 }

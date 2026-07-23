@@ -1,15 +1,21 @@
 import type { CallbackOperation } from "../contract/model"
-import { renderOperationEntry } from "./operation"
+import { renderOperationEntry, renderOperationsInterface } from "./operation"
 import type { DeclarationOptions } from "./options"
 
 export function renderCallbacksInterface(
   callbacks: CallbackOperation[],
   options: DeclarationOptions = {},
 ): string {
-  const entries = callbacks.map((callback) => renderCallbackEntry(callback, options))
-  return `export interface Callbacks {\n${entries.join("\n")}\n}`
+  return renderOperationsInterface(
+    "Callbacks",
+    callbacks.map((callback) => renderCallbackEntry(callback, options)),
+  )
 }
 
 function renderCallbackEntry(callback: CallbackOperation, options: DeclarationOptions): string {
-  return renderOperationEntry(callback, { bodyKey: "payload", responseKey: "reply" }, options)
+  return renderOperationEntry(
+    callback,
+    { params: callback.params, bodyKey: "payload", responseKey: "reply" },
+    options,
+  )
 }

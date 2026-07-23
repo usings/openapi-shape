@@ -1,6 +1,6 @@
 import type { OpenAPIDocument } from "../openapi/types"
 import { safeIdentifier } from "../shared/naming"
-import { escapePointerSegment } from "../shared/pointer"
+import { pointer } from "../shared/pointer"
 import { docBlock } from "./doc"
 import { BuildError } from "./errors"
 import type { ContractSchema, ContractField } from "./model"
@@ -33,6 +33,8 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
   const result: ContractSchema[] = []
   for (const [originalName, schema] of Object.entries(raw)) {
     const name = safeIdentifier(originalName)
+    const source = { location: pointer("components", "schemas", originalName) }
+    const docs = docBlock(schema)
     // Schemas with composition remain aliases so composition and sibling
     // constraints can be represented without loss.
     const hasComposition =
@@ -44,12 +46,16 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
       !hasComposition
     ) {
       const required = new Set<string>(schema.required ?? [])
-      const fields: ContractField[] = Object.entries(schema.properties).map(([fname, fschema]) => ({
-        name: fname,
-        required: required.has(fname),
-        type: buildContractType(fschema),
-        docs: docBlock(fschema),
-      }))
+      const fields: ContractField[] = Object.entries(schema.properties).map(([fname, fschema]) => {
+        const field: ContractField = {
+          name: fname,
+          required: required.has(fname),
+          type: buildContractType(fschema),
+        }
+        const fieldDocs = docBlock(fschema)
+        if (fieldDocs !== undefined) field.docs = fieldDocs
+        return field
+      })
       const index = objectIndexType(schema)
       result.push({
         name,
@@ -57,8 +63,8 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
         kind: "interface",
         fields,
         ...(index !== null && { index }),
-        docs: docBlock(schema),
-        source: { location: `/components/schemas/${escapePointerSegment(originalName)}` },
+        ...(docs !== undefined && { docs }),
+        source,
       })
     } else {
       result.push({
@@ -66,8 +72,8 @@ export function buildSchemas(doc: OpenAPIDocument): ContractSchema[] {
         originalName,
         kind: "alias",
         type: buildContractType(schema),
-        docs: docBlock(schema),
-        source: { location: `/components/schemas/${escapePointerSegment(originalName)}` },
+        ...(docs !== undefined && { docs }),
+        source,
       })
     }
   }

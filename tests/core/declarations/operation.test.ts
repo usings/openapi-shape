@@ -12,6 +12,7 @@ const operation: EndpointOperation = {
   params: [{ name: "user-id", required: true, type: { kind: "scalar", name: "string" } }],
   query: [{ name: "limit", required: false, type: { kind: "scalar", name: "number" } }],
   headers: [{ name: "X-Trace", required: true, type: { kind: "scalar", name: "string" } }],
+  cookies: [{ name: "session", required: true, type: { kind: "scalar", name: "string" } }],
   body: { kind: "json", required: false, type: { kind: "reference", name: "Input" } },
   responses: [
     { status: "200", type: { kind: "reference", name: "Result" } },
@@ -33,5 +34,13 @@ describe("renderOperationEntry", () => {
     expect(out).toContain('headers: { "X-Trace": string }')
     expect(out).toContain("body?: Schemas.Input")
     expect(out).toContain('response: { "200": Schemas.Result; "default": void }')
+  })
+
+  it("renders cookies only when the cookies option is enabled", () => {
+    const layout = { bodyKey: "body", responseKey: "response" } as const
+    expect(renderOperationEntry(operation, layout, { cookies: true })).toContain(
+      "cookies: { session: string }",
+    )
+    expect(renderOperationEntry(operation, layout, {})).not.toContain("cookies:")
   })
 })
