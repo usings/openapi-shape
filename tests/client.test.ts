@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
-import type { AdapterRequest, Contract, ErrorOf, SuccessOf } from "../src/client"
+import type { AdapterRequest, Client, Contract, ErrorOf, SuccessOf } from "../src/client"
 import { HttpError, createClient, fetchAdapter } from "../src/client"
 import type { Endpoints, Schemas, Security } from "./__snapshots__/client-api"
 import { contract } from "./__snapshots__/client-api"
@@ -34,6 +34,18 @@ function parts(request: AdapterRequest): Promise<FormData> {
 /** One part of a multipart body as written: its name, extra headers, and content. */
 function part(name: string, headers: string, content: string): string {
   return `Content-Disposition: form-data; name="${name}"\r\n${headers}\r\n${content}\r\n`
+}
+
+/** What `fetchAdapter` decodes from a 200 response with this body and content type. */
+function decode(body: BodyInit | null, type?: string): Promise<unknown> {
+  const init = type === undefined ? {} : { headers: { "content-type": type } }
+  return fetchAdapter(respond(body, init) as typeof fetch)({
+    method: "GET",
+    url: "/x",
+    headers: {},
+    body: undefined,
+    options: undefined,
+  })
 }
 
 /** A contract for hand-written endpoint types, with OpenAPI's defaults throughout. */
@@ -410,22 +422,14 @@ describe("fetchAdapter", () => {
   })
 
   it("decodes JSON sequences and server-sent events into arrays", async () => {
-    const read = (text: string, type: string): Promise<unknown> =>
-      fetchAdapter(respond(text, { headers: { "content-type": type } }) as typeof fetch)({
-        method: "GET",
-        url: "/x",
-        headers: {},
-        body: undefined,
-        options: undefined,
-      })
-    expect(await read('{"a":1}\n\n{"a":2}\n', "application/jsonl")).toStrictEqual([
+    expect(await decode('{"a":1}\n\n{"a":2}\n', "application/jsonl")).toStrictEqual([
       { a: 1 },
       { a: 2 },
     ])
     const rs = String.fromCharCode(0x1e)
-    expect(await read(`${rs}1\n${rs}2\n`, "application/json-seq")).toStrictEqual([1, 2])
+    expect(await decode(`${rs}1\n${rs}2\n`, "application/json-seq")).toStrictEqual([1, 2])
     expect(
-      await read(
+      await decode(
         ": comment\nevent: tick\ndata: a\ndata: b\nid: 7\n\ndata: c\nretry: 10\n\n",
         "text/event-stream",
       ),
@@ -508,6 +512,62 @@ describe("fetchAdapter", () => {
   })
 })
 
+/** Compile-time checks: what the client infers from what it is given. Never called. */
+function inferenceChecks(api: Client<Endpoints>): void {
+  // @ts-expect-error unknown endpoint
+  void api("GET /nope")
+  void createClient({
+    contract,
+    security: { bearer: "t", basic: { username: "u", password: "p" } },
+  })
+  // @ts-expect-error credentials are checked against the declared schemes
+  void createClient({ contract, security: { nope: "t" } })
+  // @ts-expect-error basic credentials need a username and password
+  void createClient({ contract, security: { basic: "t" } })
+  const custom = createClient({
+    contract,
+    adapter: (_request: AdapterRequest<{ retries: number }>) => Promise.resolve(),
+  })
+  void custom("GET /pets", { options: { retries: 2 } })
+  // @ts-expect-error options are the adapter's
+  void custom("GET /pets", { options: { cache: "no-store" } })
+}
+
+/** Compile-time checks: a call must give what the operation requires. Never called. */
+function requirementChecks(api: Client<Endpoints>): void {
+  void api("GET /pets")
+  void api("GET /pets", { query: { limit: 1 } })
+  // @ts-expect-error path parameters are required
+  void api("GET /pets/{id}")
+  // @ts-expect-error parameter types are checked
+  void api("GET /pets/{id}", { params: { id: "1" } })
+  // @ts-expect-error a required query parameter
+  void api("GET /search", { query: {} })
+  // @ts-expect-error no request body on this operation
+  void api("GET /pets", { body: {} })
+  // @ts-expect-error the body is required
+  void api("POST /pets")
+  // @ts-expect-error body type is checked
+  void api("POST /pets", { body: { name: 1 } })
+  void api("PATCH /pets/{id}", { params: { id: 1 } })
+  // The only declared media type is the default; a JSON one is otherwise.
+  void api("PATCH /pets/{id}", { params: { id: 1 }, body: { name: "x" } })
+  void api("POST /charges", { body: { amount: 1 } })
+  // @ts-expect-error the body is still checked
+  void api("POST /charges", { body: { amount: "1" } })
+  // @ts-expect-error two media types and no JSON: the call names one
+  void api("POST /upload", { body: { file: new Blob([]) } })
+  void api("POST /upload", { contentType: "multipart/form-data", body: { file: new Blob([]) } })
+  // @ts-expect-error the body must match the chosen media type
+  void api("POST /upload", { contentType: "multipart/form-data", body: { name: "x" } })
+  // @ts-expect-error only declared media types
+  void api("POST /token", { contentType: "application/json", body: { grant_type: "x" } })
+  // Declared headers keep their types; others are free-form.
+  void api("GET /pets/{id}", { params: { id: 1 }, headers: { "X-Trace": "t", "X-Other": "o" } })
+  // @ts-expect-error unknown endpoint
+  void api("GET /nope")
+}
+
 describe("types", () => {
   const api = createClient({ contract })
 
@@ -522,67 +582,14 @@ describe("types", () => {
   })
 
   it("infers endpoints, credentials, and adapter options from what it is given", () => {
-    const check = (): void => {
-      // @ts-expect-error unknown endpoint
-      void api("GET /nope")
-      void createClient({
-        contract,
-        security: { bearer: "t", basic: { username: "u", password: "p" } },
-      })
-      // @ts-expect-error credentials are checked against the declared schemes
-      void createClient({ contract, security: { nope: "t" } })
-      // @ts-expect-error basic credentials need a username and password
-      void createClient({ contract, security: { basic: "t" } })
-      const custom = createClient({
-        contract,
-        adapter: (_request: AdapterRequest<{ retries: number }>) => Promise.resolve(),
-      })
-      void custom("GET /pets", { options: { retries: 2 } })
-      // @ts-expect-error options are the adapter's
-      void custom("GET /pets", { options: { cache: "no-store" } })
-    }
-    expect(check).toBeTypeOf("function")
+    expect(inferenceChecks).toBeTypeOf("function")
     expectTypeOf<SuccessOf<Endpoints["GET /events"]>>().toEqualTypeOf<
       Array<{ data: string; event?: string }>
     >()
   })
 
   it("requires what the operation requires", () => {
-    // Compile-time checks only; never called.
-    const check = (): void => {
-      void api("GET /pets")
-      void api("GET /pets", { query: { limit: 1 } })
-      // @ts-expect-error path parameters are required
-      void api("GET /pets/{id}")
-      // @ts-expect-error parameter types are checked
-      void api("GET /pets/{id}", { params: { id: "1" } })
-      // @ts-expect-error a required query parameter
-      void api("GET /search", { query: {} })
-      // @ts-expect-error no request body on this operation
-      void api("GET /pets", { body: {} })
-      // @ts-expect-error the body is required
-      void api("POST /pets")
-      // @ts-expect-error body type is checked
-      void api("POST /pets", { body: { name: 1 } })
-      void api("PATCH /pets/{id}", { params: { id: 1 } })
-      // The only declared media type is the default; a JSON one is otherwise.
-      void api("PATCH /pets/{id}", { params: { id: 1 }, body: { name: "x" } })
-      void api("POST /charges", { body: { amount: 1 } })
-      // @ts-expect-error the body is still checked
-      void api("POST /charges", { body: { amount: "1" } })
-      // @ts-expect-error two media types and no JSON: the call names one
-      void api("POST /upload", { body: { file: new Blob([]) } })
-      void api("POST /upload", { contentType: "multipart/form-data", body: { file: new Blob([]) } })
-      // @ts-expect-error the body must match the chosen media type
-      void api("POST /upload", { contentType: "multipart/form-data", body: { name: "x" } })
-      // @ts-expect-error only declared media types
-      void api("POST /token", { contentType: "application/json", body: { grant_type: "x" } })
-      // Declared headers keep their types; others are free-form.
-      void api("GET /pets/{id}", { params: { id: 1 }, headers: { "X-Trace": "t", "X-Other": "o" } })
-      // @ts-expect-error unknown endpoint
-      void api("GET /nope")
-    }
-    expect(check).toBeTypeOf("function")
+    expect(requirementChecks).toBeTypeOf("function")
   })
 })
 
@@ -827,47 +834,35 @@ describe("bodies by media type", () => {
 })
 
 describe("decoding responses", () => {
-  const read = (body: BodyInit | null, type?: string): Promise<unknown> =>
-    fetchAdapter(
-      respond(
-        body,
-        type === undefined ? {} : { headers: { "content-type": type } },
-      ) as typeof fetch,
-    )({
-      method: "GET",
-      url: "/x",
-      headers: {},
-      body: undefined,
-      options: undefined,
-    })
-
   it("decodes by the same media classes as the types", async () => {
-    expect(await read('{"a":1}', "text/json")).toStrictEqual({ a: 1 })
-    expect(await read("event: ping\n\ndata: x\n\n", "text/event-stream")).toStrictEqual([
+    expect(await decode('{"a":1}', "text/json")).toStrictEqual({ a: 1 })
+    expect(await decode("event: ping\n\ndata: x\n\n", "text/event-stream")).toStrictEqual([
       { data: "x" },
     ])
-    expect(await read("", "image/png")).toBeInstanceOf(Blob)
-    expect(await read(null)).toBeUndefined()
+    expect(await decode("", "image/png")).toBeInstanceOf(Blob)
+    expect(await decode(null)).toBeUndefined()
   })
 })
 
+/** Compile-time checks: adapter options and credentials. Never called. */
+function optionChecks(): void {
+  const api = createClient({ contract, options: { cache: "no-store" } })
+  void api("GET /pets", { options: { keepalive: true } })
+  // @ts-expect-error options are the adapter's, checked rather than inferred
+  void createClient({ contract, options: { chache: "no-store" } })
+  // @ts-expect-error no security schemes, so no credentials
+  void createClient({ contract: contractFor<Endpoints>(), security: { token: "x" } })
+  const wildcard = createClient({
+    contract: contractFor<{
+      "PUT /x": { body: { "*/*": { a: number } }; response: Record<never, never> }
+    }>(),
+  })
+  // @ts-expect-error contentType names a declared media type
+  void wildcard("PUT /x", { contentType: "text/plain", body: { a: 1 } })
+}
+
 describe("option types", () => {
   it("takes adapter options from the adapter, and credentials only for declared schemes", () => {
-    const check = (): void => {
-      const api = createClient({ contract, options: { cache: "no-store" } })
-      void api("GET /pets", { options: { keepalive: true } })
-      // @ts-expect-error options are the adapter's, checked rather than inferred
-      void createClient({ contract, options: { chache: "no-store" } })
-      // @ts-expect-error no security schemes, so no credentials
-      void createClient({ contract: contractFor<Endpoints>(), security: { token: "x" } })
-      const wildcard = createClient({
-        contract: contractFor<{
-          "PUT /x": { body: { "*/*": { a: number } }; response: Record<never, never> }
-        }>(),
-      })
-      // @ts-expect-error contentType names a declared media type
-      void wildcard("PUT /x", { contentType: "text/plain", body: { a: 1 } })
-    }
-    expect(check).toBeTypeOf("function")
+    expect(optionChecks).toBeTypeOf("function")
   })
 })
