@@ -1,226 +1,213 @@
-import type { HttpMethod } from "../shared/http"
-
 /**
- * Normalized contract intermediate representation.
- *
- * Built after version normalization, reference resolution, and discriminator
- * expansion so renderers do not need to interpret the raw document again.
+ * The contract: every operation and named type of an OpenAPI Description,
+ * with all OpenAPI and JSON Schema semantics already applied. Renderers only
+ * choose syntax.
  */
 export interface Contract {
-  info: DocumentInfo
-  schemas: ContractSchema[]
-  operations: ContractOperation[]
+  info: Info
+  endpoints: Operation[]
+  webhooks: Operation[]
+  callbacks: Operation[]
+  /** Named types, in output order. */
+  declarations: Declaration[]
+  /** What a client needs at run time and cannot learn from types. */
+  runtime: Runtime
 }
 
-/**
- * API metadata copied from OpenAPI's `info` object.
- *
- * Empty and whitespace-only values are omitted during contract building.
- */
-export interface DocumentInfo {
+/** Document-level runtime details for the client. */
+export interface Runtime {
+  /** Server URLs, variables filled with their defaults. */
+  servers: string[]
+  /** Security schemes by name. */
+  security: Record<string, SecurityScheme>
+  /** Default security requirements. */
+  requires?: SecurityRequirement[]
+}
+
+/** Security scheme names, each with its required scopes; any one requirement of a list suffices. */
+export type SecurityRequirement = Record<string, string[]>
+
+export type SecurityScheme =
+  | { type: "apiKey"; in: "header" | "query" | "cookie"; name: string }
+  /** `scheme` is lowercase: `bearer`, `basic`, … */
+  | { type: "http"; scheme: string }
+  | { type: "oauth2" | "openIdConnect" | "mutualTLS" }
+
+/** How a value is serialized, where it differs from OpenAPI's default for its location. */
+export interface Encoding {
+  style?: string
+  explode?: boolean
+  allowReserved?: boolean
+  /** A parameter's `content` media type, or an Encoding Object's `contentType`. */
+  contentType?: string
+}
+
+export interface Info {
+  /** The entry document's `openapi` field. */
+  openapi: string
   title?: string
   version?: string
   description?: string
 }
 
 /**
- * JSON Pointer to the corresponding location in the prepared OpenAPI document.
- *
- * Source references are kept on contract nodes that may need precise diagnostics
- * or source-aware rendering later.
+ * Which side of an exchange a type describes. OpenAPI 3.0 `readOnly` and
+ * `writeOnly` make `required` apply to one side only (OpenAPI 3.0 Schema Object, `readOnly`).
  */
-export interface SourceRef {
-  location: string
-}
+export type View = "request" | "response"
 
-interface OperationBase {
-  /**
-   * Stable declaration key for this operation.
-   *
-   * Endpoints and webhooks use `${METHOD} ${pathOrWebhookName}`, for example
-   * `"GET /pets"` or `"POST pet.created"`. Callback keys prepend the parent key
-   * and callback name, for example `"POST /subscribe > onEvent > POST {$url}"`.
-   */
+export interface Operation {
+  /** `"GET /pets"`, `"POST pet.created"`, or `"<parent> > <callback> > POST <expression>"`. */
   key: string
-  method: HttpMethod
-  operationId?: string
-  tags: string[]
-  summary?: string
-  description?: string
-  deprecated: boolean
-  /** Query-string parameters after path-level and operation-level merge. */
-  query: ContractField[]
-  /** Header parameters after path-level and operation-level merge. */
-  headers: ContractField[]
-  /** Cookie parameters after path-level and operation-level merge. */
-  cookies: ContractField[]
-  /** Request payload selected from the operation request body. */
-  body: ContractPayload
-  /** Declared responses, preserving OpenAPI response key order. */
-  responses: ContractOutcome[]
-  source?: SourceRef
+  docs?: Docs
+  params: Field[]
+  query: Field[]
+  /** The `in: querystring` parameter (3.2), which describes the whole query string. */
+  querystring?: {
+    type: Type
+    required: boolean
+    docs?: Docs
+    /** The media type, unless form-urlencoded. */
+    mediaType?: string
+    /** Form content: its Encoding Objects, by field. */
+    encoding?: Record<string, Encoding>
+  }
+  headers: Field[]
+  cookies: Field[]
+  body?: Body
+  responses: Response[]
+  /** The operation's own security requirements (overriding the document's); endpoints only. */
+  requires?: SecurityRequirement[]
+  /** The operation's (or else its Path Item's) servers; endpoints only. */
+  servers?: string[]
 }
 
-/** Operation reachable through an HTTP path declared under OpenAPI `paths`. */
-export interface EndpointOperation extends OperationBase {
-  kind: "endpoint"
-  /** OpenAPI path template, for example `/pets/{petId}`. */
-  path: string
-  /** Path parameters. They are rendered as strings regardless of schema type. */
-  params: ContractField[]
-}
-
-/**
- * Operation declared under OpenAPI `webhooks`.
- *
- * Webhooks are addressed by their webhook name rather than by a URL path, and
- * they do not carry path parameters.
- */
-export interface WebhookOperation extends OperationBase {
-  kind: "webhook"
-  /** OpenAPI webhook map key, for example `pet.created`. */
-  name: string
-}
-
-/**
- * An operation declared inside an OpenAPI callback expression.
- *
- * Nested callbacks are flattened beside their parents with chained keys, and a
- * callback chain stops when a callback object repeats within it.
- */
-export interface CallbackOperation extends OperationBase {
-  kind: "callback"
-  /** Key of the operation that declares the callback, possibly itself a callback. */
-  parentKey: string
-  /** Name of the callback on the parent operation. */
-  callbackName: string
-  /** Runtime expression or URL used as the callback path-item key. */
-  expression: string
-  /** Path parameters. They are rendered as strings regardless of schema type. */
-  params: ContractField[]
-}
-
-/** Endpoint, webhook, or callback operation. Narrow with the `kind` discriminator. */
-export type ContractOperation = EndpointOperation | WebhookOperation | CallbackOperation
-
-/**
- * Named field used for parameters and object properties.
- *
- * For operation parameters, `required` reflects OpenAPI parameter requiredness
- * except path parameters, which are always required. For schema properties,
- * `required` is derived from the parent object's `required` array.
- */
-export interface ContractField {
-  name: string
+export interface Body {
   required: boolean
-  type: ContractType
-  docs?: DocBlock
+  docs?: Docs
+  /** One entry per declared media type, in declaration order. */
+  content: Media[]
 }
 
-/**
- * Operation request payload selected from `requestBody.content`.
- *
- * `json` is chosen for the first JSON-family media type with a schema.
- * `passthrough` is chosen for the first non-JSON media type with a schema.
- * `none` means no usable request body schema was declared.
- */
-export type ContractPayload =
-  /** No declared request body, or no request body schema that can be rendered. */
-  | { kind: "none" }
-  /** JSON-family request body, such as `application/json` or `application/problem+json`. */
-  | { kind: "json"; required: boolean; type: ContractType }
-  /** Non-JSON request body kept as its selected schema type. */
-  | { kind: "passthrough"; required: boolean; type: ContractType }
+export interface Media {
+  mediaType: string
+  type: Type
+  /** Request form and multipart bodies: Encoding Objects by property, where they differ from the default. */
+  encoding?: Record<string, Encoding>
+}
 
-/**
- * One OpenAPI response entry after media-type selection.
- *
- * Response status keys are preserved exactly as declared by OpenAPI.
- */
-export interface ContractOutcome {
-  /** OpenAPI response key, for example `"200"`, `"4XX"`, or `"default"`. */
+export interface Response {
+  /** Status key as declared: `"200"`, `"4XX"`, or `"default"`. */
   status: string
-  /** Selected response type, or `void` when no usable content schema exists. */
-  type: ContractType
-  /** Media type that produced `type`, when a content entry was selected. */
-  contentType?: string
-  /** Source location of this response entry. */
-  source?: SourceRef
+  docs?: Docs
+  /** Union of all media types' types; `undefined` when the response has no content. */
+  type: Type
+  headers: Field[]
 }
 
-/**
- * A named schema from `components.schemas`.
- *
- * Object schemas with properties become `interface` entries and carry `fields`.
- * Everything else becomes an `alias` entry and carries a single `type`.
- */
-interface ContractSchemaBase {
-  /** Safe TypeScript identifier used in generated declarations. */
+export interface Field {
   name: string
-  /** Original OpenAPI schema name. */
-  originalName: string
-  /** Documentation attached to the source schema. */
-  docs?: DocBlock
-  /** Source location of the schema in `components.schemas`. */
-  source?: SourceRef
+  type: Type
+  required: boolean
+  /** Set when `required` holds on one side only (readOnly/writeOnly). */
+  requiredOnly?: View
+  docs?: Docs
+  /** Parameters: serialization, where it differs from the location's default. */
+  encoding?: Encoding
 }
 
-export type ContractSchema = ContractSchemaBase &
-  (
-    | {
-        kind: "interface"
-        fields: ContractField[]
-        /** Index-signature value type before widening, when the object permits additional keys. */
-        index?: ContractType
-      }
-    | {
-        kind: "alias"
-        type: ContractType
-      }
-  )
+export interface Declaration {
+  /** Identifier inside the `Schemas` namespace. */
+  name: string
+  /** Name of the request-side variant, when it differs (see {@link View}). */
+  inputName?: string
+  type: Type
+  docs?: Docs
+}
 
-/** Scalar type names used by contract types, following TypeScript naming. */
-export type ScalarName = "string" | "number" | "boolean" | "null"
-
-/**
- * Type tree produced by contract building, decoupled from OpenAPI schemas.
- *
- * All OpenAPI schema interpretation happens before this tree is built:
- * `$ref`s are resolved to `reference` names, compositions become
- * `union`/`intersection`, and object keywords become `object`/`record`.
- * Renderers only decide target-language syntax, such as mapping `binary`
- * to `Blob` or applying user `format` mappings to scalars.
- *
- * The tree is not language-neutral: reference names are already sanitized
- * TypeScript identifiers, `integer` is collapsed to `number`, and kind
- * names follow TypeScript conventions.
- */
-export type ContractType =
-  /** Unconstrained or unsupported schema. Renders as `unknown`. */
-  | { kind: "unknown" }
-  /** Unsatisfiable schema, such as `false` or an empty enum. */
-  | { kind: "never" }
-  /** Absent payload, such as a response without content. */
-  | { kind: "void" }
-  /** Primitive with its declared `format` kept for renderer mappings. */
-  | { kind: "scalar"; name: ScalarName; format?: string }
-  /** Binary payload. `format` is present when derived from a schema keyword. */
-  | { kind: "binary"; format?: "binary" | "byte" }
-  | { kind: "literal"; value: string | number | boolean | null }
-  /** Resolved and sanitized name of a `components.schemas` entry. */
-  | { kind: "reference"; name: string }
-  | { kind: "array"; items: ContractType }
-  | { kind: "tuple"; items: ContractType[]; rest?: ContractType }
-  /** Object with declared fields. `index` is the index value type before widening. */
-  | { kind: "object"; fields: ContractField[]; index?: ContractType }
-  /** Object without declared fields, keyed by arbitrary strings. */
-  | { kind: "record"; values: ContractType }
-  | { kind: "union"; members: ContractType[] }
-  | { kind: "intersection"; members: ContractType[] }
-
-/** Documentation that can be rendered as a TypeScript JSDoc block. */
-export interface DocBlock {
+export interface Docs {
+  title?: string
   summary?: string
   description?: string
   deprecated?: boolean
+  /** JSDoc block tags such as `["minimum", "1"]`, in output order. */
+  tags?: Array<[name: string, value: string]>
 }
+
+export type Literal = string | number | boolean | null | Literal[] | { [key: string]: Literal }
+
+export type Type =
+  | { kind: "unknown" }
+  | { kind: "never" }
+  /** Absent content, such as a response without a body. */
+  | { kind: "undefined" }
+  | { kind: "null" }
+  | { kind: "boolean" }
+  /** `format` is kept so renderers can apply user format mappings. */
+  | { kind: "string"; format?: string }
+  | { kind: "number"; format?: string }
+  /** Raw octets. */
+  | { kind: "binary" }
+  | { kind: "literal"; value: Literal }
+  | { kind: "ref"; target: Declaration }
+  /**
+   * `inferred` marks shapes implied only by type-specific keywords (no `type`):
+   * JSON Schema applies those keywords to arrays/objects alone, so an inferred
+   * shape yields to a definite non-matching type in an intersection.
+   */
+  | { kind: "array"; items: Type; inferred?: true }
+  /** Leading elements; those at index `>= required` are optional. `rest` absent means closed. */
+  | { kind: "tuple"; items: Type[]; required: number; rest?: Type; inferred?: true }
+  /**
+   * `additional` types properties no field or pattern names (additionalProperties);
+   * `patterns` types properties whose names match a regular expression.
+   */
+  | {
+      kind: "object"
+      fields: Field[]
+      additional?: Type
+      patterns?: Array<{ pattern: string; type: Type }>
+      inferred?: true
+    }
+  | { kind: "union"; members: Type[] }
+  | { kind: "intersection"; members: Type[] }
+  /**
+   * A discriminator's values for `property`, applied to `type` once every
+   * declaration is built (the schema's own literals win). Never rendered.
+   */
+  | {
+      kind: "narrow"
+      type: Type
+      property: string
+      values: string[]
+      explicit: boolean
+      location: string
+    }
+
+/** The types directly inside `type`, not looking through references. */
+export function childTypes(type: Type): Type[] {
+  switch (type.kind) {
+    case "object":
+      return [
+        ...type.fields.map((f) => f.type),
+        ...(type.additional ? [type.additional] : []),
+        ...(type.patterns ?? []).map((p) => p.type),
+      ]
+    case "array":
+      return [type.items]
+    case "tuple":
+      return type.rest ? [...type.items, type.rest] : type.items
+    case "union":
+    case "intersection":
+      return type.members
+    case "narrow":
+      return [type.type]
+    default:
+      return []
+  }
+}
+
+export const UNKNOWN: Type = { kind: "unknown" }
+export const NEVER: Type = { kind: "never" }
+export const UNDEFINED: Type = { kind: "undefined" }
+export const NULL: Type = { kind: "null" }

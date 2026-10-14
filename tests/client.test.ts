@@ -1,718 +1,873 @@
-import { describe, expect, it, vi } from "vitest"
-import { createClient } from "../src/client"
-import type { Adapter, Client, ResultOf, SuccessOf } from "../src/client"
+import { describe, expect, expectTypeOf, it } from "vitest"
+import type { AdapterRequest, Contract, ErrorOf, SuccessOf } from "../src/client"
+import { HttpError, createClient, fetchAdapter } from "../src/client"
+import type { Endpoints, Schemas, Security } from "./__snapshots__/client-api"
+import { contract } from "./__snapshots__/client-api"
 
-interface TestAPI {
-  "GET /pets": {
-    params: void
-    query: { limit?: number }
-    body: void
-    response: { "200": Array<{ id: number; name: string }> }
-  }
-  "POST /pets": {
-    params: void
-    query: void
-    body: { name: string }
-    response: { "200": { id: number } }
-  }
-  "GET /pets/{petId}": {
-    params: { petId: string }
-    query: void
-    body: void
-    response: { "200": { id: number; name: string } }
-  }
-  "DELETE /pets/{petId}/tags/{tagId}": {
-    params: { petId: string; tagId: string }
-    query: void
-    body: void
-    response: { "200": void }
-  }
-  "GET /search": {
-    params: void
-    query: { q: string; page?: number }
-    body: void
-    response: { "200": string[] }
-  }
-  "POST /upload": {
-    params: void
-    query: void
-    body: { file: Blob; name: string }
-    response: { "200": { url: string } }
-  }
+/** A client for the generated fixture contract whose adapter records requests. */
+function recording(
+  config: {
+    server?: string
+    headers?: Record<string, string>
+    options?: Record<string, number>
+    security?: Parameters<typeof createClient<Endpoints, Security>>[0]["security"]
+  } = {},
+) {
+  const requests: AdapterRequest[] = []
+  const api = createClient({
+    contract,
+    ...config,
+    adapter: (request: AdapterRequest<Record<string, number>>) => {
+      requests.push(request)
+      return Promise.resolve()
+    },
+  })
+  return { api, requests }
 }
 
-describe("createClient", () => {
-  it("calls adapter with correct method and url", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter)
+/** A multipart request body, read back as a server's parser reads it. */
+function parts(request: AdapterRequest): Promise<FormData> {
+  const type = request.headers["content-type"] ?? ""
+  return new Response(request.body as Blob, { headers: { "content-type": type } }).formData()
+}
 
-    await api("GET /pets")
+/** One part of a multipart body as written: its name, extra headers, and content. */
+function part(name: string, headers: string, content: string): string {
+  return `Content-Disposition: form-data; name="${name}"\r\n${headers}\r\n${content}\r\n`
+}
 
-    expect(adapter).toHaveBeenCalledWith({
+/** A contract for hand-written endpoint types, with OpenAPI's defaults throughout. */
+function contractFor<Api>(endpoints: Contract<Api>["endpoints"] = {}): Contract<Api> {
+  return { servers: [], endpoints }
+}
+
+/** An adapter that answers with what it was asked to send. */
+const echo =
+  <K extends keyof AdapterRequest>(key: K) =>
+  (request: AdapterRequest): Promise<unknown> =>
+    Promise.resolve(request[key])
+
+describe("request building", () => {
+  it("expands path parameters with simple style and joins the server", async () => {
+    const { api, requests } = recording({ server: "https://api.test/v1/" })
+    await api("GET /pets/{id}", { params: { id: 7 } })
+    expect(requests[0]).toMatchObject({
       method: "GET",
-      url: "/pets",
+      url: "https://api.test/v1/pets/7",
       body: undefined,
-      headers: {},
     })
   })
 
-  it("throws when endpoint key does not include a path", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined)
-    const api = createClient<{
-      GET: {
-        params: void
-        query: void
-        body: void
-        response: { "200": void }
-      }
-    }>(adapter)
-
-    await expect(api("GET")).rejects.toThrow("Invalid endpoint: GET")
-    expect(adapter).not.toHaveBeenCalled()
-  })
-
-  it("appends query parameters to url", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter)
-
-    await api("GET /pets", { query: { limit: 10 } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/pets?limit=10")
-  })
-
-  it("appends array query parameters as repeated keys", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter)
-
-    await api("GET /search", { query: { q: "cat", tags: ["small", "short hair"] } as any })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/search?q=cat&tags=small&tags=short+hair")
-  })
-
-  it("supports custom query serialization", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter, {
-      serializeQuery(query) {
-        return Object.entries(query)
-          .filter(([, value]) => value != null)
-          .map(([name, value]) => {
-            const serializedValue = Array.isArray(value) ? value.join(",") : String(value)
-            return `${encodeURIComponent(name)}=${encodeURIComponent(serializedValue)}`
-          })
-          .join("&")
-      },
-    })
-
-    await api("GET /search", { query: { q: "cat", tags: ["small", "short hair"] } as any })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/search?q=cat&tags=small%2Cshort%20hair")
-  })
-
-  it("allows custom query serializer to return a leading question mark", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter, {
-      serializeQuery: () => "?q=cat",
-    })
-
-    await api("GET /search", { query: { q: "ignored" } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/search?q=cat")
-  })
-
-  it("replaces path parameters", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1, name: "Buddy" })
-    const api = createClient<TestAPI>(adapter)
-
-    await api("GET /pets/{petId}", { params: { petId: "123" } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/pets/123")
-  })
-
-  it("replaces multiple path parameters", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined)
-    const api = createClient<TestAPI>(adapter)
-
-    await api("DELETE /pets/{petId}/tags/{tagId}", {
-      params: { petId: "1", tagId: "2" },
-    })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/pets/1/tags/2")
-  })
-
-  it("replaces repeated path parameter placeholders", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined)
-    const api = createClient<{
-      "GET /items/{id}/related/{id}": {
-        params: { id: string }
-        query: void
-        body: void
-        response: { "200": void }
-      }
-    }>(adapter)
-
-    await api("GET /items/{id}/related/{id}", { params: { id: "x/y" } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/items/x%2Fy/related/x%2Fy")
-  })
-
-  it("stringifies non-string path parameter values before encoding", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined)
-    const api = createClient<{
-      "GET /pets/{petId}": {
-        params: { petId: number }
-        query: void
-        body: void
-        response: { "200": void }
-      }
-    }>(adapter)
-
-    await api("GET /pets/{petId}", { params: { petId: 123 } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/pets/123")
-  })
-
-  it("throws when a path parameter remains unresolved", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined)
-    const api = createClient<{
-      "GET /pets/{petId}/tags/{tagId}": {
-        params: { petId: string }
-        query: void
-        body: void
-        response: { "200": void }
-      }
-    }>(adapter)
-
-    await expect(api("GET /pets/{petId}/tags/{tagId}", { params: { petId: "1" } })).rejects.toThrow(
-      "Missing path param: tagId",
-    )
-    expect(adapter).not.toHaveBeenCalled()
-  })
-
-  it("throws when a path parameter value is nullish", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue(undefined)
-    const api = createClient<TestAPI>(adapter)
-
-    await expect(api("GET /pets/{petId}", { params: { petId: undefined as any } })).rejects.toThrow(
-      "Missing path param: petId",
-    )
-    expect(adapter).not.toHaveBeenCalled()
-  })
-
-  it("serializes plain object body as JSON", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1 })
-    const api = createClient<TestAPI>(adapter)
-
-    await api("POST /pets", { body: { name: "Buddy" } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.method).toBe("POST")
-    expect(call.body).toBe('{"name":"Buddy"}')
-    expect(call.headers).toStrictEqual({ "content-type": "application/json" })
-  })
-
-  it("supports custom body serialization", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1 })
-    const api = createClient<TestAPI>(adapter, {
-      serializeBody(body) {
-        return {
-          body: String((body as { name: string }).name),
-          headers: { "Content-Type": "text/plain" },
+  it("encodes path parameter values, arrays, and objects", async () => {
+    const api = createClient({
+      contract: contractFor<{
+        "GET /a/{x}/{y}/{z}": {
+          params: { x: string; y: string[]; z: object }
+          response: Record<never, never>
         }
-      },
+      }>(),
+      adapter: echo("url"),
     })
-
-    await api("POST /pets", { body: { name: "Buddy" } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.body).toBe("Buddy")
-    expect(call.headers).toStrictEqual({ "content-type": "text/plain" })
+    expect(
+      await api("GET /a/{x}/{y}/{z}", { params: { x: "a/b c", y: ["1", "2"], z: { k: "v w" } } }),
+    ).toBe("/a/a%2Fb%20c/1,2/k,v%20w")
+    await expect(api("GET /a/{x}/{y}/{z}", { params: {} as never })).rejects.toThrow(
+      'Missing path parameter "x"',
+    )
   })
 
-  it("merges per-call headers on top of custom body headers", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1 })
-    const api = createClient<TestAPI>(adapter, {
-      serializeBody() {
-        return {
-          body: "Buddy",
-          headers: { "Content-Type": "text/plain", "X-Body": "1" },
+  it("serializes the query with form style, exploding arrays and objects", async () => {
+    const api = createClient({
+      contract: contractFor<{
+        "GET /q?fixed=1": { query: Record<string, unknown>; response: Record<never, never> }
+      }>(),
+      adapter: echo("url"),
+    })
+    expect(
+      await api("GET /q?fixed=1", {
+        query: { a: [1, 2], b: null, c: { d: true, e: "x y" }, f: "" },
+      }),
+    ).toBe("/q?fixed=1&a=1&a=2&d=true&e=x%20y&f=")
+  })
+
+  it("merges headers case-insensitively and serializes declared header and cookie values", async () => {
+    const { api, requests } = recording({
+      headers: { "Authorization": "Bearer t", "X-Trace": "default" },
+    })
+    // No credentials are configured, so the header given stays.
+    await api("GET /pets/{id}", {
+      params: { id: 1 },
+      headers: { "X-Trace": "call", "x-list": ["a", "b"] },
+      cookies: { session: "a b;c" },
+    })
+    expect(requests[0].headers).toStrictEqual({
+      "authorization": "Bearer t",
+      "x-trace": "call",
+      "x-list": "a,b",
+      "cookie": "session=a%20b%3Bc",
+    })
+  })
+
+  it("shallow-merges adapter options", async () => {
+    const { api, requests } = recording({ options: { a: 1, b: 1 } })
+    await api("DELETE /pets/{id}", { params: { id: 1 }, options: { b: 2 } })
+    expect(requests[0].options).toStrictEqual({ a: 1, b: 2 })
+  })
+})
+
+describe("request bodies", () => {
+  it("sends JSON by default", async () => {
+    const { api, requests } = recording()
+    await api("POST /pets", { body: { name: "Rex" } })
+    expect(requests[0]).toMatchObject({
+      body: '{"name":"Rex"}',
+      headers: { "content-type": "application/json" },
+    })
+  })
+
+  it("labels other JSON media types as declared", async () => {
+    const { api, requests } = recording()
+    await api("PATCH /pets/{id}", {
+      params: { id: 1 },
+      contentType: "application/merge-patch+json",
+      body: { name: "R" },
+    })
+    expect(requests[0]).toMatchObject({
+      body: '{"name":"R"}',
+      headers: { "content-type": "application/merge-patch+json" },
+    })
+  })
+
+  it("encodes form and multipart bodies", async () => {
+    const { api, requests } = recording()
+    // The only declared media type is the default.
+    await api("POST /token", { body: { grant_type: "client credentials" } })
+    expect(requests[0].body).toBe("grant_type=client%20credentials")
+    expect(requests[0].headers).toStrictEqual({
+      "content-type": "application/x-www-form-urlencoded",
+    })
+
+    const file = new Blob(["data"], { type: "text/plain" })
+    await api("POST /upload", { contentType: "multipart/form-data", body: { file, name: "n" } })
+    const form = await parts(requests[1])
+    expect(form.get("name")).toBe("n")
+    expect(form.get("file")).toBeInstanceOf(Blob)
+    expect(requests[1].headers["content-type"]).toMatch(/^multipart\/form-data; boundary=/)
+  })
+
+  it("labels declared multipart parts without making them files", async () => {
+    let sent: AdapterRequest | undefined
+    const api = createClient({
+      contract: contractFor<{
+        "POST /m": {
+          body: {
+            "multipart/form-data": {
+              "meta": object
+              "raw": object
+              "data": object
+              "note": string
+              "csv": string
+              "tags": string[]
+              'say "hi"': string
+            }
+          }
+          response: Record<never, never>
         }
-      },
-    })
-
-    await api("POST /pets", {
-      body: { name: "Buddy" },
-      headers: { "Content-Type": "application/custom" },
-    })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.headers).toStrictEqual({
-      "content-type": "application/custom",
-      "x-body": "1",
-    })
-  })
-
-  it.each([
-    [
-      "FormData",
-      () => {
-        const form = new FormData()
-        form.append("name", "test")
-        return form
-      },
-    ],
-    ["URLSearchParams", () => new URLSearchParams({ name: "Buddy" })],
-    ["Blob", () => new Blob(["hello"], { type: "text/plain" })],
-    ["ArrayBuffer", () => new ArrayBuffer(4)],
-    ["Uint8Array", () => new Uint8Array([1, 2, 3])],
-    [
-      "ReadableStream",
-      () =>
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(new Uint8Array([1]))
-            controller.close()
+      }>({
+        "POST /m": {
+          contentType: "multipart/form-data",
+          encoding: {
+            "multipart/form-data": {
+              raw: { contentType: "text/plain" },
+              data: { contentType: "application/json" },
+              note: { contentType: "text/markdown" },
+              csv: { contentType: "text/csv; charset=iso-8859-1" },
+            },
           },
-        }),
-    ],
-  ])("passes %s body through without setting Content-Type", async (_name, makeBody) => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ url: "https://..." })
-    const api = createClient<TestAPI>(adapter)
-
-    const body = makeBody()
-    await api("POST /upload", { body })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.body).toBe(body)
-    expect(call.headers).toStrictEqual({})
-  })
-
-  it("serializes string body as JSON like any other declared value", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({})
-    const api = createClient<{
-      "POST /raw": {
-        params: void
-        query: void
-        body: string
-        response: { "200": void }
-      }
-    }>(adapter)
-
-    await api("POST /raw", { body: "hello world" })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.body).toBe('"hello world"')
-    expect(call.headers).toStrictEqual({ "content-type": "application/json" })
-  })
-
-  it("skips undefined query params", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter)
-
-    await api("GET /search", { query: { q: "hello", page: undefined as any } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/search?q=hello")
-  })
-
-  it("returns adapter result", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([{ id: 1, name: "Buddy" }])
-    const api = createClient<TestAPI>(adapter)
-
-    const result = await api("GET /pets")
-    expect(result).toStrictEqual([{ id: 1, name: "Buddy" }])
-  })
-
-  it.each([
-    ["https://api.example.com"],
-    ["https://api.example.com/"],
-    ["https://api.example.com///"],
-  ])("prepends baseURL %s and strips trailing slashes", async (baseURL) => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter, { baseURL })
-
-    await api("GET /pets")
-
-    expect(adapter.mock.calls[0][0].url).toBe("https://api.example.com/pets")
-  })
-
-  it("bypasses baseURL when endpoint path is an absolute URL", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<{
-      "GET https://other.example.com/hook": {
-        params: void
-        query: { token: string }
-        body: void
-        response: { "200": void }
-      }
-    }>(adapter, { baseURL: "https://api.example.com" })
-
-    await api("GET https://other.example.com/hook", { query: { token: "x" } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("https://other.example.com/hook?token=x")
-  })
-
-  it("keeps falsy but defined query values (0, false, empty string)", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter)
-
-    await api("GET /search", {
-      query: { q: "", page: 0, extra: false as any } as any,
-    })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/search?q=&page=0&extra=false")
-  })
-
-  it("appends query parameters after an existing query string", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<{
-      "GET /search?sort=name": {
-        params: void
-        query: { q: string }
-        body: void
-        response: { "200": string[] }
-      }
-    }>(adapter)
-
-    await api("GET /search?sort=name", { query: { q: "cat" } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/search?sort=name&q=cat")
-  })
-
-  it("keeps url hash after appended query parameters", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<{
-      "GET /search#items": {
-        params: void
-        query: { q: string }
-        body: void
-        response: { "200": string[] }
-      }
-    }>(adapter)
-
-    await api("GET /search#items", { query: { q: "cat" } })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.url).toBe("/search?q=cat#items")
-  })
-
-  it("per-call header overrides the auto-set content-type case-insensitively", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({})
-    const api = createClient<TestAPI>(adapter)
-
-    await api("POST /pets", {
-      body: { name: "x" },
-      headers: { "content-type": "text/plain" },
-    })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.headers).toStrictEqual({ "content-type": "text/plain" })
-  })
-
-  it("merges default headers before body and per-call headers", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({})
-    const api = createClient<TestAPI>(adapter, {
-      headers: {
-        "Content-Type": "text/plain",
-        "X-App": "docs",
-        "X-Trace-Id": "default",
+        },
+      }),
+      adapter: (request) => {
+        sent = request
+        return Promise.resolve()
       },
     })
-
-    await api("POST /pets", {
-      body: { name: "x" },
-      headers: { "X-Trace-Id": "call" },
-    })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.headers).toStrictEqual({
-      "content-type": "application/json",
-      "x-app": "docs",
-      "x-trace-id": "call",
-    })
+    const body = {
+      "meta": { a: 1 },
+      "raw": { c: 3 },
+      "data": { b: 2 },
+      "note": "# hi",
+      "csv": "café",
+      "tags": ["x", "y"],
+      'say "hi"': "line\nbreak",
+    }
+    await api("POST /m", { body })
+    const request = sent as AdapterRequest
+    const text = await (request.body as Blob).text()
+    // Undeclared, an object is a JSON part, as OpenAPI defaults.
+    expect(text).toContain(part("meta", "Content-Type: application/json\r\n", '{"a":1}'))
+    // Declared text/plain, it is a plain field, as some servers need.
+    expect(text).toContain(part("raw", "", '{"c":3}'))
+    expect(text).toContain(part("data", "Content-Type: application/json\r\n", '{"b":2}'))
+    expect(text).toContain(part("note", "Content-Type: text/markdown\r\n", "# hi"))
+    // Text goes as UTF-8, and says so.
+    expect(text).toContain(part("csv", "Content-Type: text/csv; charset=utf-8\r\n", "café"))
+    expect(text).toContain(part("say %22hi%22", "", "line\nbreak"))
+    expect(text).not.toContain("filename")
+    // What a server's multipart parser reads back.
+    const form = await parts(request)
+    expect(form.get("meta")).toBe('{"a":1}')
+    expect(form.getAll("tags")).toStrictEqual(["x", "y"])
+    expect(form.get('say "hi"')).toBe("line\nbreak")
   })
 
-  it("trims header names and skips empty header names", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({})
-    const api = createClient<TestAPI>(adapter, {
-      headers: {
-        " X-App ": "docs",
-        "": "empty",
-        "   ": "blank",
+  it("labels a file part with its declared media type, keeping a File's name", async () => {
+    let sent: AdapterRequest | undefined
+    const api = createClient({
+      contract: contractFor<{
+        "POST /a": {
+          body: { "multipart/form-data": { image: Blob; other?: Blob } }
+          response: Record<never, never>
+        }
+      }>({
+        "POST /a": {
+          contentType: "multipart/form-data",
+          encoding: { "multipart/form-data": { image: { contentType: "image/png" } } },
+        },
+      }),
+      adapter: (request) => {
+        sent = request
+        return Promise.resolve()
       },
     })
+    const file = new File(["PNG"], "photo.png", { type: "application/octet-stream" })
+    await api("POST /a", { body: { image: file, other: new File(["x"], "") } })
+    const form = await parts(sent as AdapterRequest)
+    expect(form.get("image")).toMatchObject({ name: "photo.png", type: "image/png" })
+    // A file without a name is still a file.
+    expect(form.get("other")).toMatchObject({ name: "blob", type: "application/octet-stream" })
+  })
 
-    await api("GET /pets", {
-      headers: { " X-Trace-Id ": "abc" },
+  it("passes binary bodies through, labelled with the declared type", async () => {
+    const { api, requests } = recording()
+    const bytes = new Uint8Array([1, 2])
+    await api("POST /upload", { contentType: "application/octet-stream", body: bytes as never })
+    expect(requests[0]).toMatchObject({
+      body: bytes,
+      headers: { "content-type": "application/octet-stream" },
     })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.headers).toStrictEqual({
-      "x-app": "docs",
-      "x-trace-id": "abc",
-    })
   })
 
-  it("throws when JSON body serialization returns undefined", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({})
-    const api = createClient<TestAPI>(adapter)
-
-    await expect(api("POST /pets", { body: (() => undefined) as any })).rejects.toThrow(
-      "Request body cannot be serialized as JSON",
+  it("refuses to guess an encoding", async () => {
+    const xml = contractFor<{
+      "POST /x": { body: { "application/xml": { a: string } }; response: Record<never, never> }
+    }>({ "POST /x": { contentType: "application/xml" } })
+    const api = createClient({ contract: xml, adapter: () => Promise.resolve() })
+    const custom = createClient({ contract: xml, adapter: echo("body") })
+    // The client cannot encode XML, so only ready-made bodies type-check.
+    // @ts-expect-error an object is not an XML body
+    const call = api("POST /x", { contentType: "application/xml", body: { a: "1" } })
+    await expect(call).rejects.toThrow("Cannot encode a object as application/xml")
+    expect(await custom("POST /x", { contentType: "application/xml", body: "<a>1</a>" })).toBe(
+      "<a>1</a>",
     )
-    expect(adapter).not.toHaveBeenCalled()
-  })
-
-  it("throws with context when JSON body serialization fails", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({})
-    const api = createClient<TestAPI>(adapter)
-    const body: Record<string, unknown> = {}
-    body.self = body
-
-    await expect(api("POST /pets", { body: body as any })).rejects.toThrow(
-      "Failed to serialize request body as JSON",
-    )
-    expect(adapter).not.toHaveBeenCalled()
-  })
-
-  interface AdapterOptions {
-    timeout?: number
-    tag?: string
-    retry?: number
-  }
-
-  it.each<{
-    name: string
-    defaults: AdapterOptions | undefined
-    perCall: AdapterOptions | undefined
-    expected: AdapterOptions | undefined
-  }>([
-    {
-      name: "per-call only",
-      defaults: undefined,
-      perCall: { timeout: 5000, tag: "v1" },
-      expected: { timeout: 5000, tag: "v1" },
-    },
-    {
-      name: "defaults only",
-      defaults: { timeout: 5000, tag: "default" },
-      perCall: undefined,
-      expected: { timeout: 5000, tag: "default" },
-    },
-    {
-      name: "per-call merged on top of defaults",
-      defaults: { timeout: 5000, tag: "default" },
-      perCall: { tag: "call", retry: 2 },
-      expected: { timeout: 5000, tag: "call", retry: 2 },
-    },
-  ])("plain-object adapter options: $name", async ({ defaults, perCall, expected }) => {
-    const adapter = vi.fn<Adapter<AdapterOptions>>().mockResolvedValue([])
-    const api = createClient<TestAPI, AdapterOptions>(
-      adapter,
-      defaults ? { options: defaults } : undefined,
-    )
-
-    await api("GET /pets", perCall ? { options: perCall } : undefined)
-
-    expect(adapter.mock.calls[0][0].options).toStrictEqual(expected)
-  })
-
-  it("uses per-call options when options are not objects", async () => {
-    const adapter = vi.fn<Adapter<string>>().mockResolvedValue([])
-    const api = createClient<TestAPI, string>(adapter, { options: "default" })
-
-    await api("GET /pets", { options: "call" })
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.options).toBe("call")
-  })
-
-  it("options is undefined when caller omits it", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api = createClient<TestAPI>(adapter)
-
-    await api("GET /pets")
-
-    const call = adapter.mock.calls[0][0]
-    expect(call.options).toBeUndefined()
-  })
-
-  it("can be assigned to exported Client type", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue([])
-    const api: Client<TestAPI> = createClient<TestAPI>(adapter)
-
-    await api("GET /pets")
-
-    expect(adapter).toHaveBeenCalledOnce()
   })
 })
 
-describe("createClient body optionality (type-level)", () => {
-  interface OptAPI {
-    "PATCH /x": {
-      params: void
-      query: void
-      body?: { name: string }
-      response: { "200": void }
-    }
-  }
-  interface ReqAPI {
-    "POST /x": {
-      params: void
-      query: void
-      body: { name: string }
-      response: { "200": void }
-    }
-  }
-  interface NoBodyAPI {
-    "GET /x": {
-      params: void
-      query: void
-      body: void
-      response: { "200": void }
-    }
-  }
-
-  it("optional body: caller may omit body entirely", async () => {
-    const adapter: Adapter = vi.fn<Adapter>().mockResolvedValue(undefined)
-    const api = createClient<OptAPI>(adapter)
-    await api("PATCH /x")
-    await api("PATCH /x", {})
-    await api("PATCH /x", { body: { name: "x" } })
-    expect(adapter).toBeDefined()
-  })
-
-  it("required body: caller must supply body", async () => {
-    const adapter: Adapter = vi.fn<Adapter>().mockResolvedValue(undefined)
-    const api = createClient<ReqAPI>(adapter)
-    await api("POST /x", { body: { name: "x" } })
-    // @ts-expect-error: body is required
-    await api("POST /x")
-    // @ts-expect-error: body is required
-    await api("POST /x", {})
-    expect(adapter).toBeDefined()
-  })
-
-  it("body: void: caller must not pass body", async () => {
-    const adapter: Adapter = vi.fn<Adapter>().mockResolvedValue(undefined)
-    const api = createClient<NoBodyAPI>(adapter)
-    await api("GET /x")
-    // @ts-expect-error: body is not allowed
-    await api("GET /x", { body: { foo: 1 } })
-    expect(adapter).toBeDefined()
-  })
-})
-
-describe("createClient response inference (type-level)", () => {
-  it("uses default response when no 2xx response is declared", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ message: "ok" })
-    const api = createClient<{
-      "GET /fallback": {
-        params: void
-        query: void
-        body: void
-        response: {
-          default: { message: string }
-        }
-      }
-    }>(adapter)
-
-    const result = await api("GET /fallback")
-    const typed: { message: string } = result
-
-    expect(typed).toStrictEqual({ message: "ok" })
-  })
-
-  it("prefers 2xx responses over default response", async () => {
-    const adapter = vi.fn<Adapter>().mockResolvedValue({ id: 1 })
-    const api = createClient<{
-      "GET /fallback": {
-        params: void
-        query: void
-        body: void
-        response: {
-          "200": { id: number }
-          "default": { message: string }
-        }
-      }
-    }>(adapter)
-
-    const result = await api("GET /fallback")
-    const typed: { id: number } = result
-
-    expect(typed).toStrictEqual({ id: 1 })
-  })
-})
-
-describe("client response helper types", () => {
-  interface Endpoint {
-    params: void
-    query: void
-    body: void
-    response: {
-      "200": { ok: true }
-      "201": { created: true }
-      "400": { badRequest: true }
-      "4XX": { clientError: true }
-      "500": { serverError: true }
-      "5XX": { serverFamily: true }
-      "default": { fallback: true }
-    }
-  }
-
-  it("ResultOf extracts a response by exact status", () => {
-    const result: ResultOf<Endpoint, "201"> = { created: true }
-
-    expect(result).toStrictEqual({ created: true })
-  })
-
-  it("SuccessOf extracts all 2xx responses", () => {
-    const result: SuccessOf<Endpoint> = { ok: true }
-    const created: SuccessOf<Endpoint> = { created: true }
-
-    expect(result).toStrictEqual({ ok: true })
-    expect(created).toStrictEqual({ created: true })
-  })
-
-  it("SuccessOf falls back to default only when it is the sole response", () => {
-    interface DefaultOnlyEndpoint {
-      params: void
-      query: void
-      body: void
-      response: {
-        default: { fallback: true }
-      }
-    }
-    interface DefaultAndErrorEndpoint {
-      params: void
-      query: void
-      body: void
-      response: {
-        "400": { badRequest: true }
-        "default": { fallback: true }
-      }
-    }
-
-    const fallback: SuccessOf<DefaultOnlyEndpoint> = { fallback: true }
-    const unknownSuccess = unknownValue() as SuccessOf<DefaultAndErrorEndpoint>
-    // @ts-expect-error: default is not a success fallback when other responses exist
-    unknownSuccess satisfies { fallback: true }
-
-    expect(fallback).toStrictEqual({ fallback: true })
-    expect(unknownSuccess).toBeUndefined()
-  })
-})
-
-function unknownValue(): unknown {
-  return undefined
+// A Node.js-style stream: an async iterable of bytes.
+async function* chunks(): AsyncGenerator<Uint8Array> {
+  yield await Promise.resolve(new Uint8Array([1]))
 }
+
+/** A `fetch` stand-in that always answers with this response. */
+const respond =
+  (body: BodyInit | null, init: ResponseInit) =>
+  (..._args: unknown[]): Promise<Response> =>
+    Promise.resolve(new Response(body, init))
+
+describe("with the generated contract", () => {
+  it("refuses the old baseUrl option, also in a config built beforehand", () => {
+    const config = { contract, baseUrl: "http://localhost:3000" }
+    // @ts-expect-error renamed to server
+    expect(() => createClient(config)).toThrow("The baseUrl option is now called server")
+  })
+
+  it("uses the document's server, an endpoint's own server, or the server option over both", async () => {
+    const { api, requests } = recording()
+    await api("GET /pets")
+    await api("GET /files/{names}", { params: { names: ["a", "b"] } })
+    expect(requests.map((r) => r.url)).toStrictEqual([
+      "https://eu.api.test/v1/pets",
+      "https://files.api.test/files/.a,b",
+    ])
+    const local = recording({ server: "http://localhost:3000" })
+    await local.api("GET /files/{names}", { params: { names: ["a"] } })
+    expect(local.requests[0].url).toBe("http://localhost:3000/files/.a")
+  })
+
+  it("serializes parameters in their declared styles", async () => {
+    const { api, requests } = recording()
+    await api("GET /charges", {
+      query: { created: { gte: 1 }, expand: ["customer", "invoice"], ids: ["x", "y"] },
+    })
+    expect(requests[0].url).toBe(
+      "https://eu.api.test/v1/charges?created[gte]=1&expand[0]=customer&expand[1]=invoice&ids=x%7Cy",
+    )
+    await api("GET /files/{names}", {
+      params: { names: ["a"] },
+      headers: { "X-Range": { from: 5 } },
+    })
+    expect(requests[1].headers["x-range"]).toBe("from=5")
+  })
+
+  it("sends the operation's declared media type, encoding form fields as declared", async () => {
+    const { api, requests } = recording({ security: { basic: { username: "u", password: "p" } } })
+    await api("POST /charges", {
+      body: { amount: 100, metadata: { order: "7" }, tags: ["a", "b"], filter: { live: true } },
+    })
+    expect(requests[0]).toMatchObject({
+      body: "amount=100&metadata[order]=7&tags[0]=a&tags[1]=b&filter=%7B%22live%22%3Atrue%7D",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    })
+  })
+
+  it("applies credentials where each operation's security requires them", async () => {
+    let calls = 0
+    const { api, requests } = recording({
+      security: {
+        bearer: () => Promise.resolve(`token-${++calls}`),
+        key: "k-1",
+        basic: { username: "user", password: "pässword" },
+      },
+    })
+    await api("GET /pets")
+    await api("GET /pets")
+    await api("GET /charges")
+    await api("GET /health")
+    await api("POST /charges", { body: { amount: 1 } })
+    expect(requests.map((r) => r.headers.authorization)).toStrictEqual([
+      "Bearer token-1",
+      "Bearer token-2",
+      undefined,
+      undefined,
+      `Basic ${Buffer.from("user:pässword").toString("base64")}`,
+    ])
+    expect(requests[2].url).toBe("https://eu.api.test/v1/charges?api_key=k-1")
+  })
+
+  it("sends no credentials it was not given", async () => {
+    const { api, requests } = recording({ security: { key: "k" } })
+    await api("GET /pets")
+    expect(requests[0].headers.authorization).toBeUndefined()
+  })
+})
+
+describe("encodings", () => {
+  it("serializes dates as ISO strings and JSON sequences as lines", async () => {
+    interface Api {
+      "POST /log": {
+        query: { since: Date }
+        body: { "application/x-ndjson": Array<{ n: number }> }
+        response: Record<never, never>
+      }
+    }
+    const requests: AdapterRequest[] = []
+    const api = createClient({
+      contract: contractFor<Api>({ "POST /log": { contentType: "application/x-ndjson" } }),
+      adapter: (request) => {
+        requests.push(request)
+        return Promise.resolve()
+      },
+    })
+    await api("POST /log", {
+      query: { since: new Date(Date.UTC(2026, 0, 2)) },
+      body: [{ n: 1 }, { n: 2 }],
+    })
+    expect(requests[0]).toMatchObject({
+      url: "/log?since=2026-01-02T00%3A00%3A00.000Z",
+      body: '{"n":1}\n{"n":2}\n',
+      headers: { "content-type": "application/x-ndjson" },
+    })
+  })
+})
+
+describe("fetchAdapter", () => {
+  it.each([
+    [
+      respond('{"id":1}', { headers: { "content-type": "application/json; charset=utf-8" } }),
+      { id: 1 },
+    ],
+    [respond("hello", { headers: { "content-type": "text/plain" } }), "hello"],
+    [respond(null, { status: 204 }), undefined],
+    [respond("", { headers: { "content-type": "application/json" } }), undefined],
+    [respond(null, {}), undefined],
+    // An empty text body is still text.
+    [respond("", { headers: { "content-type": "text/plain" } }), ""],
+  ])("decodes responses (%#)", async (fetchImpl, expected) => {
+    const adapter = fetchAdapter(fetchImpl as typeof fetch)
+    expect(
+      await adapter({ method: "GET", url: "/x", headers: {}, body: undefined, options: undefined }),
+    ).toStrictEqual(expected)
+  })
+
+  it("decodes JSON sequences and server-sent events into arrays", async () => {
+    const read = (text: string, type: string): Promise<unknown> =>
+      fetchAdapter(respond(text, { headers: { "content-type": type } }) as typeof fetch)({
+        method: "GET",
+        url: "/x",
+        headers: {},
+        body: undefined,
+        options: undefined,
+      })
+    expect(await read('{"a":1}\n\n{"a":2}\n', "application/jsonl")).toStrictEqual([
+      { a: 1 },
+      { a: 2 },
+    ])
+    const rs = String.fromCharCode(0x1e)
+    expect(await read(`${rs}1\n${rs}2\n`, "application/json-seq")).toStrictEqual([1, 2])
+    expect(
+      await read(
+        ": comment\nevent: tick\ndata: a\ndata: b\nid: 7\n\ndata: c\nretry: 10\n\n",
+        "text/event-stream",
+      ),
+    ).toStrictEqual([
+      { data: "a\nb", event: "tick", id: "7" },
+      { data: "c", retry: 10 },
+    ])
+  })
+
+  it("keeps an undecodable error body as text", async () => {
+    const adapter = fetchAdapter(
+      respond("<html>oops</html>", {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }) as typeof fetch,
+    )
+    const failure: unknown = await adapter({
+      method: "GET",
+      url: "/x",
+      headers: {},
+      body: undefined,
+      options: undefined,
+    }).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(HttpError)
+    expect(failure).toMatchObject({ status: 500, body: "<html>oops</html>" })
+  })
+
+  it("returns other content as a Blob", async () => {
+    const adapter = fetchAdapter(
+      respond("abc", { headers: { "content-type": "image/png" } }) as typeof fetch,
+    )
+    const blob = await adapter({
+      method: "GET",
+      url: "/x",
+      headers: {},
+      body: undefined,
+      options: undefined,
+    })
+    expect(blob).toBeInstanceOf(Blob)
+  })
+
+  it("rejects non-2xx responses with HttpError carrying the decoded body", async () => {
+    const adapter = fetchAdapter(
+      respond('{"message":"nope"}', {
+        status: 404,
+        statusText: "Not Found",
+        headers: { "content-type": "application/json" },
+      }) as typeof fetch,
+    )
+    const failure: unknown = await adapter({
+      method: "GET",
+      url: "/x",
+      headers: {},
+      body: undefined,
+      options: undefined,
+    }).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(HttpError)
+    expect(failure).toMatchObject({
+      status: 404,
+      body: { message: "nope" },
+      message: "HTTP 404 Not Found",
+    })
+  })
+
+  it("forwards the request and options to fetch", async () => {
+    let seen: [unknown, RequestInit | undefined] | undefined
+    const api = createClient({
+      contract,
+      adapter: fetchAdapter((url, init) => {
+        seen = [url, init]
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }),
+      options: { cache: "no-store" },
+    })
+    await api("DELETE /pets/{id}", { params: { id: 3 }, options: { keepalive: true } })
+    expect(seen).toStrictEqual([
+      "https://eu.api.test/v1/pets/3",
+      { cache: "no-store", keepalive: true, method: "DELETE", headers: {}, body: undefined },
+    ])
+  })
+})
+
+describe("types", () => {
+  const api = createClient({ contract })
+
+  it("derives results from the response map", () => {
+    expect(api).toBeTypeOf("function")
+    expectTypeOf<SuccessOf<Endpoints["GET /pets"]>>().toEqualTypeOf<Schemas.Pet[]>()
+    expectTypeOf<SuccessOf<Endpoints["DELETE /pets/{id}"]>>().toEqualTypeOf<undefined>()
+    expectTypeOf<SuccessOf<Endpoints["GET /search"]>>().toEqualTypeOf<string>()
+    expectTypeOf<SuccessOf<Endpoints["GET /health"]>>().toEqualTypeOf<unknown>()
+    expectTypeOf<ErrorOf<Endpoints["GET /pets/{id}"]>>().toEqualTypeOf<Schemas.Error>()
+    expectTypeOf<ReturnType<typeof api<"GET /pets/{id}">>>().resolves.toEqualTypeOf<Schemas.Pet>()
+  })
+
+  it("infers endpoints, credentials, and adapter options from what it is given", () => {
+    const check = (): void => {
+      // @ts-expect-error unknown endpoint
+      void api("GET /nope")
+      void createClient({
+        contract,
+        security: { bearer: "t", basic: { username: "u", password: "p" } },
+      })
+      // @ts-expect-error credentials are checked against the declared schemes
+      void createClient({ contract, security: { nope: "t" } })
+      // @ts-expect-error basic credentials need a username and password
+      void createClient({ contract, security: { basic: "t" } })
+      const custom = createClient({
+        contract,
+        adapter: (_request: AdapterRequest<{ retries: number }>) => Promise.resolve(),
+      })
+      void custom("GET /pets", { options: { retries: 2 } })
+      // @ts-expect-error options are the adapter's
+      void custom("GET /pets", { options: { cache: "no-store" } })
+    }
+    expect(check).toBeTypeOf("function")
+    expectTypeOf<SuccessOf<Endpoints["GET /events"]>>().toEqualTypeOf<
+      Array<{ data: string; event?: string }>
+    >()
+  })
+
+  it("requires what the operation requires", () => {
+    // Compile-time checks only; never called.
+    const check = (): void => {
+      void api("GET /pets")
+      void api("GET /pets", { query: { limit: 1 } })
+      // @ts-expect-error path parameters are required
+      void api("GET /pets/{id}")
+      // @ts-expect-error parameter types are checked
+      void api("GET /pets/{id}", { params: { id: "1" } })
+      // @ts-expect-error a required query parameter
+      void api("GET /search", { query: {} })
+      // @ts-expect-error no request body on this operation
+      void api("GET /pets", { body: {} })
+      // @ts-expect-error the body is required
+      void api("POST /pets")
+      // @ts-expect-error body type is checked
+      void api("POST /pets", { body: { name: 1 } })
+      void api("PATCH /pets/{id}", { params: { id: 1 } })
+      // The only declared media type is the default; a JSON one is otherwise.
+      void api("PATCH /pets/{id}", { params: { id: 1 }, body: { name: "x" } })
+      void api("POST /charges", { body: { amount: 1 } })
+      // @ts-expect-error the body is still checked
+      void api("POST /charges", { body: { amount: "1" } })
+      // @ts-expect-error two media types and no JSON: the call names one
+      void api("POST /upload", { body: { file: new Blob([]) } })
+      void api("POST /upload", { contentType: "multipart/form-data", body: { file: new Blob([]) } })
+      // @ts-expect-error the body must match the chosen media type
+      void api("POST /upload", { contentType: "multipart/form-data", body: { name: "x" } })
+      // @ts-expect-error only declared media types
+      void api("POST /token", { contentType: "application/json", body: { grant_type: "x" } })
+      // Declared headers keep their types; others are free-form.
+      void api("GET /pets/{id}", { params: { id: 1 }, headers: { "X-Trace": "t", "X-Other": "o" } })
+      // @ts-expect-error unknown endpoint
+      void api("GET /nope")
+    }
+    expect(check).toBeTypeOf("function")
+  })
+})
+
+describe("reserved characters, delimiters, and path segments", () => {
+  interface Api {
+    "GET /files/{path}": { params: { path: string }; response: Record<never, never> }
+    "GET /q": { query: Record<string, unknown>; response: Record<never, never> }
+  }
+  const api = createClient({
+    contract: contractFor<Api>({
+      "GET /files/{path}": {
+        params: { path: { style: "simple", explode: false, allowReserved: true } },
+      },
+      "GET /q": {
+        query: {
+          next: { style: "form", explode: true, allowReserved: true },
+          ids: { style: "form", explode: false },
+          sp: { style: "spaceDelimited", explode: false },
+          pipe: { style: "pipeDelimited", explode: false },
+        },
+      },
+    }),
+    adapter: echo("url"),
+  })
+
+  it("keeps reserved characters only where they cannot change the URL", async () => {
+    expect(await api("GET /files/{path}", { params: { path: "a/b c%20d#e?f" } })).toBe(
+      "/files/a/b%20c%20d%23e%3Ff",
+    )
+    expect(await api("GET /q", { query: { next: "a#b&c=d/e?f%20g" } })).toBe(
+      "/q?next=a%23b%26c%3Dd/e?f%20g",
+    )
+  })
+
+  it("keeps commas between values, and percent-encodes spaces and pipes", async () => {
+    const query = { ids: ["a,b", "c"], sp: { R: 100, G: 200 }, pipe: { R: 100, G: 200 } }
+    expect(await api("GET /q", { query })).toBe(
+      "/q?ids=a%2Cb,c&sp=R%20100%20G%20200&pipe=R%7C100%7CG%7C200",
+    )
+  })
+
+  it("refuses path values that would reach another resource", async () => {
+    for (const path of ["..", ".", "", "a/../b", "%2e%2E", "/a"]) {
+      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+      await expect(api("GET /files/{path}", { params: { path } })).rejects.toThrow(
+        "another resource",
+      )
+    }
+  })
+})
+
+describe("choosing credentials", () => {
+  interface Api {
+    "GET /optional": { response: Record<never, never> }
+    "GET /tls-first": { response: Record<never, never> }
+    "GET /fallback": { response: Record<never, never> }
+    "GET /anonymous": { response: Record<never, never> }
+    "GET /undeclared": { response: Record<never, never> }
+  }
+  const secured: Contract<Api, { bearer?: string; key?: string }> = {
+    servers: [],
+    security: {
+      bearer: { type: "http", scheme: "bearer" },
+      key: { type: "apiKey", in: "header", name: "X-Key" },
+      tls: { type: "mutualTLS" },
+    },
+    endpoints: {
+      "GET /optional": { requires: [{}, { bearer: [] }] },
+      "GET /tls-first": { requires: [{ tls: [] }, { bearer: [] }] },
+      "GET /fallback": { requires: [{ bearer: [] }, { key: [] }] },
+      "GET /anonymous": { requires: [] },
+    },
+  }
+  const headersFor = (
+    security: Parameters<
+      typeof createClient<Api, { bearer?: string; key?: string }>
+    >[0]["security"],
+    endpoint: keyof Api,
+  ): Promise<unknown> =>
+    createClient({ contract: secured, security, adapter: echo("headers") })(endpoint)
+
+  it("sends the credentials given when the operation accepts them", async () => {
+    expect(await headersFor({ bearer: "t" }, "GET /optional")).toStrictEqual({
+      authorization: "Bearer t",
+    })
+    expect(await headersFor({ bearer: "t" }, "GET /tls-first")).toStrictEqual({
+      authorization: "Bearer t",
+    })
+    expect(await headersFor({ bearer: "t", key: "k" }, "GET /anonymous")).toStrictEqual({})
+  })
+
+  it("resolves each credential once per request", async () => {
+    let calls = 0
+    const bearer = (): string | undefined => {
+      calls++
+      return undefined
+    }
+    await headersFor({ bearer, key: "k" }, "GET /fallback")
+    expect(calls).toBe(1)
+  })
+
+  it("tries the next requirement when a credential function returns nothing", async () => {
+    expect(
+      await headersFor({ bearer: () => undefined as never, key: "k" }, "GET /fallback"),
+    ).toStrictEqual({
+      "x-key": "k",
+    })
+  })
+
+  it("sends what it is given where no security is declared", async () => {
+    expect(await headersFor({ bearer: "t", key: "k" }, "GET /undeclared")).toStrictEqual({
+      "authorization": "Bearer t",
+      "x-key": "k",
+    })
+  })
+})
+
+describe("bodies by media type", () => {
+  interface Api {
+    "POST /json": { body: { "text/json": { a: number } }; response: Record<never, never> }
+    "POST /form": {
+      body: { "application/x-www-form-urlencoded": string }
+      response: Record<never, never>
+    }
+    "POST /text": { body: { "text/*": string }; response: Record<never, never> }
+    "PUT /raw": { body: { "application/octet-stream": Blob }; response: Record<never, never> }
+  }
+  const requests: AdapterRequest[] = []
+  const api = createClient({
+    contract: contractFor<Api>({
+      "POST /json": { contentType: "text/json" },
+      "POST /form": { contentType: "application/x-www-form-urlencoded" },
+      "POST /text": { contentType: "text/*" },
+      "PUT /raw": { contentType: "application/octet-stream" },
+    }),
+    adapter: (request) => {
+      requests.push(request)
+      return Promise.resolve()
+    },
+  })
+
+  it("encodes each as the client declares, and passes streams through", async () => {
+    await api("POST /json", { body: { a: 1 } })
+    await api("POST /form", { body: "a=1&b=2" })
+    await api("POST /text", { body: "hi" })
+    const stream = chunks()
+    await api("PUT /raw", { body: stream as never })
+    expect(requests.map((r) => [r.body, r.headers["content-type"]])).toStrictEqual([
+      ['{"a":1}', "text/json"],
+      ["a=1&b=2", "application/x-www-form-urlencoded"],
+      ["hi", "text/plain"],
+      [stream, "application/octet-stream"],
+    ])
+    await expect(api("POST /text", { body: 1 as never })).rejects.toThrow("must be a string")
+    // JSON, form fields, and parameters have no room for bytes: a Blob there is
+    // refused, not sent as {}.
+    await expect(api("POST /json", { body: { a: new Blob([]) } as never })).rejects.toThrow(
+      "A Blob cannot be sent inside JSON",
+    )
+    const fields = createClient({
+      contract: contractFor<{
+        "POST /f": {
+          query: { q?: Blob }
+          body: { "application/x-www-form-urlencoded": { f?: Blob } }
+          response: Record<never, never>
+        }
+      }>({ "POST /f": { contentType: "application/x-www-form-urlencoded" } }),
+      adapter: () => Promise.resolve(),
+    })
+    await expect(fields("POST /f", { query: { q: new Blob([]) }, body: {} })).rejects.toThrow(
+      "A Blob cannot be sent as text",
+    )
+    await expect(fields("POST /f", { body: { f: new Blob([]) } })).rejects.toThrow(
+      "A Blob cannot be sent as text",
+    )
+    // Wherever the client writes JSON: object parts, content parameters, sequences, encoded fields.
+    const json = createClient({
+      contract: contractFor<{
+        "POST /m": {
+          query: { q?: object }
+          body: {
+            "multipart/form-data": { meta?: object }
+            "application/x-ndjson": object[]
+            "application/x-www-form-urlencoded": { f?: object }
+          }
+          response: Record<never, never>
+        }
+      }>({
+        "POST /m": {
+          query: { q: { contentType: "application/json" } },
+          encoding: {
+            "application/x-www-form-urlencoded": { f: { contentType: "application/json" } },
+          },
+        },
+      }),
+      adapter: () => Promise.resolve(),
+    })
+    const data = { data: new Blob([]) }
+    for (const call of [
+      () => json("POST /m", { contentType: "multipart/form-data", body: { meta: data } }),
+      () => json("POST /m", { query: { q: data }, contentType: "application/x-ndjson", body: [] }),
+      () => json("POST /m", { contentType: "application/x-ndjson", body: [data] }),
+      () =>
+        json("POST /m", { contentType: "application/x-www-form-urlencoded", body: { f: data } }),
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+      await expect(call()).rejects.toThrow("A Blob cannot be sent inside JSON")
+    }
+  })
+
+  it("streams request bodies through fetch in half duplex", async () => {
+    let init: (RequestInit & { duplex?: string }) | undefined
+    const adapter = fetchAdapter((_url, given) => {
+      init = given
+      return Promise.resolve(new Response(null, { status: 204 }))
+    })
+    await adapter({
+      method: "PUT",
+      url: "/raw",
+      headers: {},
+      body: new ReadableStream() as never,
+      options: undefined,
+    })
+    expect(init?.duplex).toBe("half")
+  })
+
+  it("lets a body bring its own content type, and finds declared headers in any case", async () => {
+    const { api: fixture, requests: sent } = recording({
+      headers: { "Content-Type": "application/json" },
+    })
+    await fixture("POST /upload", {
+      contentType: "multipart/form-data",
+      body: { file: new Blob([]) },
+    })
+    await fixture("GET /files/{names}", {
+      params: { names: ["a"] },
+      headers: { "x-range": { from: 5 } },
+    })
+    expect(sent[0].headers["content-type"]).toMatch(/^multipart\/form-data; boundary=/)
+    expect(sent[1].headers["x-range"]).toBe("from=5")
+  })
+})
+
+describe("decoding responses", () => {
+  const read = (body: BodyInit | null, type?: string): Promise<unknown> =>
+    fetchAdapter(
+      respond(
+        body,
+        type === undefined ? {} : { headers: { "content-type": type } },
+      ) as typeof fetch,
+    )({
+      method: "GET",
+      url: "/x",
+      headers: {},
+      body: undefined,
+      options: undefined,
+    })
+
+  it("decodes by the same media classes as the types", async () => {
+    expect(await read('{"a":1}', "text/json")).toStrictEqual({ a: 1 })
+    expect(await read("event: ping\n\ndata: x\n\n", "text/event-stream")).toStrictEqual([
+      { data: "x" },
+    ])
+    expect(await read("", "image/png")).toBeInstanceOf(Blob)
+    expect(await read(null)).toBeUndefined()
+  })
+})
+
+describe("option types", () => {
+  it("takes adapter options from the adapter, and credentials only for declared schemes", () => {
+    const check = (): void => {
+      const api = createClient({ contract, options: { cache: "no-store" } })
+      void api("GET /pets", { options: { keepalive: true } })
+      // @ts-expect-error options are the adapter's, checked rather than inferred
+      void createClient({ contract, options: { chache: "no-store" } })
+      // @ts-expect-error no security schemes, so no credentials
+      void createClient({ contract: contractFor<Endpoints>(), security: { token: "x" } })
+      const wildcard = createClient({
+        contract: contractFor<{
+          "PUT /x": { body: { "*/*": { a: number } }; response: Record<never, never> }
+        }>(),
+      })
+      // @ts-expect-error contentType names a declared media type
+      void wildcard("PUT /x", { contentType: "text/plain", body: { a: 1 } })
+    }
+    expect(check).toBeTypeOf("function")
+  })
+})

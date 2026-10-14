@@ -1,95 +1,72 @@
 import { readFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
-import { parse as parseYamlText } from "yaml"
-import { LoadError } from "./errors"
+import { parse as parseYaml } from "yaml"
 
-/**
- * Read OpenAPI JSON or YAML from a file path, file URL, or HTTP(S) URL.
- *
- * File extensions and HTTP content types select the parser. Unknown formats try
- * JSON before YAML. The parsed value stays `unknown` until normalization performs
- * minimal top-level and version validation.
- */
-export async function readSource(source: string | URL): Promise<unknown> {
-  const label = typeof source === "string" ? source : source.href
-  let raw: RawSource
+type TextFormat = "json" | "yaml" | "unknown"
 
-  try {
-    raw = await readText(source)
-  } catch (error) {
-    if (error instanceof LoadError) throw error
-    throw new LoadError(`Failed to read ${label}: ${errorMessage(error)}`, { cause: error })
-  }
+const FETCH_TIMEOUT = 30_000
 
-  return parseSource(raw, label)
+export interface FetchedDocument {
+  /** Retrieval URI after redirects, without fragment. */
+  uri: string
+  root: unknown
 }
 
-type SourceFormat = "json" | "yaml" | "unknown"
-
-interface RawSource {
-  text: string
-  format: SourceFormat
-}
-
-async function readText(source: string | URL): Promise<RawSource> {
-  if (source instanceof URL) {
-    if (source.protocol === "http:" || source.protocol === "https:") {
-      return fetchText(source)
-    }
-    if (source.protocol === "file:") {
-      const path = fileURLToPath(source)
-      return { text: await readFile(path, "utf8"), format: formatFromPath(path) }
-    }
-    throw new LoadError(
-      `Unsupported URL protocol: ${source.protocol} at ${source.href}. Supported: http:, https:, file:.`,
-    )
+/** Read and parse a JSON or YAML document from a `file:` or `http(s):` URI. */
+export async function fetchDocument(uri: string): Promise<FetchedDocument> {
+  const url = new URL(uri)
+  if (url.protocol === "file:") {
+    const path = fileURLToPath(url)
+    return { uri, root: parseText(await readFile(path, "utf8"), formatFromPath(path)) }
   }
-  if (source.startsWith("http://") || source.startsWith("https://")) {
-    return fetchText(new URL(source))
-  }
-  return { text: await readFile(source, "utf8"), format: formatFromPath(source) }
-}
-
-async function fetchText(url: URL): Promise<RawSource> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new LoadError(`Failed to fetch ${url.href}: ${response.status} ${response.statusText}`)
-  }
-  const contentType = (response.headers.get("content-type") ?? "").toLowerCase()
-  let format: SourceFormat
+  const response = await fetch(url, {
+    headers: { accept: "application/json, application/yaml;q=0.9, */*;q=0.5" },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT),
+  })
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`.trim())
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
+  let format: TextFormat = formatFromPath(url.pathname)
   if (contentType.includes("json")) format = "json"
-  else if (contentType.includes("yaml") || contentType.includes("yml")) format = "yaml"
-  else format = formatFromPath(url.pathname)
-  return { text: await response.text(), format }
+  else if (contentType.includes("yaml")) format = "yaml"
+  const finalUri = response.url === "" ? uri : withoutFragment(response.url)
+  return { uri: finalUri, root: parseText(await response.text(), format) }
 }
 
-function formatFromPath(path: string): SourceFormat {
-  const p = path.toLowerCase()
-  if (p.endsWith(".json")) return "json"
-  if (p.endsWith(".yaml") || p.endsWith(".yml")) return "yaml"
+export function parseText(text: string, format: TextFormat): unknown {
+  if (format === "json") return JSON.parse(text)
+  if (format !== "yaml") {
+    try {
+      return JSON.parse(text)
+    } catch {
+      // not JSON: read as YAML
+    }
+  }
+  // YAML 1.1 merge keys (`<<: *common`) are common in OpenAPI documents.
+  return assertAcyclic(parseYaml(text, { merge: true }))
+}
+
+/** YAML aliases (and in-memory objects) can form cycles, which no JSON document has. */
+export function assertAcyclic(value: unknown): unknown {
+  const stack = new Set<object>()
+  const visit = (node: unknown): void => {
+    if (typeof node !== "object" || node === null) return
+    if (stack.has(node)) throw new Error("the document refers to itself (a recursive YAML alias?)")
+    stack.add(node)
+    for (const child of Object.values(node)) visit(child)
+    stack.delete(node)
+  }
+  visit(value)
+  return value
+}
+
+function formatFromPath(path: string): TextFormat {
+  const lower = path.toLowerCase()
+  if (lower.endsWith(".json")) return "json"
+  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "yaml"
   return "unknown"
 }
 
-function parseSource({ text, format }: RawSource, label: string): unknown {
-  if (format !== "unknown") return parseAs(format, text, label)
-  try {
-    return parseAs("json", text, label)
-  } catch {
-    return parseAs("yaml", text, label)
-  }
-}
-
-function parseAs(format: "json" | "yaml", text: string, label: string): unknown {
-  try {
-    return format === "json" ? JSON.parse(text) : parseYamlText(text)
-  } catch (error) {
-    throw new LoadError(
-      `Failed to parse ${label} as ${format.toUpperCase()}: ${errorMessage(error)}`,
-      { cause: error },
-    )
-  }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+export function withoutFragment(uri: string): string {
+  const hash = uri.indexOf("#")
+  return hash === -1 ? uri : uri.slice(0, hash)
 }

@@ -1,4 +1,15 @@
 {
   "ignorePaths": ["node_modules", "dist"],
-  "words": ["bumpp", "changelogithub", "citty", "ofetch", "oxfmt", "oxlint", "unvalidated"]
+  "words": [
+    "bumpp",
+    "changelogithub",
+    "citty",
+    "jsonl",
+    "ndjson",
+    "oxfmt",
+    "oxlint",
+    "querystring",
+    "tsdown",
+    "unvalidated"
+  ]
 }

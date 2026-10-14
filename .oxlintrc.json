@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["tests/__snapshots__"],
   "plugins": ["oxc", "eslint", "import", "typescript", "unicorn", "jsdoc", "vitest"],
   "categories": {
     "correctness": "error",
@@ -140,6 +141,7 @@
       "rules": {
         "typescript/no-explicit-any": "off",
         "unicorn/no-useless-undefined": "off",
+        "unicorn/no-thenable": "off",
         "vitest/require-to-throw-message": "off"
       }
     }

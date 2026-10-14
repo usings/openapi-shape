@@ -1,0 +1,168 @@
+openapi: 3.2.0
+info:
+  title: Client fixture
+  version: "1"
+servers:
+  - url: https://{region}.api.test/v1
+    variables:
+      region: { default: eu }
+security:
+  - bearer: []
+paths:
+  /pets:
+    get:
+      parameters:
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: tags, in: query, schema: { type: array, items: { type: string } } }
+      responses:
+        "200":
+          description: Pets
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Pet" } } } }
+        default:
+          description: Error
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    post:
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/NewPet" } } }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/Pet" } } }
+  /pets/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    get:
+      parameters:
+        - { name: X-Trace, in: header, schema: { type: string } }
+        - { name: session, in: cookie, schema: { type: string } }
+      responses:
+        "200":
+          description: Pet
+          content: { application/json: { schema: { $ref: "#/components/schemas/Pet" } } }
+        "404":
+          description: Missing
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    patch:
+      requestBody:
+        content: { application/merge-patch+json: { schema: { $ref: "#/components/schemas/NewPet" } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/Pet" } } }
+    delete:
+      responses:
+        "204": { description: Deleted }
+  /search:
+    get:
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+      responses:
+        "2XX":
+          description: Results
+          content: { text/plain: { schema: { type: string } } }
+  /upload:
+    post:
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {}
+                name: { type: string }
+          application/octet-stream: {}
+      responses:
+        "200":
+          description: Stored
+          content: { application/json: { schema: { type: object, properties: { id: { type: string } } } } }
+  /token:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, required: [grant_type], properties: { grant_type: { type: string } } }
+      responses:
+        "200":
+          description: Token
+          content: { application/json: { schema: { type: string } } }
+  /health:
+    get:
+      security: []
+  /charges:
+    get:
+      security:
+        - key: []
+      parameters:
+        - { name: created, in: query, style: deepObject, explode: true, schema: { type: object, properties: { gte: { type: integer } } } }
+        - { name: expand, in: query, style: deepObject, explode: true, schema: { type: array, items: { type: string } } }
+        - { name: ids, in: query, style: pipeDelimited, schema: { type: array, items: { type: string } } }
+      responses:
+        "200": { description: Charges, content: { application/json: { schema: { type: array, items: { type: string } } } } }
+    post:
+      security:
+        - basic: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount: { type: integer }
+                metadata: { type: object, additionalProperties: { type: string } }
+                tags: { type: array, items: { type: string } }
+                filter: { type: object, properties: { live: { type: boolean } } }
+            encoding:
+              metadata: { style: deepObject, explode: true }
+              tags: { style: deepObject, explode: true }
+              filter: { contentType: application/json }
+      responses:
+        "200": { description: Charge, content: { application/json: { schema: { type: string } } } }
+  /files/{names}:
+    servers:
+      - url: https://files.api.test
+    get:
+      parameters:
+        - { name: names, in: path, required: true, style: label, schema: { type: array, items: { type: string } } }
+        - { name: X-Range, in: header, schema: { type: object, properties: { from: { type: integer } } }, explode: true }
+      responses:
+        "200": { description: File, content: { application/octet-stream: {} } }
+  /events:
+    get:
+      responses:
+        "200":
+          description: Events
+          content:
+            text/event-stream:
+              itemSchema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: string }
+                  event: { type: string }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+    key: { type: apiKey, in: query, name: api_key }
+    basic: { type: http, scheme: basic }
+  schemas:
+    Pet:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+    NewPet:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    Error:
+      type: object
+      properties:
+        message: { type: string }

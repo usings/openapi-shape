@@ -1,401 +1,115 @@
+import { createServer } from "node:http"
+import type { AddressInfo } from "node:net"
 import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
-import { LoadError } from "../src/core/openapi/errors"
-import { generate } from "../src/index"
-import { expectPassesTsc } from "./_helpers/tsc"
+import { GenerateError, generate } from "../src/index"
+import { codes, gen, oas } from "./helpers/generate"
+import { withFiles } from "./helpers/tmp"
 
-describe("generate (integration)", () => {
-  it("generates correct output for petstore fixture", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/petstore.json"))
-    expect(code).toMatchSnapshot()
-  })
+const FIXTURES = join(import.meta.dirname, "fixtures/oai")
 
-  it("generates correct output for edge-cases fixture", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/edge-cases.json"))
-    expect(code).toMatchSnapshot()
-  })
+/** Diagnostic codes of a failed generation. */
+async function failureCodes(input: string | object): Promise<string[]> {
+  const failure: unknown = await generate(input).catch((error: unknown) => error)
+  return codes((failure as GenerateError).diagnostics)
+}
 
-  it("generated code is valid as .d.ts and passes tsc --noEmit", async () => {
-    const [petstoreCode, edgeCasesCode] = await Promise.all([
-      generate(join(import.meta.dirname, "fixtures/petstore.json")),
-      generate(join(import.meta.dirname, "fixtures/edge-cases.json")),
+describe("generate", () => {
+  it("accepts paths, file URLs, and parsed documents alike", async () => {
+    const path = join(FIXTURES, "v3.0/petstore.yaml")
+    const [fromPath, fromUrl, fromJson] = await Promise.all([
+      generate(path),
+      generate(pathToFileURL(path)),
+      generate(join(FIXTURES, "v3.0/petstore.json")),
     ])
-    await expectPassesTsc([petstoreCode, edgeCasesCode])
+    expect(fromUrl.code).toBe(fromPath.code)
+    expect(fromJson.code).toBe(fromPath.code)
   })
 
-  it("generates correct output for refs-and-edges fixture", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/refs-and-edges.json"))
-    expect(code).toMatchSnapshot()
-  })
-
-  it("refs-and-edges fixture is valid as .d.ts and passes tsc --noEmit", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/refs-and-edges.json"))
-    await expectPassesTsc([code])
-  })
-
-  it("YAML source generates identical output to the JSON source", async () => {
-    const [fromYaml, fromJson] = await Promise.all([
-      generate(join(import.meta.dirname, "fixtures/petstore.yaml")),
-      generate(join(import.meta.dirname, "fixtures/petstore.json")),
-    ])
-    expect(fromYaml).toBe(fromJson)
-  })
-
-  it("generate(doc) accepts unresolved refs and resolves them", () => {
-    const doc = {
-      components: {
-        parameters: { P: { name: "p", in: "query", schema: { type: "string" } } },
-      },
-      paths: {
-        "/x": {
-          get: {
-            parameters: [{ $ref: "#/components/parameters/P" }],
-            responses: {
-              "200": { content: { "application/json": { schema: { type: "string" } } } },
-            },
-          },
-        },
-      },
+  it("reads JSON and YAML over HTTP by content type", async () => {
+    const server = createServer((request, response) => {
+      if (request.url === "/spec") {
+        response.setHeader("content-type", "application/yaml")
+        response.end(
+          "openapi: 3.1.0\ninfo: { title: T, version: '1' }\ncomponents:\n  schemas:\n    A: { $ref: 'a.json' }\n",
+        )
+      } else if (request.url === "/a.json") {
+        response.setHeader("content-type", "application/json")
+        response.end('{"type":"integer"}')
+      } else {
+        response.statusCode = 404
+        response.end()
+      }
+    })
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve)
+    })
+    try {
+      const { port } = server.address() as AddressInfo
+      const { code } = await generate(`http://127.0.0.1:${port}/spec`)
+      expect(code).toContain("export type A = number")
+      await expect(generate(`http://127.0.0.1:${port}/missing`)).rejects.toThrow("HTTP 404")
+    } finally {
+      server.close()
     }
-    const code = generate(doc)
-    expect(code).toContain("query: { p?: string }")
   })
 
-  it("decodes and validates local schema refs", () => {
-    const code = generate({
-      components: {
-        schemas: {
-          "User/Profile": { type: "object", properties: { id: { type: "string" } } },
-          "Result": { $ref: "#/components/schemas/User~1Profile" },
-        },
-      },
+  it("is deterministic", async () => {
+    const path = join(FIXTURES, "v3.0/petstore-expanded.yaml")
+    const [first, second] = await Promise.all([generate(path), generate(path)])
+    expect(first.code).toBe(second.code)
+  })
+
+  it.each([
+    [{ swagger: "2.0" }, "unsupported-version #/swagger"],
+    [{ info: {} }, "unsupported-version #/openapi"],
+    [{ openapi: "3.3.0" }, "unsupported-version #/openapi"],
+    [{ openapi: 3.1 }, "unsupported-version #/openapi"],
+  ])("rejects %j", async (doc, expected) => {
+    const failure: unknown = await generate(doc).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(GenerateError)
+    expect(codes((failure as GenerateError).diagnostics)).toStrictEqual([expected])
+  })
+
+  it("rejects documents that are not objects or cannot be read or parsed", async () => {
+    expect(await failureCodes([])).toStrictEqual(["invalid-document #"])
+    expect(await failureCodes("/does/not/exist.yaml")).toStrictEqual(["read-failed #"])
+    await withFiles({ "bad.yaml": "openapi: [unclosed" }, async (dir) => {
+      expect(await failureCodes(join(dir, "bad.yaml"))).toStrictEqual(["read-failed #"])
     })
-    expect(code).toContain("export type Result = User_Profile")
-    expect(code).toContain("export interface User_Profile")
   })
 
-  it("rejects missing, non-component, and external schema refs", () => {
-    expect(() =>
-      generate({ components: { schemas: { Result: { $ref: "#/components/schemas/Missing" } } } }),
-    ).toThrow(LoadError)
-    expect(() =>
-      generate({ components: { schemas: { Result: { $ref: "#/$defs/Result" } } } }),
-    ).toThrow(LoadError)
-    expect(() =>
-      generate({ components: { schemas: { Result: { $ref: "./models.yaml#/Pet" } } } }),
-    ).toThrow(LoadError)
-  })
-
-  it("maps OpenAPI 3.1 boolean schemas to unknown and never", async () => {
-    const code = generate({
-      openapi: "3.1.0",
-      components: { schemas: { Anything: true, Nothing: false } },
-    })
-    expect(code).toContain("export type Anything = unknown")
-    expect(code).toContain("export type Nothing = never")
-    await expectPassesTsc([code])
-  })
-
-  it("generate(doc) injects discriminator literals into allOf branches", () => {
-    const code = generate({
-      components: {
-        schemas: {
-          BaseAnimal: {
-            type: "object",
-            properties: { id: { type: "string" } },
-            required: ["id"],
-          },
-          Cat: {
-            allOf: [
-              { $ref: "#/components/schemas/BaseAnimal" },
-              { type: "object", properties: { purr: { type: "string" } } },
-            ],
-          },
-          Animal: {
-            oneOf: [{ $ref: "#/components/schemas/Cat" }],
-            discriminator: {
-              propertyName: "type",
-              mapping: { cat: "Cat" },
-            },
-          },
-        },
-      },
-    })
-    expect(code).toContain(
-      'export type Cat = BaseAnimal & {\n    purr?: string\n    type: "cat"\n  }',
+  it("reads unknown JSON Schema dialects as 2020-12, with a warning", async () => {
+    const result = await generate(
+      oas("3.1", {
+        jsonSchemaDialect: "http://json-schema.org/draft-07/schema#",
+        components: { schemas: { A: { $schema: "https://example.com/custom", type: "string" } } },
+      }),
     )
-    expect(code).toContain("export type Animal = Cat")
-  })
-
-  it("generate(doc) supports inline discriminator branches", () => {
-    const code = generate({
-      components: {
-        schemas: {
-          Animal: {
-            oneOf: [
-              {
-                type: "object",
-                properties: { type: { const: "cat" }, purr: { type: "string" } },
-              },
-              {
-                type: "object",
-                properties: { type: { enum: ["dog"] }, bark: { type: "string" } },
-              },
-            ],
-            discriminator: { propertyName: "type" },
-          },
-        },
-      },
-    })
-    expect(code).toContain('type: "cat"')
-    expect(code).toContain('type: "dog"')
-  })
-
-  it("generate(doc) emits callback types from a component ref", async () => {
-    const code = generate({
-      components: {
-        callbacks: {
-          OnEvent: {
-            "{$request.body#/callbackUrl}": {
-              post: {
-                requestBody: {
-                  required: true,
-                  content: { "application/json": { schema: { type: "string" } } },
-                },
-                responses: { "204": { description: "accepted" } },
-              },
-            },
-          },
-        },
-      },
-      paths: {
-        "/subscribe": {
-          post: {
-            callbacks: {
-              onEvent: { $ref: "#/components/callbacks/OnEvent" },
-            },
-            responses: { "202": { description: "subscribed" } },
-          },
-        },
-      },
-    })
-    expect(code).toContain("export interface Callbacks")
-    expect(code).toContain('"POST /subscribe > onEvent > POST {$request.body#/callbackUrl}"')
-    expect(code).toContain("payload: string")
-    expect(code).toContain('reply: { "204": void }')
-    await expectPassesTsc([code])
-  })
-
-  it("generates correct output for discriminator fixture", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/discriminator.json"))
-    expect(code).toMatchSnapshot()
-  })
-
-  it("discriminator fixture is valid as .d.ts and passes tsc --noEmit", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/discriminator.json"))
-    await expectPassesTsc([code])
-  })
-
-  it("generates correct output for 3.0.x fixture", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/3.0.x.json"))
-    expect(code).toMatchSnapshot()
-  })
-
-  it("generates correct output for 3.1.x fixture", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/3.1.x.json"))
-    expect(code).toMatchSnapshot()
-  })
-
-  it("3.0.x and 3.1.x fixtures are valid as .d.ts and pass tsc --noEmit", async () => {
-    const [v30, v31] = await Promise.all([
-      generate(join(import.meta.dirname, "fixtures/3.0.x.json")),
-      generate(join(import.meta.dirname, "fixtures/3.1.x.json")),
+    expect(codes(result.diagnostics)).toStrictEqual([
+      "unknown-dialect #/jsonSchemaDialect",
+      "unknown-dialect #/components/schemas/A/$schema",
     ])
-    await expectPassesTsc([v30, v31])
   })
 
-  it("formats maps date-time to Date in petstore", async () => {
-    const code = await generate(join(import.meta.dirname, "fixtures/petstore.json"), {
-      formats: { "date-time": "Date" },
-    })
-    expect(code).toMatchSnapshot()
-  })
-
-  it("headers: false (default) omits header parameters from endpoint type", () => {
-    const code = generate({
-      paths: {
-        "/x": {
-          get: {
-            parameters: [
-              { name: "X-API-Key", in: "header", required: true, schema: { type: "string" } },
-            ],
-            responses: { "200": { description: "ok" } },
-          },
-        },
-      },
-    })
-    expect(code).not.toContain("headers:")
-    expect(code).not.toContain("X-API-Key")
-  })
-
-  it("headers: true emits typed headers field per endpoint", () => {
-    const code = generate(
-      {
-        paths: {
-          "/secure": {
-            get: {
-              parameters: [
-                { name: "X-API-Key", in: "header", required: true, schema: { type: "string" } },
-                { name: "X-Trace-Id", in: "header", schema: { type: "string" } },
-              ],
-              responses: { "200": { description: "ok" } },
-            },
-          },
-          "/public": {
-            get: { responses: { "200": { description: "ok" } } },
-          },
-        },
-      },
-      { headers: true },
+  it("accepts every 3.x patch version", async () => {
+    const versions = ["3.0.0", "3.0.4", "3.1.0", "3.1.2", "3.2.0", "3.2.1"]
+    const outputs = await Promise.all(
+      versions.map((openapi) => gen({ openapi, info: { title: "T", version: "1" } })),
     )
-    expect(code).toContain('headers: { "X-API-Key": string; "X-Trace-Id"?: string }')
-    expect(code).toContain("headers: void")
+    for (const [i, openapi] of versions.entries())
+      expect(outputs[i]).toContain(`OpenAPI ${openapi} document`)
   })
 
-  it("3.0 nullable enum keeps literal types", () => {
-    const code = generate({
-      openapi: "3.0.3",
-      components: {
-        schemas: { Color: { type: "string", enum: ["red", "blue"], nullable: true } },
-      },
-    })
-    expect(code).toContain('export type Color = "red" | "blue" | null')
-  })
-
-  it("3.0 nullable object keeps null in the alias", () => {
-    const code = generate({
-      openapi: "3.0.3",
-      components: {
-        schemas: {
-          Box: { type: "object", nullable: true, properties: { a: { type: "string" } } },
-        },
-      },
-    })
-    expect(code).toContain("export type Box = {\n    a?: string\n  } | null")
-  })
-
-  it("3.0 nullable composition keeps the composition and null branches", () => {
-    const code = generate({
-      openapi: "3.0.3",
-      components: {
-        schemas: {
-          Base: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
-          Ext: {
-            type: "object",
-            nullable: true,
-            allOf: [{ $ref: "#/components/schemas/Base" }],
-            properties: { extra: { type: "string" } },
-            required: ["extra"],
-          },
-        },
-      },
-    })
-    expect(code).toContain("export type Ext = (Base & {\n    extra: string\n  }) | null")
-  })
-
-  it("allOf with sibling properties keeps both", () => {
-    const code = generate({
-      components: {
-        schemas: {
-          Base: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
-          Ext: {
-            allOf: [{ $ref: "#/components/schemas/Base" }],
-            properties: { extra: { type: "string" } },
-            required: ["extra"],
-          },
-        },
-      },
-    })
-    expect(code).toContain("export type Ext = Base & {\n    extra: string\n  }")
-  })
-
-  it("object schema with explicit type and allOf keeps both as an alias", () => {
-    const code = generate({
-      components: {
-        schemas: {
-          Base: { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
-          Ext: {
-            type: "object",
-            allOf: [{ $ref: "#/components/schemas/Base" }],
-            properties: { extra: { type: "string" } },
-            required: ["extra"],
-          },
-        },
-      },
-    })
-    expect(code).toContain("export type Ext = Base & {\n    extra: string\n  }")
-  })
-
-  it("conflicting index signature is widened and passes tsc", async () => {
-    const code = generate({
-      components: {
-        schemas: {
-          Mixed: {
-            type: "object",
-            properties: { id: { type: "number" } },
-            additionalProperties: { type: "string" },
-          },
-        },
-      },
-    })
-    expect(code).toContain("[key: string]: string | number | undefined")
-    await expectPassesTsc([code])
-  })
-
-  it("3.1 operation without responses is allowed", () => {
-    const code = generate({
-      openapi: "3.1.0",
-      paths: { "/ping": { get: { summary: "no responses" } } },
-    })
-    expect(code).toContain('"GET /ping"')
-    expect(code).toContain("response: unknown")
-  })
-
-  it("response field is a status-keyed map of every declared response", () => {
-    const code = generate({
-      paths: {
-        "/x": {
-          get: {
-            responses: {
-              "200": { content: { "application/json": { schema: { type: "string" } } } },
-              "400": { content: { "application/json": { schema: { type: "string" } } } },
-              "default": { content: { "application/json": { schema: { type: "string" } } } },
-            },
-          },
-        },
-      },
-    })
-    expect(code).toContain('response: { "200": string; "400": string; "default": string }')
-  })
-
-  it("renders documentation for nested inline object properties", () => {
-    const code = generate({
-      components: {
-        schemas: {
-          Outer: {
-            type: "object",
-            properties: {
-              inner: {
-                type: "object",
-                properties: {
-                  id: { type: "string", description: "Inner identifier." },
-                },
-              },
-            },
-          },
-        },
-      },
-    })
-    expect(code).toContain("/** @description Inner identifier. */")
+  it("writes a header from the document's info", async () => {
+    const code = await gen(
+      oas("3.1", {
+        info: { title: "  Pets\nAPI ", version: "2.0", description: "Line 1\r\nLine 2 */" },
+      }),
+    )
+    expect(code.split("\n\n")[0]).toBe(
+      "// Pets API 2.0\n// Line 1\n// Line 2 */\n//\n// Generated by openapi-shape from an OpenAPI 3.1.2 document. Do not edit.",
+    )
   })
 })

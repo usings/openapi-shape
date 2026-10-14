@@ -1,17 +1,18 @@
 {
   "name": "openapi-shape",
   "version": "0.12.0",
-  "description": "Generate TypeScript API contract types from OpenAPI 3.0/3.1 JSON or YAML",
+  "description": "TypeScript types and a dependency-free typed client for OpenAPI 3.0, 3.1, and 3.2 APIs, generated as one module",
   "keywords": [
     "api-client",
     "codegen",
     "dts",
+    "json-schema",
     "openapi",
     "openapi-typescript",
     "openapi3",
-    "schema-to-typescript",
+    "openapi31",
+    "openapi32",
     "typed-api-client",
-    "types",
     "typescript"
   ],
   "license": "MIT",
@@ -28,7 +29,6 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
-    "./cli": "./dist/cli.mjs",
     "./client": "./dist/client.mjs",
     "./package.json": "./package.json"
   },

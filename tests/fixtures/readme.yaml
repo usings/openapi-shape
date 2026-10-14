@@ -1,0 +1,104 @@
+# The API behind the examples in README.md (see tests/readme.test.ts).
+openapi: 3.2.0
+info:
+  title: Petstore
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+security:
+  - bearer: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List pets
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, maximum: 100 } }
+      responses:
+        "200":
+          description: A page of pets
+          headers:
+            x-next: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Pet" } }
+        default:
+          description: Unexpected error
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: "#/components/schemas/NewPet" } }
+      responses:
+        "201":
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Pet" } }
+  /pets/{petId}:
+    parameters:
+      - { name: petId, in: path, required: true, schema: { type: integer } }
+    get:
+      responses:
+        "200":
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Pet" } }
+        "404":
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+    patch:
+      requestBody:
+        content:
+          application/merge-patch+json: { schema: { $ref: "#/components/schemas/NewPet" } }
+      responses:
+        "200":
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Pet" } }
+  /upload:
+    post:
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {}
+                name: { type: string }
+      responses:
+        "204": {}
+webhooks:
+  pet.created:
+    post:
+      parameters:
+        - { name: x-signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: "#/components/schemas/Pet" } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { type: object, required: [received], properties: { received: { type: integer } } }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  schemas:
+    Pet:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        born: { type: string, format: date-time }
+    NewPet:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    Error:
+      type: object
+      properties:
+        message: { type: string }
