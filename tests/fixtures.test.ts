@@ -27,3 +27,10 @@ describe("OpenAPI Initiative examples", () => {
     expect(await typecheck(files)).toBe("")
   })
 })
+
+// The module the client runtime and type tests use: the generator's real output.
+it("generates the client fixture", async () => {
+  const { code, diagnostics } = await generate(join(import.meta.dirname, "fixtures/client.yaml"))
+  expect(diagnostics).toStrictEqual([])
+  await expect(code).toMatchFileSnapshot("__snapshots__/client-api.ts")
+})

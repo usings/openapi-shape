@@ -1,6 +1,6 @@
-import { buildContract } from "./core/contract/build"
-import { renderDeclarations } from "./core/declarations/render"
-import { DocumentSet } from "./core/openapi/documents"
+import { buildModel } from "./core/build"
+import { loadDocuments } from "./core/load/documents"
+import { renderModule } from "./core/render/module"
 import type { Diagnostic } from "./core/shared/diagnostics"
 import { Diagnostics } from "./core/shared/diagnostics"
 
@@ -8,31 +8,16 @@ export type { Diagnostic, DiagnosticCode } from "./core/shared/diagnostics"
 
 export interface GenerateOptions {
   /**
-   * Map OpenAPI `format` values to TypeScript types, for example
-   * `{ "date-time": "Date", "int64": "bigint" }`. Applies to strings and
-   * numbers; `binary` sets the type of raw binary content (default `Blob`).
-   * Values are emitted verbatim.
-   */
-  formats?: Record<string, string>
-  /**
    * Where an in-memory document lives (file path or URL), so its relative
    * `$ref`s can be resolved. Ignored when `input` is a path or URL.
    */
   base?: string | URL
-  /**
-   * Emit types only, for a `.d.ts` file: no `Security` or runtime `contract`, so
-   * the module cannot drive `openapi-shape/client`.
-   */
-  declarations?: boolean
 }
 
 export interface GenerateResult {
-  /** The TypeScript module: the types, and `Security` and the runtime `contract` unless `declarations` is set. */
+  /** The TypeScript module, which imports nothing: the types, and the runtime `contract`. */
   code: string
-  /**
-   * Warnings: where the output departs from the letter of the specification,
-   * to follow what the API does (`lenient-*`), or ignores or approximates something.
-   */
+  /** Warnings: parts of the description the output cannot apply, or that are not valid. */
   diagnostics: Diagnostic[]
 }
 
@@ -78,23 +63,16 @@ export async function generate(
   }
 }
 
+/** Load the description, build its model, and render the module. */
 async function run(
   input: string | URL | object,
   options: GenerateOptions,
 ): Promise<GenerateResult> {
-  const opening = new Diagnostics()
-  const docs = await DocumentSet.open(input, options.base, opening)
-  if (docs === undefined) throw new GenerateError(opening.list)
-
-  for (;;) {
-    const diagnostics = new Diagnostics()
-    const contract = buildContract(docs, diagnostics)
-    if (docs.hasPending) {
-      // oxlint-disable-next-line no-await-in-loop -- each round needs the documents the previous one asked for
-      if (await docs.loadPending()) continue
-      diagnostics.error("unresolved-ref", "References nest too deeply across documents", "#")
-    }
-    if (diagnostics.hasErrors) throw new GenerateError(diagnostics.list)
-    return { code: renderDeclarations(contract, options), diagnostics: diagnostics.list }
-  }
+  const loading = new Diagnostics()
+  const documents = await loadDocuments(input, options.base, loading)
+  if (documents === undefined) throw new GenerateError(loading.list)
+  const { model, diagnostics } = await buildModel(documents)
+  if (diagnostics.hasErrors) throw new GenerateError(diagnostics.list)
+  const code = renderModule(model)
+  return { code, diagnostics: diagnostics.list }
 }

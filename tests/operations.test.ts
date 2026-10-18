@@ -1,6 +1,13 @@
+import { readdirSync } from "node:fs"
+import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
+import type { Contract } from "../src/client"
+import type { Encoding, EndpointContract } from "../src/client/contract"
+import { generate } from "../src/index"
 import { codes, entry, gen, genResult, oas } from "./helpers/generate"
-import { expectPassesTsc } from "./helpers/tsc"
+import { withFiles } from "./helpers/tmp"
+import { expectPassesTsc, typecheck } from "./helpers/tsc"
 
 const ok = { "200": { description: "OK" } }
 const json = (schema: unknown) => ({ content: { "application/json": { schema } } })
@@ -41,11 +48,11 @@ describe("methods", () => {
     expect(result.code).toContain('"COPY /r": {')
     expect(result.code).not.toContain('"POST /r"')
     expect(codes(result.diagnostics)).toStrictEqual([
-      "ignored-keyword #/paths/~1r/additionalOperations/POST",
+      "ignored-field #/paths/~1r/additionalOperations/POST",
     ])
   })
 
-  it("applies 3.2 fields in earlier versions, and says so", async () => {
+  it("applies 3.2 fields in earlier versions too", async () => {
     const result = await genResult(
       oas("3.1", {
         paths: {
@@ -55,10 +62,7 @@ describe("methods", () => {
     )
     expect(result.code).toContain('"QUERY /r"')
     expect(result.code).toContain('"COPY /r"')
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "lenient-keyword #/paths/~1r/query",
-      "lenient-keyword #/paths/~1r/additionalOperations",
-    ])
+    expect(result.diagnostics).toStrictEqual([])
   })
 
   it("documents operations", async () => {
@@ -114,9 +118,9 @@ describe("parameters", () => {
         '    "X-Trace"?: string',
         "  }",
         "  cookies: { session: string }",
-        "  response: {",
+        "  responses: {",
         "    /** OK */",
-        '    "200": undefined',
+        '    "200": {}',
         "  }",
         "}",
       ].join("\n"),
@@ -253,7 +257,6 @@ describe("parameters", () => {
     expect(codes(result.diagnostics)).toStrictEqual([
       "invalid-parameter #/paths/~1r~1{id}/get/parameters/1/in",
       "invalid-parameter #/paths/~1r~1{id}/get/parameters/2",
-      "lenient-keyword #/paths/~1r~1{id}/get/parameters/5/in",
       "invalid-parameter #/paths/~1r~1{id}/get/parameters/0",
       "invalid-parameter #/paths/~1r~1{id}/get/parameters/3",
       "invalid-parameter #/paths/~1r~1{id}/get/parameters/4",
@@ -328,13 +331,11 @@ describe("request bodies", () => {
     )
   })
 
-  it("keeps request bodies on GET, HEAD, and DELETE, warning only for 3.0", async () => {
+  it("keeps request bodies on GET, HEAD, and DELETE, also in 3.0, which says to ignore them", async () => {
     const paths = { "/r": { delete: { requestBody: json({ type: "string" }), responses: ok } } }
     const result30 = await genResult(oas("3.0", { paths }))
     expect(entry(result30.code, "DELETE /r")).toContain('body?: { "application/json": string }')
-    expect(codes(result30.diagnostics)).toStrictEqual([
-      "lenient-request-body #/paths/~1r/delete/requestBody",
-    ])
+    expect(result30.diagnostics).toStrictEqual([])
     const result31 = await genResult(oas("3.1", { paths }))
     expect(entry(result31.code, "DELETE /r")).toContain("body?:")
     expect(result31.diagnostics).toStrictEqual([])
@@ -342,7 +343,7 @@ describe("request bodies", () => {
 })
 
 describe("responses", () => {
-  it("keeps status keys, unions media types, and marks empty responses undefined", async () => {
+  it("keeps status keys and media types, and leaves out content that is not declared", async () => {
     const result = await genResult(
       oas("3.1", {
         paths: {
@@ -366,22 +367,21 @@ describe("responses", () => {
     expect(entry(result.code, "GET /r")).toBe(
       [
         "{",
-        "  response: {",
+        "  responses: {",
         "    /** Pet */",
-        '    "200": { [key: string]: unknown } | string',
+        '    "200": { content: { "application/json": { [key: string]: unknown }; "text/csv": string } }',
         "    /** Nothing */",
-        '    "204": undefined',
+        '    "204": {}',
         "    /** Client error */",
-        '    "4XX": string',
+        '    "4XX": { content: { "application/json": string } }',
         "    /** Other */",
-        '    "default": undefined',
+        '    "default": {}',
         "  }",
         "}",
       ].join("\n"),
     )
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "invalid-status-code #/paths/~1r/get/responses/4xx",
-    ])
+    // A lowercase range means the same range.
+    expect(result.diagnostics).toStrictEqual([])
   })
 
   it("merges status keys that differ only in case", async () => {
@@ -392,14 +392,22 @@ describe("responses", () => {
             get: {
               responses: {
                 "2xx": { description: "a", ...json({ type: "string" }) },
-                "2XX": { description: "b", ...json({ type: "number" }) },
+                "2XX": {
+                  description: "b",
+                  content: {
+                    "application/json": { schema: { type: "number" } },
+                    "text/plain": {},
+                  },
+                },
               },
             },
           },
         },
       }),
     )
-    expect(entry(result.code, "GET /r")).toContain('"2XX": string | number')
+    expect(entry(result.code, "GET /r")).toContain(
+      '"2XX": { content: { "application/json": string | number; "text/plain": string } }',
+    )
     await expectPassesTsc(result.code)
   })
 
@@ -426,19 +434,19 @@ describe("responses", () => {
       }),
     )
     expect(entry(code, "GET /r")).toContain(
-      '  responseHeaders: {\n    "200": {\n      "X-Rate-Limit": number\n      /** Pagination */\n      Link?: string\n    }\n  }',
+      '    "200": {\n      headers: {\n        "X-Rate-Limit": number\n        /** Pagination */\n        Link?: string\n      }\n    }',
     )
   })
 
   it("leaves the response map empty when no responses are declared", async () => {
     expect(entry(await gen(oas("3.1", { paths: { "/r": { get: {} } } })), "GET /r")).toBe(
-      "{\n  response: {}\n}",
+      "{\n  responses: {}\n}",
     )
   })
 })
 
 describe("webhooks and callbacks", () => {
-  it("emits webhooks, applying them in 3.0 with a warning", async () => {
+  it("emits webhooks, also in 3.0, which lacks them", async () => {
     const webhooks = {
       "pet.created": { post: { requestBody: json({ type: "string" }), responses: ok } },
     }
@@ -448,7 +456,7 @@ describe("webhooks and callbacks", () => {
     )
     const result30 = await genResult(oas("3.0", { webhooks }))
     expect(result30.code).toContain('"POST pet.created"')
-    expect(codes(result30.diagnostics)).toStrictEqual(["lenient-keyword #/webhooks"])
+    expect(result30.diagnostics).toStrictEqual([])
   })
 
   it("types form and multipart content by its schema in both directions", async () => {
@@ -480,7 +488,7 @@ describe("webhooks and callbacks", () => {
     // Your handler reads the request and writes the response, as their schemas say.
     const expected = [
       'body: { "application/json": { count?: number }; "application/x-www-form-urlencoded": { count?: number } }',
-      'response: {\n    /** OK */\n    "200": { count?: number }\n  }',
+      'responses: {\n    /** OK */\n    "200": { content: { "multipart/form-data": { count?: number } } }\n  }',
     ]
     for (const key of [
       "POST pet.created",
@@ -556,5 +564,336 @@ describe("path items", () => {
     expect(entry(result.code, "GET /r")).toContain('"201"')
     expect(result.code).toContain('"PUT /r"')
     expect(codes(result.diagnostics)).toStrictEqual(["path-item-conflict #/paths/~1r/get"])
+  })
+})
+
+/** The `contract` a generated module exports, imported as a consumer would. */
+function contractOf(code: string): Promise<Contract<Record<string, unknown>>> {
+  return withFiles({ "api.ts": code }, async (dir) => {
+    const module = (await import(pathToFileURL(join(dir, "api.ts")).href)) as {
+      contract: Contract<Record<string, unknown>>
+    }
+    return module.contract
+  })
+}
+
+/** The fields of the contract format, as the client's types define them, every one listed. */
+const ENTRY_FIELDS = [
+  "params",
+  "query",
+  "querystring",
+  "headers",
+  "contentType",
+  "json",
+  "encoding",
+] as const satisfies ReadonlyArray<keyof EndpointContract>
+const ENCODING_FIELDS = [
+  "style",
+  "explode",
+  "allowReserved",
+  "contentType",
+] as const satisfies ReadonlyArray<keyof Encoding>
+type Lists<T, L extends readonly unknown[]> = [Exclude<keyof T, L[number]>] extends [never]
+  ? true
+  : false
+const listed: [
+  Lists<EndpointContract, typeof ENTRY_FIELDS>,
+  Lists<Encoding, typeof ENCODING_FIELDS>,
+] = [true, true]
+
+/** Fields of a contract the client does not read. */
+function unknownFields(contract: object): string[] {
+  const out = Object.keys(contract).filter((key) => key !== "version" && key !== "endpoints")
+  const { endpoints } = contract as { endpoints: Record<string, Record<string, unknown>> }
+  for (const [endpoint, fields] of Object.entries(endpoints)) {
+    for (const [field, value] of Object.entries(fields)) {
+      if (!(ENTRY_FIELDS as readonly string[]).includes(field)) out.push(`${endpoint} ${field}`)
+      if (typeof value !== "object" || value === null) continue
+      for (const [name, encoding] of Object.entries(value as Record<string, object>)) {
+        for (const key of Object.keys(encoding)) {
+          if (!(ENCODING_FIELDS as readonly string[]).includes(key)) {
+            out.push(`${endpoint} ${field}.${name}.${key}`)
+          }
+        }
+      }
+    }
+  }
+  return out
+}
+
+describe("runtime contract", () => {
+  it("has only fields the client reads, in every fixture", async () => {
+    expect(listed).toStrictEqual([true, true])
+    const fixtures = join(import.meta.dirname, "fixtures")
+    const documents = [
+      join(fixtures, "client.yaml"),
+      join(fixtures, "readme.yaml"),
+      ...["v3.0", "v3.1", "v3.2"].flatMap((version) =>
+        readdirSync(join(fixtures, "oai", version)).map((file) =>
+          join(fixtures, "oai", version, file),
+        ),
+      ),
+    ]
+    const querystring = oas("3.2", {
+      paths: {
+        "/q": {
+          get: {
+            parameters: [
+              { name: "q", in: "querystring", content: { "application/json": { schema: {} } } },
+            ],
+            responses: ok,
+          },
+        },
+      },
+    })
+    const profiled = oas("3.1", {
+      paths: {
+        "/p": {
+          post: {
+            requestBody: { content: { 'application/json; profile="p"': { schema: {} } } },
+            responses: ok,
+          },
+        },
+      },
+    })
+    const contracts = await Promise.all(
+      [...documents, querystring, profiled].map(async (document) => {
+        const { code } = await generate(document)
+        return contractOf(code)
+      }),
+    )
+    expect(contracts.flatMap((contract) => unknownFields(contract))).toStrictEqual([])
+    // The fixtures reach every field the client reads.
+    const written = new Set(
+      contracts.flatMap((contract) =>
+        Object.values(contract.endpoints).flatMap((e) => Object.keys(e ?? {})),
+      ),
+    )
+    expect([...written].toSorted()).toStrictEqual([...ENTRY_FIELDS].toSorted())
+  })
+
+  it("records each endpoint's serialization where it differs from OpenAPI's defaults", async () => {
+    const result = await genResult(
+      oas("3.1", {
+        servers: [{ url: "https://api.test/v1" }],
+        paths: {
+          "/items/{id}": {
+            servers: [{ url: "https://files.api.test" }],
+            get: {
+              parameters: [
+                {
+                  name: "id",
+                  in: "path",
+                  required: true,
+                  style: "label",
+                  schema: { type: "array" },
+                },
+                { name: "plain", in: "query", schema: { type: "string" } },
+                {
+                  name: "explicitDefault",
+                  in: "query",
+                  style: "form",
+                  explode: true,
+                  schema: { type: "array" },
+                },
+                {
+                  name: "created",
+                  in: "query",
+                  style: "deepObject",
+                  explode: true,
+                  schema: { type: "object" },
+                },
+                { name: "ids", in: "query", style: "pipeDelimited", schema: { type: "array" } },
+                { name: "tags", in: "query", explode: false, schema: { type: "array" } },
+                { name: "next", in: "query", allowReserved: true, schema: { type: "string" } },
+                {
+                  name: "filter",
+                  in: "query",
+                  content: { "application/json": { schema: { type: "object" } } },
+                },
+                { name: "X-Range", in: "header", explode: true, schema: { type: "object" } },
+                { name: "session", in: "cookie", explode: false, schema: { type: "array" } },
+              ],
+              responses: ok,
+            },
+            put: {
+              requestBody: {
+                content: {
+                  "application/x-www-form-urlencoded": {
+                    schema: { type: "object" },
+                    encoding: {
+                      metadata: { style: "deepObject", explode: true },
+                      plain: { contentType: "text/plain" },
+                      styled: { style: "form", explode: false, contentType: "application/json" },
+                    },
+                  },
+                },
+              },
+              responses: ok,
+            },
+            post: {
+              requestBody: {
+                content: {
+                  "multipart/form-data": {
+                    schema: { type: "object" },
+                    encoding: { meta: { contentType: "application/json" } },
+                  },
+                  "application/octet-stream": {},
+                },
+              },
+              responses: ok,
+            },
+            patch: { requestBody: { content: { "application/json": {} } }, responses: ok },
+          },
+        },
+      }),
+    )
+    const { endpoints } = await contractOf(result.code)
+    expect(endpoints).toStrictEqual({
+      "GET /items/{id}": {
+        params: { id: { style: "label", explode: false } },
+        query: {
+          created: { style: "deepObject", explode: true },
+          ids: { style: "pipeDelimited", explode: false },
+          tags: { style: "form", explode: false },
+          next: { style: "form", explode: true, allowReserved: true },
+          filter: { contentType: "application/json" },
+        },
+        headers: { "X-Range": { style: "simple", explode: true } },
+      },
+      "PUT /items/{id}": {
+        contentType: "application/x-www-form-urlencoded",
+        encoding: {
+          metadata: { style: "deepObject", explode: true },
+          plain: { contentType: "text/plain" },
+          styled: { style: "form", explode: false },
+        },
+      },
+      // Two media types and neither takes JSON: the call names one.
+    })
+    // The client sends every request to its baseUrl; the document's servers are documentation.
+    expect(result.code).toContain("// Server: https://api.test/v1\n")
+    expect(codes(result.diagnostics).filter((c) => c.startsWith("ignored"))).toStrictEqual([
+      "ignored-field #/paths/~1items~1{id}/servers",
+    ])
+    await expectPassesTsc(result.code)
+  })
+
+  it("leaves out the bodies of GET and HEAD, which the client does not send", async () => {
+    const form = {
+      content: {
+        "application/x-www-form-urlencoded": {
+          schema: { type: "object", properties: { a: { type: "object" } } },
+          encoding: { a: { style: "deepObject", explode: true } },
+        },
+      },
+    }
+    const operation = { requestBody: form, responses: ok }
+    const code = await gen(
+      oas("3.1", { paths: { "/r": { get: operation, head: operation, post: operation } } }),
+    )
+    const { endpoints } = await contractOf(code)
+    expect(endpoints).toStrictEqual({
+      "POST /r": {
+        contentType: "application/x-www-form-urlencoded",
+        encoding: { a: { style: "deepObject", explode: true } },
+      },
+    })
+    // The types still describe what the API declares.
+    expect(entry(code, "GET /r")).toContain('body?: { "application/x-www-form-urlencoded"')
+  })
+
+  it("keeps names such as __proto__ as data", async () => {
+    // Parsed from JSON, as documents are: `__proto__` is an ordinary key there.
+    const doc = JSON.parse(
+      JSON.stringify(
+        oas("3.1", {
+          paths: {
+            "/a": {
+              post: {
+                parameters: [
+                  { name: "PROTO", in: "query", style: "pipeDelimited", schema: { type: "array" } },
+                ],
+                requestBody: {
+                  content: {
+                    "application/x-www-form-urlencoded": {
+                      schema: { type: "object" },
+                      encoding: { PROTO: { style: "deepObject", explode: true } },
+                    },
+                  },
+                },
+                responses: ok,
+              },
+            },
+          },
+        }),
+      ).replaceAll("PROTO", "__proto__"),
+    ) as object
+    const code = await gen(doc)
+    const { endpoints } = await contractOf(code)
+    const post = endpoints["POST /a"]
+    for (const map of [post?.query, post?.encoding]) {
+      expect(Object.hasOwn(map ?? {}, "__proto__")).toBe(true)
+    }
+    await expectPassesTsc(code)
+  })
+
+  it("records the Encoding Objects of a 3.2 form querystring as its fields' encodings", async () => {
+    const code = await gen(
+      oas("3.2", {
+        paths: {
+          "/q": {
+            get: {
+              parameters: [
+                {
+                  name: "q",
+                  in: "querystring",
+                  content: {
+                    "application/x-www-form-urlencoded": {
+                      schema: { type: "object" },
+                      encoding: {
+                        filter: { style: "deepObject", explode: true },
+                        ids: { explode: false },
+                      },
+                    },
+                  },
+                },
+              ],
+              responses: ok,
+            },
+          },
+        },
+      }),
+    )
+    const { endpoints } = await contractOf(code)
+    expect(endpoints["GET /q"]).toStrictEqual({
+      query: {
+        filter: { style: "deepObject", explode: true },
+        ids: { style: "form", explode: false },
+      },
+    })
+  })
+
+  it("is typed in a module that imports nothing, so that its types need nothing installed", async () => {
+    const code = await gen(oas("3.1", { paths: { "/a": { get: { responses: ok } } } }))
+    expect(code).not.toMatch(/^import /m)
+    // Without openapi-shape/client to resolve, as for a client of your own.
+    const types = 'import type { Endpoints } from "./api"\nexport type A = Endpoints["GET /a"]\n'
+    const tsconfig = {
+      compilerOptions: {
+        strict: true,
+        noEmit: true,
+        module: "esnext",
+        moduleResolution: "bundler",
+        types: [],
+      },
+    }
+    expect(
+      await typecheck({
+        "api.ts": code,
+        "use.ts": types,
+        "tsconfig.json": JSON.stringify(tsconfig),
+      }),
+    ).toBe("")
   })
 })

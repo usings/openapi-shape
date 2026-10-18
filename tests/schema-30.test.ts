@@ -26,7 +26,7 @@ describe("nullable: the schema also admits null", () => {
     expect(await typeOf(schema, "3.0")).toBe(expected)
   })
 
-  it("admits null where 3.0.3+ would not, and says so", async () => {
+  it("admits null where 3.0.3+ would not", async () => {
     const result = await genResult(
       withSchemas("3.0", {
         Base: { type: "object", properties: { id: { type: "string" } } },
@@ -42,19 +42,13 @@ describe("nullable: the schema also admits null", () => {
     expect(declaration(result.code, "AllOf")).toBe("Base | null")
     expect(declaration(result.code, "Ref")).toBe("Base | null")
     expect(declaration(result.code, "Unconstrained")).toBe("unknown")
-    // Only where the 3.0.3+ reading differs.
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "lenient-nullable #/components/schemas/NoType/nullable",
-      "lenient-nullable #/components/schemas/Enum/nullable",
-      "lenient-nullable #/components/schemas/AllOf/nullable",
-      "lenient-nullable #/components/schemas/Ref/nullable",
-    ])
+    expect(result.diagnostics).toStrictEqual([])
     await expectPassesTsc(result.code)
   })
 })
 
 describe("3.0 keyword set", () => {
-  it("applies keywords next to $ref, which 3.0 would ignore, and says so", async () => {
+  it("applies keywords next to $ref, which 3.0 would ignore", async () => {
     const result = await genResult(
       withSchemas("3.0", {
         Base: { type: "object", properties: { id: { type: "string" } } },
@@ -69,12 +63,10 @@ describe("3.0 keyword set", () => {
     expect(declaration(result.code, "Extended")).toBe("Base & { extra?: boolean }")
     expect(result.code).toContain("/** Shown, too */\n  export type Extended")
     expect(declaration(result.code, "Annotated")).toBe("Base")
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "lenient-ref-siblings #/components/schemas/Extended",
-    ])
+    expect(result.diagnostics).toStrictEqual([])
   })
 
-  it("applies JSON Schema keywords the 3.0 Schema Object lacks, and says so", async () => {
+  it("applies JSON Schema keywords the 3.0 Schema Object lacks", async () => {
     const result = await genResult(
       withSchemas("3.0", {
         T: {
@@ -97,33 +89,12 @@ describe("3.0 keyword set", () => {
       '{\n  kind?: "x"\n  /** @minItems 1 */\n  pair?: [string, ...number[]]\n  [key: string]: string | [string, ...number[]] | undefined\n}',
     )
     expect(declaration(result.code, "U")).toBe("string | null")
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "lenient-keyword #/components/schemas/T/patternProperties",
-      "lenient-keyword #/components/schemas/T/properties/kind/const",
-      "lenient-keyword #/components/schemas/T/properties/pair/prefixItems",
-      "lenient-keyword #/components/schemas/U/type",
-    ])
+    expect(result.diagnostics).toStrictEqual([])
   })
 
   it("reads format: binary as raw bytes, a Blob, and format: byte as base64 text", async () => {
     expect(await typeOf({ type: "string", format: "binary" }, "3.0")).toBe("Blob")
     expect(await typeOf({ type: "string", format: "byte" }, "3.0")).toBe("string")
-    const file = { schema: { type: "string", format: "binary" } }
-    const code = await gen(
-      oas("3.0", {
-        paths: {
-          "/f": {
-            get: {
-              responses: {
-                "200": { description: "File", content: { "application/octet-stream": file } },
-              },
-            },
-          },
-        },
-      }),
-      { formats: { binary: "Uint8Array" } },
-    )
-    expect(entry(code, "GET /f")).toContain('"200": Uint8Array')
   })
 
   it("renders boolean exclusive bounds as exclusive constraints", async () => {
@@ -184,23 +155,21 @@ describe("readOnly and writeOnly: `required` applies to one side only", () => {
     )
     expect(declaration(code, "TeamInput")).toBe("{\n  lead?: UserInput\n}")
     expect(entry(code, "POST /users")).toContain('body: { "application/json": Schemas.TeamInput }')
-    expect(entry(code, "POST /users")).toContain('"201": Schemas.Team')
+    expect(entry(code, "POST /users")).toContain(
+      '"201": { content: { "application/json": Schemas.Team } }',
+    )
     // Variants exist only for schemas a request uses.
     expect(code).not.toContain("UnusedInput")
     await expectPassesTsc(code)
   })
 
-  it("applies them in 3.1+ too, where they are annotations, and says so", async () => {
+  it("applies them in 3.1+ too, where they are annotations", async () => {
     const result = await genResult(readWriteDoc("3.1"))
     expect(declaration(result.code, "UserInput")).toContain("  id?: string")
     expect(entry(result.code, "POST /users")).toContain(
       'body: { "application/json": Schemas.TeamInput }',
     )
-    // Wherever the one-sided rule applies, also in responses.
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "lenient-read-only #/components/schemas/User/required",
-      "lenient-read-only #/components/schemas/Unused/required",
-    ])
+    expect(result.diagnostics).toStrictEqual([])
   })
 })
 
@@ -273,7 +242,7 @@ describe("readOnly and writeOnly across schemas", () => {
     )
     const webhook = code.slice(code.indexOf("export interface Webhooks"))
     expect(webhook).toContain('body?: { "application/json": Schemas.Pet }')
-    expect(webhook).toContain('"200": Schemas.AckInput')
+    expect(webhook).toContain('"200": { content: { "application/json": Schemas.AckInput } }')
     expect(code).not.toContain("PetInput")
   })
 
@@ -299,7 +268,7 @@ describe("readOnly and writeOnly across schemas", () => {
 })
 
 describe("3.1 keywords in 3.0 documents", () => {
-  it("applies them, and says so", async () => {
+  it("applies them", async () => {
     const result = await genResult(
       withSchemas("3.0", {
         N: { type: "null" },
@@ -310,12 +279,6 @@ describe("3.1 keywords in 3.0 documents", () => {
     )
     expect(declaration(result.code, "N")).toBe("null")
     expect(declaration(result.code, "T")).toBe("[string?]")
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "lenient-keyword #/components/schemas/N/type",
-      "lenient-keyword #/components/schemas/T/additionalItems",
-      "lenient-keyword #/components/schemas/T/items",
-      "lenient-keyword #/components/schemas/E/items",
-      "lenient-keyword #/components/schemas/B/properties/a",
-    ])
+    expect(result.diagnostics).toStrictEqual([])
   })
 })

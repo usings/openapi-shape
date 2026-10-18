@@ -9,7 +9,6 @@
     "oxfmt",
     "oxlint",
     "querystring",
-    "tsdown",
-    "unvalidated"
+    "tsdown"
   ]
 }

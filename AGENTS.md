@@ -77,12 +77,10 @@ A split task is still one pass over the combined delta. No two agents edit the s
 
 ## Code Conventions
 
-Only what scanning the repo would miss; `package.json`, the configs, and neighboring code show the rest.
+Only what scanning the repo would miss.
 
-- Verify runs `pnpm test --run`, `pnpm typecheck`, `pnpm lint`, and `pnpm format --check`; together they take seconds, so run them all. No CI runs them, and a pushed `v*` tag (which `pnpm release` creates) publishes to npm, so release only when asked.
-- The generated module is a published format: consumers commit it and `--check` fails on any byte difference. That covers its types, `Security`, and the runtime `contract`, typed by `Contract` in `src/client.ts`; a committed contract meets newer clients until it is regenerated. Changing either is High, and a `!` commit when code written against the old output stops compiling or an old contract stops working. `README.md` is their spec and changes in the same delta.
-- `tests/__snapshots__/` holds full generated files: `oai/` for the vendored OpenAPI Initiative examples, `client-api.ts` for the module `tests/client.test.ts` runs and type-checks against. Update them (`pnpm test --run -u`) only for an intended change, and report changed output as before/after.
-- `tests/json-schema-suite.test.ts` type-checks every valid instance of the vendored JSON Schema Test Suite against the generated types; `KNOWN` pins each deliberate exception to a README "Approximations" entry. A soundness change, better or worse, fails it until `KNOWN` and the README agree.
-- `src` imports omit extensions, so node cannot run it directly: to see output, `pnpm build`, then `node dist/cli.mjs <doc> -o <tmp>/out.ts` (a `.d.ts` output leaves out the contract). `src/cli.ts` is the citty command; `tests/cli.test.ts` imports it with `runMain` mocked and drives it through `runCommand`.
-- oxlint runs without `--type-aware`, so the type-aware rules in `.oxlintrc.json` (`switch-exhaustiveness-check`, `prefer-nullish-coalescing`, …) never fire: follow them by hand.
-- Lint does not enforce these: `src/core/` imports flow one way (`openapi/` → `contract/` → `declarations/`, each may use `shared/`), and `src/client.ts`, which consumers ship, imports nothing.
+- Verify runs `pnpm test --run`, `pnpm typecheck`, `pnpm lint`, and `pnpm format --check`, all of them: they take seconds, and no CI runs them. A pushed `v*` tag (`pnpm release` makes one) publishes to npm, so release only when asked.
+- The generated module is a published format: consumers commit it, and `--check` fails on any byte change. A change to the runtime `contract`'s format bumps `version` in the renderer and in `src/client/contract.ts`, and the client keeps reading older versions. Changing the module is High, and a `!` commit when old output stops compiling or an old contract stops working. `README.md` and `docs/` are its spec and change in the same delta.
+- Update `tests/__snapshots__/` (`-u`) only for an intended output change, and report it as before/after.
+- `src` imports omit extensions, so node cannot run it: to see output, `pnpm build`, then `node dist/cli.mjs <doc> -o <tmp>/out.ts`.
+- oxlint runs without `--type-aware`, so the type-aware rules in `.oxlintrc.json` never fire: follow them by hand.

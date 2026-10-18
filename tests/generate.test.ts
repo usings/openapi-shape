@@ -80,17 +80,15 @@ describe("generate", () => {
     })
   })
 
-  it("reads unknown JSON Schema dialects as 2020-12, with a warning", async () => {
+  it("reads unknown JSON Schema dialects as 2020-12", async () => {
     const result = await generate(
       oas("3.1", {
         jsonSchemaDialect: "http://json-schema.org/draft-07/schema#",
         components: { schemas: { A: { $schema: "https://example.com/custom", type: "string" } } },
       }),
     )
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "unknown-dialect #/jsonSchemaDialect",
-      "unknown-dialect #/components/schemas/A/$schema",
-    ])
+    expect(result.diagnostics).toStrictEqual([])
+    expect(result.code).toContain("export type A = string")
   })
 
   it("accepts every 3.x patch version", async () => {

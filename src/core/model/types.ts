@@ -1,37 +1,16 @@
 /**
- * The contract: every operation and named type of an OpenAPI Description,
- * with all OpenAPI and JSON Schema semantics already applied. Renderers only
- * choose syntax.
+ * The model: every operation and named type of an OpenAPI Description, with
+ * all OpenAPI and JSON Schema semantics already applied. Renderers only choose
+ * syntax.
  */
-export interface Contract {
+export interface Model {
   info: Info
   endpoints: Operation[]
   webhooks: Operation[]
   callbacks: Operation[]
   /** Named types, in output order. */
   declarations: Declaration[]
-  /** What a client needs at run time and cannot learn from types. */
-  runtime: Runtime
 }
-
-/** Document-level runtime details for the client. */
-export interface Runtime {
-  /** Server URLs, variables filled with their defaults. */
-  servers: string[]
-  /** Security schemes by name. */
-  security: Record<string, SecurityScheme>
-  /** Default security requirements. */
-  requires?: SecurityRequirement[]
-}
-
-/** Security scheme names, each with its required scopes; any one requirement of a list suffices. */
-export type SecurityRequirement = Record<string, string[]>
-
-export type SecurityScheme =
-  | { type: "apiKey"; in: "header" | "query" | "cookie"; name: string }
-  /** `scheme` is lowercase: `bearer`, `basic`, … */
-  | { type: "http"; scheme: string }
-  | { type: "oauth2" | "openIdConnect" | "mutualTLS" }
 
 /** How a value is serialized, where it differs from OpenAPI's default for its location. */
 export interface Encoding {
@@ -48,25 +27,27 @@ export interface Info {
   title?: string
   version?: string
   description?: string
+  /** The entry document's server URLs, as written. */
+  servers: string[]
 }
 
 /**
  * Which side of an exchange a type describes. OpenAPI 3.0 `readOnly` and
  * `writeOnly` make `required` apply to one side only (OpenAPI 3.0 Schema Object, `readOnly`).
  */
-export type View = "request" | "response"
+export type Side = "request" | "response"
 
 export interface Operation {
   /** `"GET /pets"`, `"POST pet.created"`, or `"<parent> > <callback> > POST <expression>"`. */
   key: string
-  docs?: Docs
+  annotations?: Annotations
   params: Field[]
   query: Field[]
   /** The `in: querystring` parameter (3.2), which describes the whole query string. */
   querystring?: {
     type: Type
     required: boolean
-    docs?: Docs
+    annotations?: Annotations
     /** The media type, unless form-urlencoded. */
     mediaType?: string
     /** Form content: its Encoding Objects, by field. */
@@ -76,15 +57,11 @@ export interface Operation {
   cookies: Field[]
   body?: Body
   responses: Response[]
-  /** The operation's own security requirements (overriding the document's); endpoints only. */
-  requires?: SecurityRequirement[]
-  /** The operation's (or else its Path Item's) servers; endpoints only. */
-  servers?: string[]
 }
 
 export interface Body {
   required: boolean
-  docs?: Docs
+  annotations?: Annotations
   /** One entry per declared media type, in declaration order. */
   content: Media[]
 }
@@ -92,16 +69,16 @@ export interface Body {
 export interface Media {
   mediaType: string
   type: Type
-  /** Request form and multipart bodies: Encoding Objects by property, where they differ from the default. */
+  /** Request form bodies: Encoding Objects by property, where they differ from the default. */
   encoding?: Record<string, Encoding>
 }
 
 export interface Response {
   /** Status key as declared: `"200"`, `"4XX"`, or `"default"`. */
   status: string
-  docs?: Docs
-  /** Union of all media types' types; `undefined` when the response has no content. */
-  type: Type
+  annotations?: Annotations
+  /** One entry per declared media type, in declaration order; empty without content. */
+  content: Media[]
   headers: Field[]
 }
 
@@ -110,8 +87,8 @@ export interface Field {
   type: Type
   required: boolean
   /** Set when `required` holds on one side only (readOnly/writeOnly). */
-  requiredOnly?: View
-  docs?: Docs
+  requiredOnly?: Side
+  annotations?: Annotations
   /** Parameters: serialization, where it differs from the location's default. */
   encoding?: Encoding
 }
@@ -119,13 +96,13 @@ export interface Field {
 export interface Declaration {
   /** Identifier inside the `Schemas` namespace. */
   name: string
-  /** Name of the request-side variant, when it differs (see {@link View}). */
+  /** Name of the request-side variant, when it differs (see {@link Side}). */
   inputName?: string
   type: Type
-  docs?: Docs
+  annotations?: Annotations
 }
 
-export interface Docs {
+export interface Annotations {
   title?: string
   summary?: string
   description?: string
@@ -139,13 +116,12 @@ export type Literal = string | number | boolean | null | Literal[] | { [key: str
 export type Type =
   | { kind: "unknown" }
   | { kind: "never" }
-  /** Absent content, such as a response without a body. */
+  /** Absent, such as an optional property's value in an index signature. */
   | { kind: "undefined" }
   | { kind: "null" }
   | { kind: "boolean" }
-  /** `format` is kept so renderers can apply user format mappings. */
-  | { kind: "string"; format?: string }
-  | { kind: "number"; format?: string }
+  | { kind: "string" }
+  | { kind: "number" }
   /** Raw octets. */
   | { kind: "binary" }
   | { kind: "literal"; value: Literal }

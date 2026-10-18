@@ -1,605 +1,418 @@
-import { describe, expect, expectTypeOf, it } from "vitest"
-import type { AdapterRequest, Client, Contract, ErrorOf, SuccessOf } from "../src/client"
-import { HttpError, createClient, fetchAdapter } from "../src/client"
-import type { Endpoints, Schemas, Security } from "./__snapshots__/client-api"
+import { describe, expect, it } from "vitest"
+import type { Client, ClientOptions, Contract } from "../src/client"
+import { createClient } from "../src/client"
 import { contract } from "./__snapshots__/client-api"
 
-/** A client for the generated fixture contract whose adapter records requests. */
-function recording(
-  config: {
-    server?: string
-    headers?: Record<string, string>
-    options?: Record<string, number>
-    security?: Parameters<typeof createClient<Endpoints, Security>>[0]["security"]
-  } = {},
-) {
-  const requests: AdapterRequest[] = []
-  const api = createClient({
-    contract,
-    ...config,
-    adapter: (request: AdapterRequest<Record<string, number>>) => {
+/**
+ * A client whose `fetch` records each request and answers with `respond()`;
+ * `sent()` is the last request. Endpoint paths go under `https://x.test`.
+ */
+function recorder<Api>(
+  given: Contract<Api>,
+  options: ClientOptions = {},
+  respond: () => Response = () => new Response(null, { status: 204 }),
+): { client: Client<Api>; sent: () => Request; requests: Request[] } {
+  const requests: Request[] = []
+  const client = createClient(given, {
+    baseUrl: "https://x.test",
+    ...options,
+    fetch: (request) => {
       requests.push(request)
-      return Promise.resolve()
+      return Promise.resolve(respond())
     },
   })
-  return { api, requests }
+  const sent = (): Request => {
+    const last = requests.at(-1)
+    if (last === undefined) throw new Error("Nothing was sent")
+    return last
+  }
+  return { client, sent, requests }
 }
 
-/** A multipart request body, read back as a server's parser reads it. */
-function parts(request: AdapterRequest): Promise<FormData> {
-  const type = request.headers["content-type"] ?? ""
-  return new Response(request.body as Blob, { headers: { "content-type": type } }).formData()
+/** A request's URL under `https://x.test`. */
+function url(request: Request): string {
+  return request.url.slice("https://x.test".length)
 }
 
-/** One part of a multipart body as written: its name, extra headers, and content. */
-function part(name: string, headers: string, content: string): string {
-  return `Content-Disposition: form-data; name="${name}"\r\n${headers}\r\n${content}\r\n`
+/** What `result` reads from a response with this body, content type, and status. */
+async function decoded(body: BodyInit | null, type?: string, status = 200): Promise<unknown> {
+  const headers = type === undefined ? undefined : { "content-type": type }
+  const { client } = recorder<{
+    "GET /x": { responses: object }
+  }>({ version: 1, endpoints: {} }, {}, () => new Response(body, { status, headers }))
+  const { data, error } = await client.result("GET /x")
+  return status < 300 ? data : error
 }
 
-/** What `fetchAdapter` decodes from a 200 response with this body and content type. */
-function decode(body: BodyInit | null, type?: string): Promise<unknown> {
-  const init = type === undefined ? {} : { headers: { "content-type": type } }
-  return fetchAdapter(respond(body, init) as typeof fetch)({
-    method: "GET",
-    url: "/x",
-    headers: {},
-    body: undefined,
-    options: undefined,
-  })
+/** A `SharedArrayBuffer` holding these bytes. */
+function shared(values: number[]): SharedArrayBuffer {
+  const buffer = new SharedArrayBuffer(values.length)
+  new Uint8Array(buffer).set(values)
+  return buffer
 }
-
-/** A contract for hand-written endpoint types, with OpenAPI's defaults throughout. */
-function contractFor<Api>(endpoints: Contract<Api>["endpoints"] = {}): Contract<Api> {
-  return { servers: [], endpoints }
-}
-
-/** An adapter that answers with what it was asked to send. */
-const echo =
-  <K extends keyof AdapterRequest>(key: K) =>
-  (request: AdapterRequest): Promise<unknown> =>
-    Promise.resolve(request[key])
-
-describe("request building", () => {
-  it("expands path parameters with simple style and joins the server", async () => {
-    const { api, requests } = recording({ server: "https://api.test/v1/" })
-    await api("GET /pets/{id}", { params: { id: 7 } })
-    expect(requests[0]).toMatchObject({
-      method: "GET",
-      url: "https://api.test/v1/pets/7",
-      body: undefined,
-    })
-  })
-
-  it("encodes path parameter values, arrays, and objects", async () => {
-    const api = createClient({
-      contract: contractFor<{
-        "GET /a/{x}/{y}/{z}": {
-          params: { x: string; y: string[]; z: object }
-          response: Record<never, never>
-        }
-      }>(),
-      adapter: echo("url"),
-    })
-    expect(
-      await api("GET /a/{x}/{y}/{z}", { params: { x: "a/b c", y: ["1", "2"], z: { k: "v w" } } }),
-    ).toBe("/a/a%2Fb%20c/1,2/k,v%20w")
-    await expect(api("GET /a/{x}/{y}/{z}", { params: {} as never })).rejects.toThrow(
-      'Missing path parameter "x"',
-    )
-  })
-
-  it("serializes the query with form style, exploding arrays and objects", async () => {
-    const api = createClient({
-      contract: contractFor<{
-        "GET /q?fixed=1": { query: Record<string, unknown>; response: Record<never, never> }
-      }>(),
-      adapter: echo("url"),
-    })
-    expect(
-      await api("GET /q?fixed=1", {
-        query: { a: [1, 2], b: null, c: { d: true, e: "x y" }, f: "" },
-      }),
-    ).toBe("/q?fixed=1&a=1&a=2&d=true&e=x%20y&f=")
-  })
-
-  it("merges headers case-insensitively and serializes declared header and cookie values", async () => {
-    const { api, requests } = recording({
-      headers: { "Authorization": "Bearer t", "X-Trace": "default" },
-    })
-    // No credentials are configured, so the header given stays.
-    await api("GET /pets/{id}", {
-      params: { id: 1 },
-      headers: { "X-Trace": "call", "x-list": ["a", "b"] },
-      cookies: { session: "a b;c" },
-    })
-    expect(requests[0].headers).toStrictEqual({
-      "authorization": "Bearer t",
-      "x-trace": "call",
-      "x-list": "a,b",
-      "cookie": "session=a%20b%3Bc",
-    })
-  })
-
-  it("shallow-merges adapter options", async () => {
-    const { api, requests } = recording({ options: { a: 1, b: 1 } })
-    await api("DELETE /pets/{id}", { params: { id: 1 }, options: { b: 2 } })
-    expect(requests[0].options).toStrictEqual({ a: 1, b: 2 })
-  })
-})
-
-describe("request bodies", () => {
-  it("sends JSON by default", async () => {
-    const { api, requests } = recording()
-    await api("POST /pets", { body: { name: "Rex" } })
-    expect(requests[0]).toMatchObject({
-      body: '{"name":"Rex"}',
-      headers: { "content-type": "application/json" },
-    })
-  })
-
-  it("labels other JSON media types as declared", async () => {
-    const { api, requests } = recording()
-    await api("PATCH /pets/{id}", {
-      params: { id: 1 },
-      contentType: "application/merge-patch+json",
-      body: { name: "R" },
-    })
-    expect(requests[0]).toMatchObject({
-      body: '{"name":"R"}',
-      headers: { "content-type": "application/merge-patch+json" },
-    })
-  })
-
-  it("encodes form and multipart bodies", async () => {
-    const { api, requests } = recording()
-    // The only declared media type is the default.
-    await api("POST /token", { body: { grant_type: "client credentials" } })
-    expect(requests[0].body).toBe("grant_type=client%20credentials")
-    expect(requests[0].headers).toStrictEqual({
-      "content-type": "application/x-www-form-urlencoded",
-    })
-
-    const file = new Blob(["data"], { type: "text/plain" })
-    await api("POST /upload", { contentType: "multipart/form-data", body: { file, name: "n" } })
-    const form = await parts(requests[1])
-    expect(form.get("name")).toBe("n")
-    expect(form.get("file")).toBeInstanceOf(Blob)
-    expect(requests[1].headers["content-type"]).toMatch(/^multipart\/form-data; boundary=/)
-  })
-
-  it("labels declared multipart parts without making them files", async () => {
-    let sent: AdapterRequest | undefined
-    const api = createClient({
-      contract: contractFor<{
-        "POST /m": {
-          body: {
-            "multipart/form-data": {
-              "meta": object
-              "raw": object
-              "data": object
-              "note": string
-              "csv": string
-              "tags": string[]
-              'say "hi"': string
-            }
-          }
-          response: Record<never, never>
-        }
-      }>({
-        "POST /m": {
-          contentType: "multipart/form-data",
-          encoding: {
-            "multipart/form-data": {
-              raw: { contentType: "text/plain" },
-              data: { contentType: "application/json" },
-              note: { contentType: "text/markdown" },
-              csv: { contentType: "text/csv; charset=iso-8859-1" },
-            },
-          },
-        },
-      }),
-      adapter: (request) => {
-        sent = request
-        return Promise.resolve()
-      },
-    })
-    const body = {
-      "meta": { a: 1 },
-      "raw": { c: 3 },
-      "data": { b: 2 },
-      "note": "# hi",
-      "csv": "café",
-      "tags": ["x", "y"],
-      'say "hi"': "line\nbreak",
-    }
-    await api("POST /m", { body })
-    const request = sent as AdapterRequest
-    const text = await (request.body as Blob).text()
-    // Undeclared, an object is a JSON part, as OpenAPI defaults.
-    expect(text).toContain(part("meta", "Content-Type: application/json\r\n", '{"a":1}'))
-    // Declared text/plain, it is a plain field, as some servers need.
-    expect(text).toContain(part("raw", "", '{"c":3}'))
-    expect(text).toContain(part("data", "Content-Type: application/json\r\n", '{"b":2}'))
-    expect(text).toContain(part("note", "Content-Type: text/markdown\r\n", "# hi"))
-    // Text goes as UTF-8, and says so.
-    expect(text).toContain(part("csv", "Content-Type: text/csv; charset=utf-8\r\n", "café"))
-    expect(text).toContain(part("say %22hi%22", "", "line\nbreak"))
-    expect(text).not.toContain("filename")
-    // What a server's multipart parser reads back.
-    const form = await parts(request)
-    expect(form.get("meta")).toBe('{"a":1}')
-    expect(form.getAll("tags")).toStrictEqual(["x", "y"])
-    expect(form.get('say "hi"')).toBe("line\nbreak")
-  })
-
-  it("labels a file part with its declared media type, keeping a File's name", async () => {
-    let sent: AdapterRequest | undefined
-    const api = createClient({
-      contract: contractFor<{
-        "POST /a": {
-          body: { "multipart/form-data": { image: Blob; other?: Blob } }
-          response: Record<never, never>
-        }
-      }>({
-        "POST /a": {
-          contentType: "multipart/form-data",
-          encoding: { "multipart/form-data": { image: { contentType: "image/png" } } },
-        },
-      }),
-      adapter: (request) => {
-        sent = request
-        return Promise.resolve()
-      },
-    })
-    const file = new File(["PNG"], "photo.png", { type: "application/octet-stream" })
-    await api("POST /a", { body: { image: file, other: new File(["x"], "") } })
-    const form = await parts(sent as AdapterRequest)
-    expect(form.get("image")).toMatchObject({ name: "photo.png", type: "image/png" })
-    // A file without a name is still a file.
-    expect(form.get("other")).toMatchObject({ name: "blob", type: "application/octet-stream" })
-  })
-
-  it("passes binary bodies through, labelled with the declared type", async () => {
-    const { api, requests } = recording()
-    const bytes = new Uint8Array([1, 2])
-    await api("POST /upload", { contentType: "application/octet-stream", body: bytes as never })
-    expect(requests[0]).toMatchObject({
-      body: bytes,
-      headers: { "content-type": "application/octet-stream" },
-    })
-  })
-
-  it("refuses to guess an encoding", async () => {
-    const xml = contractFor<{
-      "POST /x": { body: { "application/xml": { a: string } }; response: Record<never, never> }
-    }>({ "POST /x": { contentType: "application/xml" } })
-    const api = createClient({ contract: xml, adapter: () => Promise.resolve() })
-    const custom = createClient({ contract: xml, adapter: echo("body") })
-    // The client cannot encode XML, so only ready-made bodies type-check.
-    // @ts-expect-error an object is not an XML body
-    const call = api("POST /x", { contentType: "application/xml", body: { a: "1" } })
-    await expect(call).rejects.toThrow("Cannot encode a object as application/xml")
-    expect(await custom("POST /x", { contentType: "application/xml", body: "<a>1</a>" })).toBe(
-      "<a>1</a>",
-    )
-  })
-})
 
 // A Node.js-style stream: an async iterable of bytes.
 async function* chunks(): AsyncGenerator<Uint8Array> {
   yield await Promise.resolve(new Uint8Array([1]))
 }
 
-/** A `fetch` stand-in that always answers with this response. */
-const respond =
-  (body: BodyInit | null, init: ResponseInit) =>
-  (..._args: unknown[]): Promise<Response> =>
-    Promise.resolve(new Response(body, init))
-
-describe("with the generated contract", () => {
-  it("refuses the old baseUrl option, also in a config built beforehand", () => {
-    const config = { contract, baseUrl: "http://localhost:3000" }
-    // @ts-expect-error renamed to server
-    expect(() => createClient(config)).toThrow("The baseUrl option is now called server")
+describe("createClient", () => {
+  it("refuses a base URL that would swallow the path", () => {
+    expect(() => createClient(contract, { baseUrl: "https://api.test/v1?k=1" })).toThrow(
+      "has a query or fragment",
+    )
+    expect(() => createClient(contract, { baseUrl: new URL("https://api.test/v1#top") })).toThrow(
+      "has a query or fragment",
+    )
   })
 
-  it("uses the document's server, an endpoint's own server, or the server option over both", async () => {
-    const { api, requests } = recording()
-    await api("GET /pets")
-    await api("GET /files/{names}", { params: { names: ["a", "b"] } })
-    expect(requests.map((r) => r.url)).toStrictEqual([
-      "https://eu.api.test/v1/pets",
-      "https://files.api.test/files/.a,b",
-    ])
-    const local = recording({ server: "http://localhost:3000" })
-    await local.api("GET /files/{names}", { params: { names: ["a"] } })
-    expect(local.requests[0].url).toBe("http://localhost:3000/files/.a")
+  it("requires a contract of the supported format", () => {
+    for (const given of [undefined, { endpoints: {} }, { version: 2, endpoints: {} }]) {
+      expect(() => createClient(given as never)).toThrow(
+        "createClient takes a generated contract of format 1 as its first argument",
+      )
+    }
+  })
+})
+
+describe("building requests", () => {
+  it("expands path parameters with simple style under the base URL", async () => {
+    const { client, sent } = recorder(contract, { baseUrl: "https://api.test/v1/" })
+    await client.fetch("GET /pets/{id}", { params: { id: 7 } })
+    expect([sent().method, sent().url]).toStrictEqual(["GET", "https://api.test/v1/pets/7"])
+  })
+
+  it("encodes path parameter values, arrays, and objects", async () => {
+    const { client, sent } = recorder<{
+      "GET /a/{x}/{y}/{z}": { params: { x: string; y: string[]; z: object }; responses: object }
+    }>({ version: 1, endpoints: {} })
+    await client.fetch("GET /a/{x}/{y}/{z}", {
+      params: { x: "雪/a b", y: ["1", "2"], z: { k: "v w" } },
+    })
+    expect(url(sent())).toBe("/a/%E9%9B%AA%2Fa%20b/1,2/k,v%20w")
+  })
+
+  it("rejects, sending nothing, when a request cannot be built", async () => {
+    const { client, requests } = recorder(contract)
+    await expect(client.fetch("GET /pets/{id}", {} as never)).rejects.toThrow(
+      'Missing path parameter "id"',
+    )
+    // As `fetch` does for a request it cannot build.
+    await expect(client.result("GET /pets/{id}", {} as never)).rejects.toBeInstanceOf(TypeError)
+    expect(requests).toHaveLength(0)
+  })
+
+  it("serializes the query with form style, exploding arrays and objects", async () => {
+    const { client, sent } = recorder<{
+      "GET /q?fixed=1": { query: Record<string, unknown>; responses: object }
+    }>({ version: 1, endpoints: { "GET /q?fixed=1": { query: { compact: { explode: false } } } } })
+    const query = {
+      a: [1, null, 2, undefined, 0, false, ""],
+      b: null,
+      c: { "d": true, "e": "x y", "nil": null, "a&b": "c=d" },
+      f: "",
+      g: new Date(0),
+      empty: [],
+      compact: [],
+    }
+    await client.fetch("GET /q?fixed=1", { query })
+    expect(url(sent())).toBe(
+      "/q?fixed=1&a=1&a=2&a=0&a=false&a=&d=true&e=x%20y&a%26b=c%3Dd&f=&g=1970-01-01T00%3A00%3A00.000Z&compact=",
+    )
+  })
+
+  it("serializes sparse deep fields without invoking methods on the input array", async () => {
+    const { client, sent } = recorder<{
+      "GET /q": { query: Record<string, unknown>; responses: object }
+    }>({ version: 1, endpoints: { "GET /q": { query: { filter: { style: "deepObject" } } } } })
+    const items = Object.assign(Array<string | undefined>(4), {
+      forEach: () => {
+        throw new Error("Do not call a method on the input")
+      },
+    })
+    items[2] = "a/b &+"
+    const filter = Object.assign(Object.create(null), { items, omit: null, empty: {}, flag: false })
+    await client.fetch("GET /q", { query: { filter } })
+    expect(url(sent())).toBe("/q?filter[items][2]=a%2Fb%20%26%2B&filter[flag]=false")
+    await expect(
+      client.fetch("GET /q", {
+        query: { filter: { invalidUnicode: "\uD800", blob: new Blob(["x"]) } },
+      }),
+    ).rejects.toThrow("A Blob cannot be sent as text")
+  })
+
+  it("normalizes parameter content types before encoding their values", async () => {
+    const { client, sent } = recorder<{
+      "GET /q": { query: Record<string, unknown>; responses: object }
+    }>({
+      version: 1,
+      endpoints: {
+        "GET /q": {
+          query: {
+            json: { contentType: " \tApplication/Problem+JSON ; p=*" },
+            wild: { contentType: "Application/*" },
+            text: { contentType: "TEXT/PLAIN; charset=utf-8" },
+          },
+        },
+      },
+    })
+    await client.fetch("GET /q", { query: { json: "value", wild: "value", text: "value" } })
+    expect(url(sent())).toBe("/q?json=%22value%22&wild=%22value%22&text=value")
   })
 
   it("serializes parameters in their declared styles", async () => {
-    const { api, requests } = recording()
-    await api("GET /charges", {
-      query: { created: { gte: 1 }, expand: ["customer", "invoice"], ids: ["x", "y"] },
-    })
-    expect(requests[0].url).toBe(
-      "https://eu.api.test/v1/charges?created[gte]=1&expand[0]=customer&expand[1]=invoice&ids=x%7Cy",
+    const { client, sent } = recorder(contract)
+    const query = { created: { gte: 1 }, expand: ["customer", "invoice"], ids: ["x", "y"] }
+    await client.fetch("GET /charges", { query })
+    expect(url(sent())).toBe(
+      "/charges?created[gte]=1&expand[0]=customer&expand[1]=invoice&ids=x%7Cy",
     )
-    await api("GET /files/{names}", {
+    await client.fetch("GET /files/{names}", { params: { names: ["a", "b"] } })
+    expect(url(sent())).toBe("/files/.a,b")
+  })
+
+  it("merges headers, the call's over the client's, and serializes declared ones", async () => {
+    const { client, sent } = recorder(contract, {
+      headers: { "Authorization": "Bearer t", "X-Trace": "default" },
+    })
+    await client.fetch("GET /files/{names}", {
       params: { names: ["a"] },
-      headers: { "X-Range": { from: 5 } },
+      headers: { "x-trace": "call", "x-range": { from: 5 }, "x-list": ["a", "b"], "x-no": null },
     })
-    expect(requests[1].headers["x-range"]).toBe("from=5")
-  })
-
-  it("sends the operation's declared media type, encoding form fields as declared", async () => {
-    const { api, requests } = recording({ security: { basic: { username: "u", password: "p" } } })
-    await api("POST /charges", {
-      body: { amount: 100, metadata: { order: "7" }, tags: ["a", "b"], filter: { live: true } },
-    })
-    expect(requests[0]).toMatchObject({
-      body: "amount=100&metadata[order]=7&tags[0]=a&tags[1]=b&filter=%7B%22live%22%3Atrue%7D",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+    expect(Object.fromEntries(sent().headers)).toStrictEqual({
+      "authorization": "Bearer t",
+      "x-trace": "call",
+      "x-range": "from=5",
+      "x-list": "a,b",
     })
   })
 
-  it("applies credentials where each operation's security requires them", async () => {
-    let calls = 0
-    const { api, requests } = recording({
-      security: {
-        bearer: () => Promise.resolve(`token-${++calls}`),
-        key: "k-1",
-        basic: { username: "user", password: "pässword" },
-      },
-    })
-    await api("GET /pets")
-    await api("GET /pets")
-    await api("GET /charges")
-    await api("GET /health")
-    await api("POST /charges", { body: { amount: 1 } })
-    expect(requests.map((r) => r.headers.authorization)).toStrictEqual([
-      "Bearer token-1",
-      "Bearer token-2",
-      undefined,
-      undefined,
-      `Basic ${Buffer.from("user:pässword").toString("base64")}`,
+  it("takes a Headers or its entries as they are", async () => {
+    const { client, sent } = recorder(contract, { headers: { "X-Trace": "default" } })
+    await client.fetch("GET /pets", { headers: new Headers({ "X-Trace": "call", "X-Other": "o" }) })
+    expect(Object.fromEntries(sent().headers)).toStrictEqual({ "x-trace": "call", "x-other": "o" })
+    await client.fetch("GET /pets", { headers: [["x-trace", "entries"]] })
+    expect(sent().headers.get("x-trace")).toBe("entries")
+    // Repeated names, as `new Headers()` keeps them.
+    const cookies = new Headers([
+      ["set-cookie", "a=1"],
+      ["set-cookie", "b=2"],
     ])
-    expect(requests[2].url).toBe("https://eu.api.test/v1/charges?api_key=k-1")
-  })
-
-  it("sends no credentials it was not given", async () => {
-    const { api, requests } = recording({ security: { key: "k" } })
-    await api("GET /pets")
-    expect(requests[0].headers.authorization).toBeUndefined()
-  })
-})
-
-describe("encodings", () => {
-  it("serializes dates as ISO strings and JSON sequences as lines", async () => {
-    interface Api {
-      "POST /log": {
-        query: { since: Date }
-        body: { "application/x-ndjson": Array<{ n: number }> }
-        response: Record<never, never>
-      }
+    await client.fetch("GET /pets", { headers: cookies })
+    expect(sent().headers.getSetCookie()).toStrictEqual(["a=1", "b=2"])
+    // A Headers of another implementation, as undici's may be in Node.js.
+    const foreign = {
+      *[Symbol.iterator]() {
+        yield ["x-trace", "foreign"]
+      },
     }
-    const requests: AdapterRequest[] = []
-    const api = createClient({
-      contract: contractFor<Api>({ "POST /log": { contentType: "application/x-ndjson" } }),
-      adapter: (request) => {
-        requests.push(request)
-        return Promise.resolve()
+    await client.fetch("GET /pets", { headers: foreign as unknown as Headers })
+    expect(sent().headers.get("x-trace")).toBe("foreign")
+    // From JavaScript, no headers at all.
+    await client.fetch("GET /pets", { headers: null as never })
+    expect(sent().headers.get("x-trace")).toBe("default")
+  })
+
+  it("sets the call's headers over the body's media type", async () => {
+    const { client, sent } = recorder(contract)
+    await client.fetch("PATCH /pets/{id}", {
+      params: { id: 1 },
+      headers: { "content-type": "application/json" },
+      body: { name: "R" },
+    })
+    expect(sent().headers.get("content-type")).toBe("application/json")
+  })
+
+  it("applies RequestInit fields, the call's over the client's", async () => {
+    const { client, sent } = recorder(contract, { cache: "no-store", redirect: "manual" })
+    const controller = new AbortController()
+    await client.fetch("GET /pets", { redirect: "error", signal: controller.signal })
+    expect([sent().cache, sent().redirect]).toStrictEqual(["no-store", "error"])
+    controller.abort()
+    expect(sent().signal.aborted).toBe(true)
+  })
+})
+
+describe("request bodies", () => {
+  it("distinguishes an omitted body from empty text", async () => {
+    const { client, sent } = recorder<{
+      "POST /text": { body?: { "text/plain": string }; responses: object }
+    }>({ version: 1, endpoints: { "POST /text": { contentType: "text/plain" } } })
+    await client.fetch("POST /text")
+    expect(sent().body).toBeNull()
+    expect(sent().headers.has("content-type")).toBe(false)
+    await client.fetch("POST /text", { body: "" })
+    expect(sent().body).not.toBeNull()
+    expect(sent().headers.get("content-type")).toBe("text/plain")
+    expect(await sent().text()).toBe("")
+  })
+
+  it("sends JSON by default, and other JSON media types as declared", async () => {
+    const { client, sent } = recorder(contract)
+    await client.fetch("POST /pets", { body: { name: "Rex" } })
+    expect(sent().headers.get("content-type")).toBe("application/json")
+    expect(await sent().text()).toBe('{"name":"Rex"}')
+    await client.fetch("PATCH /pets/{id}", { params: { id: 1 }, body: { name: "R" } })
+    expect(sent().headers.get("content-type")).toBe("application/merge-patch+json")
+  })
+
+  it("encodes form bodies, fields as their Encoding Objects say", async () => {
+    const { client, sent } = recorder(contract)
+    await client.fetch("POST /token", { body: { grant_type: "client credentials" } })
+    expect(sent().headers.get("content-type")).toBe("application/x-www-form-urlencoded")
+    expect(await sent().text()).toBe("grant_type=client%20credentials")
+    const body = { amount: 100, metadata: { order: "7" }, tags: ["a", "b"], filter: { live: true } }
+    await client.fetch("POST /charges", { body })
+    expect(await sent().text()).toBe(
+      "amount=100&metadata[order]=7&tags[0]=a&tags[1]=b&filter=%7B%22live%22%3Atrue%7D",
+    )
+  })
+
+  it("encodes multipart bodies as FormData", async () => {
+    const { client, sent } = recorder<{
+      "POST /m": { body: { "multipart/form-data": Record<string, unknown> }; responses: object }
+    }>({ version: 1, endpoints: { "POST /m": { contentType: "multipart/form-data" } } })
+    const body = {
+      photo: new File(["PNG"], "photo.png", { type: "image/png" }),
+      raw: new Blob(["x"]),
+      meta: { a: 1 },
+      tags: ["x", "y"],
+      when: new Date(0),
+      bytes: new Uint8Array([1, 2]),
+      shared: shared([3]),
+      sharedView: new Uint8Array(shared([4])),
+      skipped: undefined,
+    }
+    await client.fetch("POST /m", { body })
+    expect(sent().headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/)
+    const form = await sent().formData()
+    expect(form.get("photo")).toMatchObject({ name: "photo.png", type: "image/png" })
+    // A Blob without a name is still a file.
+    expect(form.get("raw")).toMatchObject({ name: "blob" })
+    expect(form.get("meta")).toBe('{"a":1}')
+    expect(form.getAll("tags")).toStrictEqual(["x", "y"])
+    expect(form.get("when")).toBe("1970-01-01T00:00:00.000Z")
+    // Buffers are bytes, so files, too, also in shared memory.
+    const files = await Promise.all(
+      ["bytes", "shared", "sharedView"].map((name) => (form.get(name) as Blob).arrayBuffer()),
+    )
+    expect(files.map((buffer) => new Uint8Array(buffer))).toStrictEqual(
+      [[1, 2], [3], [4]].map((values) => new Uint8Array(values)),
+    )
+    expect(form.has("skipped")).toBe(false)
+  })
+
+  it("passes ready-made bodies through, with their own or the declared type", async () => {
+    const { client, sent } = recorder(contract, {
+      headers: { "content-type": "application/json" },
+    })
+    const form = new FormData()
+    form.append("name", "n")
+    // A FormData's boundary is part of its own type, which no header replaces.
+    await client.fetch("POST /upload", {
+      contentType: "multipart/form-data",
+      headers: { "content-type": "multipart/form-data" },
+      body: form,
+    })
+    expect(sent().headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/)
+    const parts = await sent().formData()
+    expect(parts.get("name")).toBe("n")
+    await client.fetch("POST /upload", {
+      contentType: "application/octet-stream",
+      body: new Uint8Array([1, 2]),
+    })
+    expect(sent().headers.get("content-type")).toBe("application/octet-stream")
+    expect(new Uint8Array(await sent().arrayBuffer())).toStrictEqual(new Uint8Array([1, 2]))
+    // fetch takes no shared memory, and some runtimes would send it as text.
+    await client.fetch("POST /upload", {
+      contentType: "application/octet-stream",
+      body: new Uint8Array(shared([1, 2])),
+    })
+    expect(new Uint8Array(await sent().arrayBuffer())).toStrictEqual(new Uint8Array([1, 2]))
+    for (const body of [new ReadableStream(), chunks()]) {
+      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+      await client.fetch("POST /upload", { contentType: "application/octet-stream", body })
+      // Streaming request bodies go in half duplex.
+      expect((sent() as Request & { duplex?: string }).duplex).toBe("half")
+    }
+  })
+
+  it("refuses to guess an encoding", async () => {
+    const { client, sent } = recorder<{
+      "POST /x": { body: { "application/xml": { a: string } }; responses: object }
+      "POST /t": { body: { "text/plain": string }; responses: object }
+    }>({
+      version: 1,
+      endpoints: {
+        "POST /x": { contentType: "application/xml" },
+        "POST /t": { contentType: "text/plain" },
       },
     })
-    await api("POST /log", {
-      query: { since: new Date(Date.UTC(2026, 0, 2)) },
-      body: [{ n: 1 }, { n: 2 }],
-    })
-    expect(requests[0]).toMatchObject({
-      url: "/log?since=2026-01-02T00%3A00%3A00.000Z",
-      body: '{"n":1}\n{"n":2}\n',
-      headers: { "content-type": "application/x-ndjson" },
-    })
-  })
-})
-
-describe("fetchAdapter", () => {
-  it.each([
-    [
-      respond('{"id":1}', { headers: { "content-type": "application/json; charset=utf-8" } }),
-      { id: 1 },
-    ],
-    [respond("hello", { headers: { "content-type": "text/plain" } }), "hello"],
-    [respond(null, { status: 204 }), undefined],
-    [respond("", { headers: { "content-type": "application/json" } }), undefined],
-    [respond(null, {}), undefined],
-    // An empty text body is still text.
-    [respond("", { headers: { "content-type": "text/plain" } }), ""],
-  ])("decodes responses (%#)", async (fetchImpl, expected) => {
-    const adapter = fetchAdapter(fetchImpl as typeof fetch)
-    expect(
-      await adapter({ method: "GET", url: "/x", headers: {}, body: undefined, options: undefined }),
-    ).toStrictEqual(expected)
-  })
-
-  it("decodes JSON sequences and server-sent events into arrays", async () => {
-    expect(await decode('{"a":1}\n\n{"a":2}\n', "application/jsonl")).toStrictEqual([
-      { a: 1 },
-      { a: 2 },
-    ])
-    const rs = String.fromCharCode(0x1e)
-    expect(await decode(`${rs}1\n${rs}2\n`, "application/json-seq")).toStrictEqual([1, 2])
-    expect(
-      await decode(
-        ": comment\nevent: tick\ndata: a\ndata: b\nid: 7\n\ndata: c\nretry: 10\n\n",
-        "text/event-stream",
-      ),
-    ).toStrictEqual([
-      { data: "a\nb", event: "tick", id: "7" },
-      { data: "c", retry: 10 },
-    ])
-  })
-
-  it("keeps an undecodable error body as text", async () => {
-    const adapter = fetchAdapter(
-      respond("<html>oops</html>", {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      }) as typeof fetch,
+    // The client cannot encode XML, so only ready-made bodies type-check.
+    // @ts-expect-error an object is not an XML body
+    await expect(client.fetch("POST /x", { body: { a: "1" } })).rejects.toThrow(
+      "Cannot encode a object as application/xml",
     )
-    const failure: unknown = await adapter({
-      method: "GET",
-      url: "/x",
-      headers: {},
-      body: undefined,
-      options: undefined,
-    }).catch((error: unknown) => error)
-    expect(failure).toBeInstanceOf(HttpError)
-    expect(failure).toMatchObject({ status: 500, body: "<html>oops</html>" })
-  })
-
-  it("returns other content as a Blob", async () => {
-    const adapter = fetchAdapter(
-      respond("abc", { headers: { "content-type": "image/png" } }) as typeof fetch,
-    )
-    const blob = await adapter({
-      method: "GET",
-      url: "/x",
-      headers: {},
-      body: undefined,
-      options: undefined,
-    })
-    expect(blob).toBeInstanceOf(Blob)
-  })
-
-  it("rejects non-2xx responses with HttpError carrying the decoded body", async () => {
-    const adapter = fetchAdapter(
-      respond('{"message":"nope"}', {
-        status: 404,
-        statusText: "Not Found",
-        headers: { "content-type": "application/json" },
-      }) as typeof fetch,
-    )
-    const failure: unknown = await adapter({
-      method: "GET",
-      url: "/x",
-      headers: {},
-      body: undefined,
-      options: undefined,
-    }).catch((error: unknown) => error)
-    expect(failure).toBeInstanceOf(HttpError)
-    expect(failure).toMatchObject({
-      status: 404,
-      body: { message: "nope" },
-      message: "HTTP 404 Not Found",
-    })
-  })
-
-  it("forwards the request and options to fetch", async () => {
-    let seen: [unknown, RequestInit | undefined] | undefined
-    const api = createClient({
-      contract,
-      adapter: fetchAdapter((url, init) => {
-        seen = [url, init]
-        return Promise.resolve(new Response(null, { status: 204 }))
-      }),
-      options: { cache: "no-store" },
-    })
-    await api("DELETE /pets/{id}", { params: { id: 3 }, options: { keepalive: true } })
-    expect(seen).toStrictEqual([
-      "https://eu.api.test/v1/pets/3",
-      { cache: "no-store", keepalive: true, method: "DELETE", headers: {}, body: undefined },
+    await client.fetch("POST /x", { body: "<a>1</a>" })
+    expect(await sent().text()).toBe("<a>1</a>")
+    await client.fetch("POST /t", { body: "hi" })
+    expect([sent().headers.get("content-type"), await sent().text()]).toStrictEqual([
+      "text/plain",
+      "hi",
     ])
-  })
-})
-
-/** Compile-time checks: what the client infers from what it is given. Never called. */
-function inferenceChecks(api: Client<Endpoints>): void {
-  // @ts-expect-error unknown endpoint
-  void api("GET /nope")
-  void createClient({
-    contract,
-    security: { bearer: "t", basic: { username: "u", password: "p" } },
-  })
-  // @ts-expect-error credentials are checked against the declared schemes
-  void createClient({ contract, security: { nope: "t" } })
-  // @ts-expect-error basic credentials need a username and password
-  void createClient({ contract, security: { basic: "t" } })
-  const custom = createClient({
-    contract,
-    adapter: (_request: AdapterRequest<{ retries: number }>) => Promise.resolve(),
-  })
-  void custom("GET /pets", { options: { retries: 2 } })
-  // @ts-expect-error options are the adapter's
-  void custom("GET /pets", { options: { cache: "no-store" } })
-}
-
-/** Compile-time checks: a call must give what the operation requires. Never called. */
-function requirementChecks(api: Client<Endpoints>): void {
-  void api("GET /pets")
-  void api("GET /pets", { query: { limit: 1 } })
-  // @ts-expect-error path parameters are required
-  void api("GET /pets/{id}")
-  // @ts-expect-error parameter types are checked
-  void api("GET /pets/{id}", { params: { id: "1" } })
-  // @ts-expect-error a required query parameter
-  void api("GET /search", { query: {} })
-  // @ts-expect-error no request body on this operation
-  void api("GET /pets", { body: {} })
-  // @ts-expect-error the body is required
-  void api("POST /pets")
-  // @ts-expect-error body type is checked
-  void api("POST /pets", { body: { name: 1 } })
-  void api("PATCH /pets/{id}", { params: { id: 1 } })
-  // The only declared media type is the default; a JSON one is otherwise.
-  void api("PATCH /pets/{id}", { params: { id: 1 }, body: { name: "x" } })
-  void api("POST /charges", { body: { amount: 1 } })
-  // @ts-expect-error the body is still checked
-  void api("POST /charges", { body: { amount: "1" } })
-  // @ts-expect-error two media types and no JSON: the call names one
-  void api("POST /upload", { body: { file: new Blob([]) } })
-  void api("POST /upload", { contentType: "multipart/form-data", body: { file: new Blob([]) } })
-  // @ts-expect-error the body must match the chosen media type
-  void api("POST /upload", { contentType: "multipart/form-data", body: { name: "x" } })
-  // @ts-expect-error only declared media types
-  void api("POST /token", { contentType: "application/json", body: { grant_type: "x" } })
-  // Declared headers keep their types; others are free-form.
-  void api("GET /pets/{id}", { params: { id: 1 }, headers: { "X-Trace": "t", "X-Other": "o" } })
-  // @ts-expect-error unknown endpoint
-  void api("GET /nope")
-}
-
-describe("types", () => {
-  const api = createClient({ contract })
-
-  it("derives results from the response map", () => {
-    expect(api).toBeTypeOf("function")
-    expectTypeOf<SuccessOf<Endpoints["GET /pets"]>>().toEqualTypeOf<Schemas.Pet[]>()
-    expectTypeOf<SuccessOf<Endpoints["DELETE /pets/{id}"]>>().toEqualTypeOf<undefined>()
-    expectTypeOf<SuccessOf<Endpoints["GET /search"]>>().toEqualTypeOf<string>()
-    expectTypeOf<SuccessOf<Endpoints["GET /health"]>>().toEqualTypeOf<unknown>()
-    expectTypeOf<ErrorOf<Endpoints["GET /pets/{id}"]>>().toEqualTypeOf<Schemas.Error>()
-    expectTypeOf<ReturnType<typeof api<"GET /pets/{id}">>>().resolves.toEqualTypeOf<Schemas.Pet>()
+    await expect(client.fetch("POST /t", { body: 1 as never })).rejects.toThrow(
+      "Cannot encode a number as text/plain",
+    )
   })
 
-  it("infers endpoints, credentials, and adapter options from what it is given", () => {
-    expect(inferenceChecks).toBeTypeOf("function")
-    expectTypeOf<SuccessOf<Endpoints["GET /events"]>>().toEqualTypeOf<
-      Array<{ data: string; event?: string }>
-    >()
-  })
-
-  it("requires what the operation requires", () => {
-    expect(requirementChecks).toBeTypeOf("function")
+  it("refuses a Blob wherever it would be written as text or JSON", async () => {
+    const { client } = recorder<{
+      "POST /m": {
+        query: { q?: unknown; j?: unknown }
+        body?: {
+          "application/json": unknown
+          "multipart/form-data": { meta?: object }
+          "application/x-www-form-urlencoded": { f?: unknown; j?: unknown }
+        }
+        responses: object
+      }
+    }>({
+      version: 1,
+      endpoints: {
+        "POST /m": {
+          query: { j: { contentType: "application/json" } },
+          encoding: { j: { contentType: "application/json" } },
+        },
+      },
+    })
+    const blob = new Blob([])
+    const form = "application/x-www-form-urlencoded"
+    const multipart = "multipart/form-data"
+    const calls = [
+      [() => client.fetch("POST /m", { body: { a: blob } }), "inside JSON"],
+      [() => client.fetch("POST /m", { query: { q: blob } }), "as text"],
+      [() => client.fetch("POST /m", { query: { j: { a: blob } } }), "inside JSON"],
+      [() => client.fetch("POST /m", { contentType: form, body: { f: blob } }), "as text"],
+      [() => client.fetch("POST /m", { contentType: form, body: { j: [blob] } }), "inside JSON"],
+      [
+        () => client.fetch("POST /m", { contentType: multipart, body: { meta: { blob } } }),
+        "inside JSON",
+      ],
+    ] as const
+    for (const [call, where] of calls) {
+      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+      await expect(call()).rejects.toThrow(`A Blob cannot be sent ${where}`)
+    }
   })
 })
 
 describe("reserved characters, delimiters, and path segments", () => {
-  interface Api {
-    "GET /files/{path}": { params: { path: string }; response: Record<never, never> }
-    "GET /q": { query: Record<string, unknown>; response: Record<never, never> }
-  }
-  const api = createClient({
-    contract: contractFor<Api>({
+  const { client, sent } = recorder<{
+    "GET /files/{path}": { params: { path: string }; responses: object }
+    "GET /q": { query: Record<string, unknown>; responses: object }
+  }>({
+    version: 1,
+    endpoints: {
       "GET /files/{path}": {
         params: { path: { style: "simple", explode: false, allowReserved: true } },
       },
@@ -609,260 +422,124 @@ describe("reserved characters, delimiters, and path segments", () => {
           ids: { style: "form", explode: false },
           sp: { style: "spaceDelimited", explode: false },
           pipe: { style: "pipeDelimited", explode: false },
+          spArray: { style: "spaceDelimited", explode: false },
+          pipeArray: { style: "pipeDelimited", explode: false },
         },
       },
-    }),
-    adapter: echo("url"),
+    },
   })
 
   it("keeps reserved characters only where they cannot change the URL", async () => {
-    expect(await api("GET /files/{path}", { params: { path: "a/b c%20d#e?f" } })).toBe(
-      "/files/a/b%20c%20d%23e%3Ff",
-    )
-    expect(await api("GET /q", { query: { next: "a#b&c=d/e?f%20g" } })).toBe(
-      "/q?next=a%23b%26c%3Dd/e?f%20g",
-    )
+    await client.fetch("GET /files/{path}", { params: { path: "a/b c%20d#e?f" } })
+    expect(url(sent())).toBe("/files/a/b%20c%20d%23e%3Ff")
+    await client.fetch("GET /q", { query: { next: "a#b&c=d/e?f%20g+h" } })
+    expect(url(sent())).toBe("/q?next=a%23b%26c%3Dd/e?f%20g%2Bh")
   })
 
   it("keeps commas between values, and percent-encodes spaces and pipes", async () => {
-    const query = { ids: ["a,b", "c"], sp: { R: 100, G: 200 }, pipe: { R: 100, G: 200 } }
-    expect(await api("GET /q", { query })).toBe(
-      "/q?ids=a%2Cb,c&sp=R%20100%20G%20200&pipe=R%7C100%7CG%7C200",
+    const query = {
+      ids: ["a,b", null, "c"],
+      sp: { R: 100, G: 200 },
+      pipe: { R: 100, G: 200 },
+      spArray: ["a b", null, "c/d"],
+      pipeArray: ["a b", null, "c/d"],
+    }
+    await client.fetch("GET /q", { query })
+    expect(url(sent())).toBe(
+      "/q?ids=a%2Cb,c&sp=R%20100%20G%20200&pipe=R%7C100%7CG%7C200&spArray=a%20b%20c%2Fd&pipeArray=a%20b%7Cc%2Fd",
     )
   })
 
   it("refuses path values that would reach another resource", async () => {
-    for (const path of ["..", ".", "", "a/../b", "%2e%2E", "/a"]) {
+    for (const path of ["..", ".", "", "a/../b", "%2e", "%2e%2E", "/a", "a//b"]) {
+      const call = client.fetch("GET /files/{path}", { params: { path } })
       // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-      await expect(api("GET /files/{path}", { params: { path } })).rejects.toThrow(
-        "another resource",
-      )
+      await expect(call).rejects.toThrow("another resource")
+      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+      await expect(call).rejects.toBeInstanceOf(TypeError)
     }
   })
 })
 
-describe("choosing credentials", () => {
-  interface Api {
-    "GET /optional": { response: Record<never, never> }
-    "GET /tls-first": { response: Record<never, never> }
-    "GET /fallback": { response: Record<never, never> }
-    "GET /anonymous": { response: Record<never, never> }
-    "GET /undeclared": { response: Record<never, never> }
-  }
-  const secured: Contract<Api, { bearer?: string; key?: string }> = {
-    servers: [],
-    security: {
-      bearer: { type: "http", scheme: "bearer" },
-      key: { type: "apiKey", in: "header", name: "X-Key" },
-      tls: { type: "mutualTLS" },
-    },
-    endpoints: {
-      "GET /optional": { requires: [{}, { bearer: [] }] },
-      "GET /tls-first": { requires: [{ tls: [] }, { bearer: [] }] },
-      "GET /fallback": { requires: [{ bearer: [] }, { key: [] }] },
-      "GET /anonymous": { requires: [] },
-    },
-  }
-  const headersFor = (
-    security: Parameters<
-      typeof createClient<Api, { bearer?: string; key?: string }>
-    >[0]["security"],
-    endpoint: keyof Api,
-  ): Promise<unknown> =>
-    createClient({ contract: secured, security, adapter: echo("headers") })(endpoint)
-
-  it("sends the credentials given when the operation accepts them", async () => {
-    expect(await headersFor({ bearer: "t" }, "GET /optional")).toStrictEqual({
-      authorization: "Bearer t",
+describe("responses", () => {
+  it("hands the request to the fetch option, called unbound, and resolves to its response", async () => {
+    const answer = new Response("{}", { status: 404 })
+    const client = createClient(contract, {
+      baseUrl: "https://api.test",
+      // A browser's fetch refuses to be called on another object.
+      fetch(this: unknown, request) {
+        expect(this).toBeUndefined()
+        expect(request.url).toBe("https://api.test/pets/1")
+        return Promise.resolve(answer)
+      },
     })
-    expect(await headersFor({ bearer: "t" }, "GET /tls-first")).toStrictEqual({
-      authorization: "Bearer t",
-    })
-    expect(await headersFor({ bearer: "t", key: "k" }, "GET /anonymous")).toStrictEqual({})
+    expect(await client.fetch("GET /pets/{id}", { params: { id: 1 } })).toBe(answer)
   })
 
-  it("resolves each credential once per request", async () => {
-    let calls = 0
-    const bearer = (): string | undefined => {
-      calls++
-      return undefined
-    }
-    await headersFor({ bearer, key: "k" }, "GET /fallback")
-    expect(calls).toBe(1)
+  it.each([
+    ['{"id":1}', "application/json; charset=utf-8", { id: 1 }],
+    ['{"id":1}', "application/problem+json", { id: 1 }],
+    ["hello", "text/plain", "hello"],
+    // An empty text body is still text.
+    ["", "text/plain", ""],
+    ["", "application/json", undefined],
+    [" \n", "application/json", undefined],
+    [null, undefined, undefined],
+  ])("reads a body by its content type (%#)", async (body, type, expected) => {
+    expect(await decoded(body, type)).toStrictEqual(expected)
+    // A failure's error is never undefined: without a body, it is null.
+    expect(await decoded(body, type, 500)).toStrictEqual(expected ?? null)
   })
 
-  it("tries the next requirement when a credential function returns nothing", async () => {
-    expect(
-      await headersFor({ bearer: () => undefined as never, key: "k" }, "GET /fallback"),
-    ).toStrictEqual({
-      "x-key": "k",
-    })
-  })
-
-  it("sends what it is given where no security is declared", async () => {
-    expect(await headersFor({ bearer: "t", key: "k" }, "GET /undeclared")).toStrictEqual({
-      "authorization": "Bearer t",
-      "x-key": "k",
-    })
-  })
-})
-
-describe("bodies by media type", () => {
-  interface Api {
-    "POST /json": { body: { "text/json": { a: number } }; response: Record<never, never> }
-    "POST /form": {
-      body: { "application/x-www-form-urlencoded": string }
-      response: Record<never, never>
-    }
-    "POST /text": { body: { "text/*": string }; response: Record<never, never> }
-    "PUT /raw": { body: { "application/octet-stream": Blob }; response: Record<never, never> }
-  }
-  const requests: AdapterRequest[] = []
-  const api = createClient({
-    contract: contractFor<Api>({
-      "POST /json": { contentType: "text/json" },
-      "POST /form": { contentType: "application/x-www-form-urlencoded" },
-      "POST /text": { contentType: "text/*" },
-      "PUT /raw": { contentType: "application/octet-stream" },
-    }),
-    adapter: (request) => {
-      requests.push(request)
-      return Promise.resolve()
-    },
-  })
-
-  it("encodes each as the client declares, and passes streams through", async () => {
-    await api("POST /json", { body: { a: 1 } })
-    await api("POST /form", { body: "a=1&b=2" })
-    await api("POST /text", { body: "hi" })
-    const stream = chunks()
-    await api("PUT /raw", { body: stream as never })
-    expect(requests.map((r) => [r.body, r.headers["content-type"]])).toStrictEqual([
-      ['{"a":1}', "text/json"],
-      ["a=1&b=2", "application/x-www-form-urlencoded"],
-      ["hi", "text/plain"],
-      [stream, "application/octet-stream"],
-    ])
-    await expect(api("POST /text", { body: 1 as never })).rejects.toThrow("must be a string")
-    // JSON, form fields, and parameters have no room for bytes: a Blob there is
-    // refused, not sent as {}.
-    await expect(api("POST /json", { body: { a: new Blob([]) } as never })).rejects.toThrow(
-      "A Blob cannot be sent inside JSON",
+  it("reads no content as undefined, and other content as a Blob", async () => {
+    expect(await decoded(null, "application/json", 204)).toBeUndefined()
+    expect(await decoded(null, "application/json", 205)).toBeUndefined()
+    expect(await decoded(null, "application/json", 304)).toBeNull()
+    // A body where none can be is still consumed, so that the connection is free.
+    const { client } = recorder<{ "HEAD /x": { responses: object } }>(
+      { version: 1, endpoints: {} },
+      {},
+      () => new Response("x", { status: 200, headers: { "content-type": "application/json" } }),
     )
-    const fields = createClient({
-      contract: contractFor<{
-        "POST /f": {
-          query: { q?: Blob }
-          body: { "application/x-www-form-urlencoded": { f?: Blob } }
-          response: Record<never, never>
-        }
-      }>({ "POST /f": { contentType: "application/x-www-form-urlencoded" } }),
-      adapter: () => Promise.resolve(),
-    })
-    await expect(fields("POST /f", { query: { q: new Blob([]) }, body: {} })).rejects.toThrow(
-      "A Blob cannot be sent as text",
-    )
-    await expect(fields("POST /f", { body: { f: new Blob([]) } })).rejects.toThrow(
-      "A Blob cannot be sent as text",
-    )
-    // Wherever the client writes JSON: object parts, content parameters, sequences, encoded fields.
-    const json = createClient({
-      contract: contractFor<{
-        "POST /m": {
-          query: { q?: object }
-          body: {
-            "multipart/form-data": { meta?: object }
-            "application/x-ndjson": object[]
-            "application/x-www-form-urlencoded": { f?: object }
-          }
-          response: Record<never, never>
-        }
-      }>({
-        "POST /m": {
-          query: { q: { contentType: "application/json" } },
-          encoding: {
-            "application/x-www-form-urlencoded": { f: { contentType: "application/json" } },
-          },
-        },
-      }),
-      adapter: () => Promise.resolve(),
-    })
-    const data = { data: new Blob([]) }
-    for (const call of [
-      () => json("POST /m", { contentType: "multipart/form-data", body: { meta: data } }),
-      () => json("POST /m", { query: { q: data }, contentType: "application/x-ndjson", body: [] }),
-      () => json("POST /m", { contentType: "application/x-ndjson", body: [data] }),
+    const { data, response } = await client.result("HEAD /x")
+    expect(data).toBeUndefined()
+    expect(response.bodyUsed).toBe(true)
+    expect(await decoded("abc", "image/png")).toBeInstanceOf(Blob)
+    expect(await decoded(new Blob(["abc"]))).toBeInstanceOf(Blob)
+    // Event streams and JSON sequences are not parsed: `fetch` streams them.
+    expect(await decoded("data: x\n\n", "text/event-stream")).toBe("data: x\n\n")
+    expect(await decoded('{"a":1}\n', "application/jsonl")).toBeInstanceOf(Blob)
+  })
+
+  it("gives the data of a success and the error of a failure, with the status, its body read", async () => {
+    let status = 200
+    const { client } = recorder(
+      contract,
+      {},
       () =>
-        json("POST /m", { contentType: "application/x-www-form-urlencoded", body: { f: data } }),
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-      await expect(call()).rejects.toThrow("A Blob cannot be sent inside JSON")
-    }
+        new Response(status === 200 ? '{"id":1,"name":"Rex"}' : '{"message":"nope"}', {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+    )
+    const found = await client.result("GET /pets/{id}", { params: { id: 1 } })
+    expect(found).toMatchObject({ data: { id: 1, name: "Rex" }, error: undefined, status: 200 })
+    status = 404
+    const missing = await client.result("GET /pets/{id}", { params: { id: 1 } })
+    expect(missing).toMatchObject({ data: undefined, error: { message: "nope" }, status: 404 })
+    // The body is read, so the connection is free again.
+    expect(missing.response.bodyUsed).toBe(true)
   })
 
-  it("streams request bodies through fetch in half duplex", async () => {
-    let init: (RequestInit & { duplex?: string }) | undefined
-    const adapter = fetchAdapter((_url, given) => {
-      init = given
-      return Promise.resolve(new Response(null, { status: 204 }))
-    })
-    await adapter({
-      method: "PUT",
-      url: "/raw",
-      headers: {},
-      body: new ReadableStream() as never,
-      options: undefined,
-    })
-    expect(init?.duplex).toBe("half")
-  })
-
-  it("lets a body bring its own content type, and finds declared headers in any case", async () => {
-    const { api: fixture, requests: sent } = recording({
-      headers: { "Content-Type": "application/json" },
-    })
-    await fixture("POST /upload", {
-      contentType: "multipart/form-data",
-      body: { file: new Blob([]) },
-    })
-    await fixture("GET /files/{names}", {
-      params: { names: ["a"] },
-      headers: { "x-range": { from: 5 } },
-    })
-    expect(sent[0].headers["content-type"]).toMatch(/^multipart\/form-data; boundary=/)
-    expect(sent[1].headers["x-range"]).toBe("from=5")
-  })
-})
-
-describe("decoding responses", () => {
-  it("decodes by the same media classes as the types", async () => {
-    expect(await decode('{"a":1}', "text/json")).toStrictEqual({ a: 1 })
-    expect(await decode("event: ping\n\ndata: x\n\n", "text/event-stream")).toStrictEqual([
-      { data: "x" },
-    ])
-    expect(await decode("", "image/png")).toBeInstanceOf(Blob)
-    expect(await decode(null)).toBeUndefined()
-  })
-})
-
-/** Compile-time checks: adapter options and credentials. Never called. */
-function optionChecks(): void {
-  const api = createClient({ contract, options: { cache: "no-store" } })
-  void api("GET /pets", { options: { keepalive: true } })
-  // @ts-expect-error options are the adapter's, checked rather than inferred
-  void createClient({ contract, options: { chache: "no-store" } })
-  // @ts-expect-error no security schemes, so no credentials
-  void createClient({ contract: contractFor<Endpoints>(), security: { token: "x" } })
-  const wildcard = createClient({
-    contract: contractFor<{
-      "PUT /x": { body: { "*/*": { a: number } }; response: Record<never, never> }
-    }>(),
-  })
-  // @ts-expect-error contentType names a declared media type
-  void wildcard("PUT /x", { contentType: "text/plain", body: { a: 1 } })
-}
-
-describe("option types", () => {
-  it("takes adapter options from the adapter, and credentials only for declared schemes", () => {
-    expect(optionChecks).toBeTypeOf("function")
+  it("rejects a body that does not decode, as a network failure does", async () => {
+    const { client } = recorder(
+      contract,
+      {},
+      () =>
+        new Response("<html>", { status: 502, headers: { "content-type": "application/json" } }),
+    )
+    await expect(client.result("GET /pets")).rejects.toThrow(
+      "The 502 response is not the JSON it says",
+    )
   })
 })

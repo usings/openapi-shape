@@ -1,5 +1,5 @@
-import type { Declaration, Field, Literal, Type } from "./model"
-import { NEVER, UNKNOWN } from "./model"
+import type { Declaration, Field, Literal, Type } from "./types"
+import { NEVER, UNKNOWN } from "./types"
 
 /** Normalized union: flattened, deduplicated, with absorbed members removed. */
 export function union(members: Type[]): Type {
@@ -11,8 +11,7 @@ export function union(members: Type[]): Type {
   if (flat.some((t) => t.kind === "unknown")) return UNKNOWN
   let out = dedupe(flat.filter((t) => t.kind !== "never"))
 
-  const has = (kind: "string" | "number" | "boolean"): boolean =>
-    out.some((t) => t.kind === kind && !("format" in t && t.format !== undefined))
+  const has = (kind: "string" | "number" | "boolean"): boolean => out.some((t) => t.kind === kind)
   const absorbs = { string: has("string"), number: has("number"), boolean: has("boolean") }
   out = out.filter((t) => {
     if (t.kind !== "literal") return true
@@ -205,10 +204,10 @@ function canonicalJson(value: unknown): string {
 }
 
 /** Structural identity of a type; declarations compare by identity. */
-export function typeKey(type: Type): string {
+function typeKey(type: Type): string {
   // Documentation does not affect identity; declarations compare by reference.
   return JSON.stringify(type, (key, value: unknown) =>
-    key === "docs"
+    key === "annotations"
       ? undefined
       : key === "target"
         ? `#${declarationId(value as Declaration)}`
@@ -454,8 +453,7 @@ function intersectTwoScalars(a: Type, b: Type): Type {
   }
   if (a.kind === "literal") return a
   if (b.kind === "literal") return b
-  // Same primitive: keep whichever carries a format.
-  return "format" in a && a.format !== undefined ? a : b
+  return a
 }
 
 function mergeObjects(objects: Type[]): Type {

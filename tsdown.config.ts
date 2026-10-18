@@ -1,8 +1,9 @@
 import { defineConfig } from "tsdown"
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/client.ts", "src/cli.ts"],
+  // Named, so that each stage directory can keep an index.ts.
+  entry: { index: "src/index.ts", client: "src/client/index.ts", cli: "src/cli/index.ts" },
   dts: true,
-  // The CLI is a bin; importing it would run it.
+  // The bin; importing it would run it.
   exports: { exclude: ["cli"] },
 })

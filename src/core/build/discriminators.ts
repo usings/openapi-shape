@@ -1,9 +1,9 @@
-import type { Node } from "../openapi/documents"
+import type { DocumentNode } from "../load/documents"
+import { componentNameOf, identity } from "../load/nodes"
+import { intersect, literal, union } from "../model/algebra"
+import type { Type } from "../model/types"
 import { isRecord } from "../shared/object"
-import { intersect, literal, union } from "./algebra"
-import type { Type } from "./model"
-import { componentNameOf, identity } from "./nodes"
-import type { SchemaBuilder } from "./schema"
+import type { SchemaBuilder } from "./schemas"
 
 /**
  * Discriminator Objects are hints that "MUST NOT change the validation
@@ -13,27 +13,27 @@ import type { SchemaBuilder } from "./schema"
  * Narrowings are recorded while building and applied by `applyNarrowing`.
  */
 export function narrowDiscriminated(
-  builder: SchemaBuilder,
-  node: Node,
+  schemas: SchemaBuilder,
+  node: DocumentNode,
   keyword: "oneOf" | "anyOf",
   types: Type[],
 ): Type[] {
   const schema = node.value as Record<string, unknown>
-  const discriminator = readDiscriminator(builder, node)
+  const discriminator = readDiscriminator(schemas, node)
   // With both present, the discriminator describes the oneOf.
   if (discriminator === undefined || (keyword === "anyOf" && Array.isArray(schema.oneOf))) {
     return types
   }
   return types.map((type, i) => {
-    const branch = builder.docs.child(node, keyword, i)
+    const branch = schemas.context.documents.child(node, keyword, i)
     if (!isRecord(branch.value) || typeof branch.value.$ref !== "string") return type
-    const chain = refChain(builder, branch)
+    const chain = refChain(schemas, branch)
     if (chain.length === 0) return type
     const member = {
       ids: new Set(chain.map((n) => identity(n))),
       name: chain.map((n) => componentNameOf(n)).find((n) => n !== undefined),
     }
-    return narrow(builder, branch, type, discriminator, [member])
+    return narrow(schemas, branch, type, discriminator, [member])
   })
 }
 
@@ -44,23 +44,23 @@ export function narrowDiscriminated(
  * searching the components for them).
  */
 export function parentDiscriminators(
-  builder: SchemaBuilder,
-  node: Node,
+  schemas: SchemaBuilder,
+  node: DocumentNode,
   componentName: string,
   type: Type,
   selfIds: string[],
 ): Type {
   let out = type
   const applied = new Set<string>()
-  for (const parent of allOfParents(builder, node, new Set(selfIds))) {
-    const discriminator = readDiscriminator(builder, parent)
+  for (const parent of allOfParents(schemas, node, new Set(selfIds))) {
+    const discriminator = readDiscriminator(schemas, parent)
     if (discriminator === undefined || applied.has(discriminator.property)) continue
     applied.add(discriminator.property)
     const family = [
       { ids: new Set(selfIds), name: componentName },
-      ...descendants(builder, selfIds),
+      ...descendants(schemas, selfIds),
     ]
-    out = narrow(builder, node, out, discriminator, family)
+    out = narrow(schemas, node, out, discriminator, family)
   }
   return out
 }
@@ -71,20 +71,20 @@ interface Discriminator {
   defaultIds?: Set<string>
 }
 
-function readDiscriminator(builder: SchemaBuilder, node: Node): Discriminator | undefined {
+function readDiscriminator(schemas: SchemaBuilder, node: DocumentNode): Discriminator | undefined {
   const schema = node.value
   if (!isRecord(schema)) return undefined
   const raw = schema.discriminator
   if (!isRecord(raw) || typeof raw.propertyName !== "string") return undefined
-  const at = builder.docs.child(node, "discriminator")
+  const at = schemas.context.documents.child(node, "discriminator")
   const mapping: Discriminator["mapping"] = []
   if (isRecord(raw.mapping)) {
     for (const [value, target] of Object.entries(raw.mapping)) {
       if (typeof target !== "string") continue
-      const ids = mappingTarget(builder, at, target)
+      const ids = mappingTarget(schemas, at, target)
       if (ids) mapping.push({ value, ids })
       else {
-        builder.warn(
+        schemas.context.warn(
           "discriminator-mismatch",
           `Discriminator mapping "${value}" points to "${target}", which does not resolve to a schema`,
           at,
@@ -94,31 +94,40 @@ function readDiscriminator(builder: SchemaBuilder, node: Node): Discriminator | 
     }
   }
   const out: Discriminator = { property: raw.propertyName, mapping }
-  if (typeof raw.defaultMapping === "string" && node.doc.version === "3.2") {
-    out.defaultIds = mappingTarget(builder, at, raw.defaultMapping)
+  if (typeof raw.defaultMapping === "string" && node.document.version === "3.2") {
+    out.defaultIds = mappingTarget(schemas, at, raw.defaultMapping)
   }
   return out
 }
 
 /** Resolve a mapping value: a component name, or a URI reference when it contains `/` or `#`. */
-function mappingTarget(builder: SchemaBuilder, at: Node, target: string): Set<string> | undefined {
-  let node: Node | undefined
+function mappingTarget(
+  schemas: SchemaBuilder,
+  at: DocumentNode,
+  target: string,
+): Set<string> | undefined {
+  let node: DocumentNode | undefined
   if (!target.includes("/") && !target.includes("#")) {
-    const docs = builder.docs
-    for (const doc of [at.doc, docs.entry]) {
-      const candidate = docs.child(docs.root(doc), "components", "schemas", target)
+    const annotations = schemas.context.documents
+    for (const document of [at.document, annotations.entry]) {
+      const candidate = annotations.child(
+        annotations.root(document),
+        "components",
+        "schemas",
+        target,
+      )
       if (candidate.value !== undefined) {
         node = candidate
         break
       }
     }
   } else {
-    const resolution = builder.docs.resolve(target, at)
+    const resolution = schemas.context.documents.resolve(target, at)
     if (resolution.kind === "found") node = resolution.node
     else if (resolution.kind === "pending") return new Set()
   }
   if (node === undefined) return undefined
-  return new Set([identity(node), ...refChain(builder, node).map((n) => identity(n))])
+  return new Set([identity(node), ...refChain(schemas, node).map((n) => identity(n))])
 }
 
 /** A schema a discriminator can select: its identities and its component name. */
@@ -128,8 +137,8 @@ interface Member {
 }
 
 function narrow(
-  builder: SchemaBuilder,
-  at: Node,
+  schemas: SchemaBuilder,
+  at: DocumentNode,
   type: Type,
   discriminator: Discriminator,
   members: Member[],
@@ -160,7 +169,7 @@ function narrow(
     property: discriminator.property,
     values: [...found],
     explicit,
-    location: builder.docs.locate(at.doc, at.pointer),
+    location: schemas.context.documents.locate(at.document, at.pointer),
   }
 }
 
@@ -317,12 +326,12 @@ function join(results: Literals[]): Literals {
 }
 
 /** Targets of a chain of `$ref`s starting at `node` (excluding `node`). */
-function refChain(builder: SchemaBuilder, node: Node): Node[] {
-  const out: Node[] = []
+function refChain(schemas: SchemaBuilder, node: DocumentNode): DocumentNode[] {
+  const out: DocumentNode[] = []
   const seen = new Set<string>()
   let current = node
   while (isRecord(current.value) && typeof current.value.$ref === "string") {
-    const resolution = builder.docs.resolve(current.value.$ref, current)
+    const resolution = schemas.context.documents.resolve(current.value.$ref, current)
     if (resolution.kind !== "found") break
     const id = identity(resolution.node)
     if (seen.has(id)) break
@@ -334,52 +343,59 @@ function refChain(builder: SchemaBuilder, node: Node): Node[] {
 }
 
 /** Schemas reachable through `allOf` references, nearest first. */
-function allOfParents(builder: SchemaBuilder, node: Node, seen: Set<string>): Node[] {
+function allOfParents(
+  schemas: SchemaBuilder,
+  node: DocumentNode,
+  seen: Set<string>,
+): DocumentNode[] {
   const schema = node.value
   if (!isRecord(schema) || !Array.isArray(schema.allOf)) return []
-  const out: Node[] = []
-  const later: Node[] = []
+  const out: DocumentNode[] = []
+  const later: DocumentNode[] = []
   schema.allOf.forEach((_, i) => {
-    const target = refChain(builder, builder.docs.child(node, "allOf", i)).at(-1)
+    const target = refChain(schemas, schemas.context.documents.child(node, "allOf", i)).at(-1)
     if (target === undefined || seen.has(identity(target))) return
     seen.add(identity(target))
     out.push(target)
     later.push(target)
   })
-  for (const parent of later) out.push(...allOfParents(builder, parent, seen))
+  for (const parent of later) out.push(...allOfParents(schemas, parent, seen))
   return out
 }
 
 const families = new WeakMap<SchemaBuilder, Map<string, Member[]>>()
 
 /** Entry-document components extending (via `allOf`, transitively) the schema with `selfIds`. */
-function descendants(builder: SchemaBuilder, selfIds: string[]): Member[] {
-  let children = families.get(builder)
+function descendants(schemas: SchemaBuilder, selfIds: string[]): Member[] {
+  let children = families.get(schemas)
   if (children === undefined) {
     children = new Map()
-    const components = builder.docs.child(
-      builder.docs.root(builder.docs.entry),
+    const components = schemas.context.documents.child(
+      schemas.context.documents.root(schemas.context.documents.entry),
       "components",
       "schemas",
     )
     for (const name of isRecord(components.value) ? Object.keys(components.value) : []) {
-      const node = builder.docs.child(components, name)
+      const node = schemas.context.documents.child(components, name)
       const member = {
-        ids: new Set([identity(node), ...refChain(builder, node).map((n) => identity(n))]),
+        ids: new Set([identity(node), ...refChain(schemas, node).map((n) => identity(n))]),
         name,
       }
-      const schema = (refChain(builder, node).at(-1) ?? node).value
+      const schema = (refChain(schemas, node).at(-1) ?? node).value
       if (!isRecord(schema) || !Array.isArray(schema.allOf)) continue
-      const owner = refChain(builder, node).at(-1) ?? node
+      const owner = refChain(schemas, node).at(-1) ?? node
       schema.allOf.forEach((_, i) => {
-        for (const parent of refChain(builder, builder.docs.child(owner, "allOf", i))) {
+        for (const parent of refChain(
+          schemas,
+          schemas.context.documents.child(owner, "allOf", i),
+        )) {
           const list = children?.get(identity(parent)) ?? []
           list.push(member)
           children?.set(identity(parent), list)
         }
       })
     }
-    families.set(builder, children)
+    families.set(schemas, children)
   }
   const out: Member[] = []
   const seen = new Set(selfIds)

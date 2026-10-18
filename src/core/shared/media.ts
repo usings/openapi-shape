@@ -1,7 +1,5 @@
 /**
- * How content of a media type goes over the wire, as openapi-shape/client
- * encodes and decodes it; the generator types content by the same classes, so
- * that types and the wire agree.
+ * What content of a media type carries, which decides its type:
  *
  * - `json`: parsed JSON: `…/json`, `…/…+json`, and the wildcards that take
  *   JSON, `*` + `/*` and `application/*`.
@@ -13,11 +11,15 @@
  * - `multipart`: `multipart/*` parts.
  * - `binary`: anything else: raw bytes.
  */
-export type MediaClass = "json" | "events" | "sequence" | "text" | "form" | "multipart" | "binary"
+type MediaClass = "json" | "events" | "sequence" | "text" | "form" | "multipart" | "binary"
 
 /** Lowercased `type/subtype` without parameters. */
 function mediaTypeEssence(mediaType: string): string {
-  return mediaType.split(";", 1)[0].trim().toLowerCase()
+  // Only spaces and tabs surround it (RFC 9110, OWS), as the client's types trim them.
+  return mediaType
+    .split(";", 1)[0]
+    .replaceAll(/^[ \t]+|[ \t]+$/g, "")
+    .toLowerCase()
 }
 
 export function classifyMediaType(mediaType: string): MediaClass {
@@ -32,7 +34,24 @@ export function classifyMediaType(mediaType: string): MediaClass {
   return "binary"
 }
 
-/** Whether a declared request media type takes JSON, the client's default. */
+/**
+ * The media type a request body is sent as when the call names none: the
+ * declared `application/json` one, parameters and all, where one alone is;
+ * else the only one declared; else none. The client's types apply the same
+ * rule (`DefaultMediaType` in src/client/types.ts).
+ */
+export function defaultMediaType(mediaTypes: string[]): string | undefined {
+  const json = mediaTypes.filter((m) => isApplicationJson(m))
+  if (json.length === 1) return json[0]
+  return mediaTypes.length === 1 ? mediaTypes[0] : undefined
+}
+
+/** Whether a media type is `application/json`, whatever its parameters. */
+export function isApplicationJson(mediaType: string): boolean {
+  return mediaTypeEssence(mediaType) === "application/json"
+}
+
+/** Whether a media type takes JSON: `application/json`, or a wildcard that admits it. */
 export function acceptsJson(mediaType: string): boolean {
   const essence = mediaTypeEssence(mediaType)
   return essence === "application/json" || essence === "*/*" || essence === "application/*"

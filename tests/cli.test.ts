@@ -1,20 +1,11 @@
-import { readFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { stripVTControlCharacters } from "node:util"
-import type * as Citty from "citty"
-import type { CommandDef } from "citty"
-import { renderUsage, runCommand, runMain } from "citty"
+import { renderUsage, runCommand } from "citty"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { cli } from "../src/cli/command"
 import { oas } from "./helpers/generate"
 import { withFiles } from "./helpers/tmp"
-
-// Importing the bin hands its command to runMain; capture it instead of running it.
-vi.mock("citty", async (importOriginal) => ({
-  ...(await importOriginal<typeof Citty>()),
-  runMain: vi.fn<typeof runMain>(),
-}))
-await import("../src/cli")
-const command = vi.mocked(runMain).mock.calls[0][0] as CommandDef
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -38,7 +29,7 @@ async function run(
     return true
   })
   try {
-    await runCommand(command, { rawArgs: argv })
+    await runCommand(cli, { rawArgs: argv })
   } finally {
     vi.restoreAllMocks()
   }
@@ -65,58 +56,26 @@ describe("openapi-shape <source>", () => {
     })
   })
 
-  it("writes --output, creating directories, with --formats mappings", async () => {
+  it("writes --output, creating directories", async () => {
     await withFiles({ "openapi.json": spec }, async (dir) => {
-      const result = await run(
-        [
-          "openapi.json",
-          "-o",
-          "src/gen/api.ts",
-          "--formats",
-          "date-time=Date, int64=Map<string, number>",
-        ],
-        dir,
-      )
-      expect(result).toMatchObject({ code: 0, stdout: "", stderr: "✔ Wrote src/gen/api.ts\n" })
+      const result = await run(["openapi.json", "-o", "src/gen/api.ts"], dir)
+      expect(result).toMatchObject({ code: 0, stdout: "", stderr: "Wrote src/gen/api.ts\n" })
       const code = await readFile(join(dir, "src/gen/api.ts"), "utf8")
-      expect(code).toContain("export type When = Date")
-      expect(code).toContain("export type Id = Map<string, number>")
+      expect(code).toContain("export type When = string")
+      expect(code).toContain("export const contract")
     })
   })
 
-  it("merges repeated --formats", async () => {
+  it("writes only an ES module, not CommonJS or a declaration file", async () => {
     await withFiles({ "openapi.json": spec }, async (dir) => {
-      // citty drops `--no-*` flags before it reads values.
-      const argv = [
-        "openapi.json",
-        "--formats",
-        "--no-check",
-        "date-time=Date",
-        "--formats=int64=bigint",
-      ]
-      const result = await run(argv, dir)
-      expect(result.code).toBe(0)
-      expect(result.stdout).toContain("export type When = Date")
-      expect(result.stdout).toContain("export type Id = bigint")
-    })
-  })
-
-  it("writes declarations only to .d.ts files", async () => {
-    await withFiles({ "openapi.json": spec }, async (dir) => {
-      await run(["openapi.json", "-o", "api.ts"], dir)
-      await run(["openapi.json", "-o", "api.d.ts"], dir)
-      await run(["openapi.json", "-o", "API.D.MTS"], dir)
-      expect(await readFile(join(dir, "api.ts"), "utf8")).toContain("export const contract")
-      expect(await readFile(join(dir, "api.d.ts"), "utf8")).not.toContain("contract")
-      expect(await readFile(join(dir, "API.D.MTS"), "utf8")).not.toContain("contract")
-    })
-  })
-
-  it("only writes TypeScript", async () => {
-    await withFiles({ "openapi.json": spec }, async (dir) => {
-      const result = await run(["openapi.json", "-o", "api.js"], dir)
-      expect(result.code).toBe(1)
-      expect(result.stderr).toContain("--output must be a .ts, .mts, or .cts file, got api.js")
+      for (const output of ["api.js", "api.cts", "api.d.ts", "API.D.MTS", "api.d.json.ts"]) {
+        // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+        const result = await run(["openapi.json", "-o", output], dir)
+        expect(result.code).toBe(1)
+        expect(result.stderr).toContain(`--output must be a .ts or .mts module, got ${output}`)
+      }
+      await expect(readFile(join(dir, "api.d.ts"), "utf8")).rejects.toThrow("ENOENT")
+      expect(await run(["openapi.json", "-o", "api.mts"], dir)).toMatchObject({ code: 0 })
     })
   })
 
@@ -124,48 +83,53 @@ describe("openapi-shape <source>", () => {
     await withFiles({ "openapi.json": spec, "file": "" }, async (dir) => {
       const result = await run(["openapi.json", "-o", "file/api.ts"], dir)
       expect(result.code).toBe(1)
-      expect(result.stderr).toMatch(/^error Cannot write file\/api\.ts: /m)
+      expect(result.stderr).toMatch(/^error: Cannot write file\/api\.ts: .*\n$/)
     })
   })
 
   it("checks --output without writing", async () => {
     await withFiles({ "openapi.json": spec }, async (dir) => {
-      const missing = await run(["openapi.json", "-o", "api.d.ts", "--check"], dir)
+      const missing = await run(["openapi.json", "-o", "api.ts", "--check"], dir)
       expect(missing).toMatchObject({
         code: 1,
-        stderr: expect.stringContaining("api.d.ts does not exist"),
+        stderr: "error: api.ts does not exist; run the same command without --check to write it\n",
       })
-      await run(["openapi.json", "-o", "api.d.ts"], dir)
-      const fresh = await run(["openapi.json", "-o", "api.d.ts", "--check"], dir)
-      expect(fresh).toMatchObject({ code: 0, stderr: "✔ api.d.ts is up to date\n" })
-      const stale = await run(
-        ["openapi.json", "-o", "api.d.ts", "--check", "--formats", "date-time=Date"],
-        dir,
-      )
+      await run(["openapi.json", "-o", "api.ts"], dir)
+      const fresh = await run(["openapi.json", "-o", "api.ts", "--check"], dir)
+      expect(fresh).toMatchObject({ code: 0, stderr: "api.ts is up to date\n" })
+      const written = await readFile(join(dir, "api.ts"), "utf8")
+      const edited = written.replace("= string", "= Date")
+      await writeFile(join(dir, "api.ts"), edited)
+      const stale = await run(["openapi.json", "-o", "api.ts", "--check"], dir)
       expect(stale.code).toBe(1)
-      expect(stale.stderr).toContain("api.d.ts is out of date")
-      expect(stale.stderr).toContain(
-        "expected:   export type When = Date\n    found:      export type When = string",
+      // Where it differs, as `<file>:<line>:`, then what to do.
+      expect(stale.stderr).toMatch(
+        /^api\.ts:(\d+): expected: {3}export type When = string\napi\.ts:\1: found: {4}  export type When = Date\nerror: api\.ts is out of date; run the same command without --check to update it\n$/,
       )
-      expect(await readFile(join(dir, "api.d.ts"), "utf8")).toContain("When = string")
+      expect(await readFile(join(dir, "api.ts"), "utf8")).toBe(edited)
     })
   })
 
-  it("reports warnings grouped by code", async () => {
+  it("reports every diagnostic on a line of its own, located in its file, and the outcome last", async () => {
     const schemas = Object.fromEntries(
-      Array.from({ length: 5 }, (_, i) => [
-        `S${i}`,
-        { type: "string", nullable: true, enum: ["a"] },
-      ]),
+      Array.from({ length: 5 }, (_, i) => [`S${i}`, { type: "text" }]),
     )
-    await withFiles({ "openapi.json": oas("3.0", { components: { schemas } }) }, async (dir) => {
-      const result = await run(["openapi.json", "-o", "api.d.ts"], dir)
-      expect(result.code).toBe(0)
-      expect(result.stderr.match(/^warning lenient-nullable/gm)).toHaveLength(3)
-      expect(result.stderr).toContain("    at #/components/schemas/S0/nullable\n")
-      expect(result.stderr).toContain("  … and 2 more lenient-nullable warnings\n")
-      expect(result.stderr).toContain("✔ Wrote api.d.ts with 5 warnings")
-    })
+    await withFiles(
+      { "specs/openapi.json": oas("3.1", { components: { schemas } }) },
+      async (dir) => {
+        const result = await run(["./specs/openapi.json", "-o", "api.ts"], dir)
+        expect(result.code).toBe(0)
+        const lines = result.stderr.split("\n")
+        expect(lines.slice(0, 5)).toStrictEqual(
+          Array.from(
+            { length: 5 },
+            (_, i) =>
+              `specs/openapi.json#/components/schemas/S${i}/type: warning invalid-schema: ${lines[0].split("invalid-schema: ")[1]}`,
+          ),
+        )
+        expect(lines.slice(5)).toStrictEqual(["Wrote api.ts (5 warnings)", ""])
+      },
+    )
   })
 
   it("exits 1 with every error when generation fails", async () => {
@@ -173,33 +137,43 @@ describe("openapi-shape <source>", () => {
       components: { schemas: { A: { $ref: "#/x" }, B: { $ref: "other.json" } } },
     })
     await withFiles({ "openapi.json": broken }, async (dir) => {
-      const result = await run(["openapi.json", "-o", "api.d.ts"], dir)
+      const result = await run(["openapi.json", "-o", "api.ts"], dir)
       expect(result.code).toBe(1)
-      expect(result.stderr).toContain('error unresolved-ref: Cannot resolve $ref "#/x"')
+      expect(result.stderr).toContain(
+        'openapi.json#/components/schemas/A/$ref: error unresolved-ref: Cannot resolve $ref "#/x"',
+      )
       expect(result.stderr).toContain('error unresolved-ref: Cannot resolve $ref "other.json"')
+      expect(result.stderr).toMatch(/\nerror: Generation failed \(2 errors\)\n$/)
     })
   })
 
-  it.each([
-    [["a", "b"], "Expected one <source>, got a, b"],
-    [["a", "--check"], "--check requires --output"],
-    [["a", "--formats", "nope"], '--formats expects name=type pairs, got "nope"'],
-    [["a", "--chek"], "Unknown option --chek"],
-    [["a", "-o", "x.ts", "--output=y.ts"], "--output can be given only once"],
-    [["a", "-ox.ts", "-o", "y.ts"], "--output can be given only once"],
-    [["a", "--o", "x.ts", "--o=y.ts"], "--output can be given only once"],
-  ])("rejects %j with usage", async (argv, message) => {
-    const result = await run(argv, ".")
-    expect(result.code).toBe(1)
-    expect(result.stderr).toContain(`error ${message}`)
-    expect(result.stderr).toContain("USAGE")
+  it("rejects --check without --output, pointing to --help", async () => {
+    const result = await run(["a", "--check"], ".")
+    expect(result).toMatchObject({
+      code: 1,
+      stderr: "error: --check requires --output; see openapi-shape --help\n",
+    })
+  })
+
+  it("requires a source", async () => {
+    await expect(runCommand(cli, { rawArgs: [] })).rejects.toThrow(
+      "Missing required positional argument: SOURCE",
+    )
+  })
+
+  it("takes the last of a repeated option, and --no-* flags", async () => {
+    await withFiles({ "openapi.json": spec }, async (dir) => {
+      const result = await run(["openapi.json", "-o", "x.ts", "-o", "y.ts", "--no-check"], dir)
+      expect(result).toMatchObject({ code: 0, stderr: "Wrote y.ts\n" })
+      await expect(readFile(join(dir, "x.ts"), "utf8")).rejects.toThrow("ENOENT")
+    })
   })
 
   it("describes itself", async () => {
-    const usage = stripVTControlCharacters(await renderUsage(command))
+    const usage = stripVTControlCharacters(await renderUsage(cli))
     expect(usage).toContain(
       "Generate a TypeScript module (types and the client contract) from an OpenAPI 3.0, 3.1, or 3.2 description.",
     )
-    expect(usage).toContain("--formats")
+    expect(usage).toContain("--check")
   })
 })

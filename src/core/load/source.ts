@@ -32,7 +32,7 @@ export async function fetchDocument(uri: string): Promise<FetchedDocument> {
   return { uri: finalUri, root: parseText(await response.text(), format) }
 }
 
-export function parseText(text: string, format: TextFormat): unknown {
+function parseText(text: string, format: TextFormat): unknown {
   if (format === "json") return JSON.parse(text)
   if (format !== "yaml") {
     try {

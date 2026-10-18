@@ -1,147 +1,111 @@
-import type { DocumentSet, Node } from "../openapi/documents"
-import type { Diagnostics } from "../shared/diagnostics"
+import type { DocumentSet } from "../load/documents"
+import { intersect, seal, union } from "../model/algebra"
+import type { Declaration, Field, Info, Model, Operation, Type } from "../model/types"
+import { UNKNOWN, childTypes } from "../model/types"
+import { Diagnostics } from "../shared/diagnostics"
 import { uniqueName } from "../shared/naming"
 import { isRecord } from "../shared/object"
-import { intersect, seal, union } from "./algebra"
-import { applyNarrowing } from "./discriminator"
-import type {
-  Contract,
-  Declaration,
-  Field,
-  Info,
-  Operation,
-  Runtime,
-  SecurityScheme,
-  Type,
-} from "./model"
-import { UNKNOWN, childTypes } from "./model"
-import { buildOperations, implicitServers, requirements, serverUrls } from "./operations"
-import { resolveObject } from "./references"
-import { KNOWN_DIALECTS, SchemaBuilder } from "./schema"
+import { BuildContext } from "./context"
+import { applyNarrowing } from "./discriminators"
+import type { Operations } from "./operations"
+import { buildOperations } from "./operations"
+import { SchemaBuilder } from "./schemas"
 
-/** Build the contract for an OpenAPI Description whose documents are (being) loaded. */
-export function buildContract(docs: DocumentSet, diagnostics: Diagnostics): Contract {
-  const builder = new SchemaBuilder(docs, diagnostics)
-  const root = docs.root(docs.entry)
-  const entry = isRecord(root.value) ? root.value : {}
-  const dialect = entry.jsonSchemaDialect
-  if (typeof dialect === "string" && !KNOWN_DIALECTS.some((known) => known.test(dialect))) {
-    builder.warn(
-      "unknown-dialect",
-      `Unknown JSON Schema dialect "${dialect}"; schemas are read as JSON Schema 2020-12`,
-      root,
-      "jsonSchemaDialect",
-    )
+/**
+ * Build the model of an OpenAPI Description. A build that reaches documents
+ * not loaded yet asks for them; they are loaded and the build starts over, so
+ * that every build sees the same documents from start to end.
+ */
+export async function buildModel(
+  documents: DocumentSet,
+): Promise<{ model: Model; diagnostics: Diagnostics }> {
+  for (;;) {
+    const diagnostics = new Diagnostics()
+    const model = buildOnce(new BuildContext(documents, diagnostics))
+    if (documents.hasPending) {
+      // oxlint-disable-next-line no-await-in-loop -- each build needs the documents the previous one asked for
+      if (await documents.loadPending()) continue
+      diagnostics.error("unresolved-ref", "References nest too deeply across documents", "#")
+    }
+    return { model, diagnostics }
   }
+}
 
-  builder.declareComponents()
-  builder.buildDeclarations()
-  const operations = buildOperations(builder)
-  builder.buildDeclarations()
-  const all = [...operations.endpoints, ...operations.webhooks, ...operations.callbacks]
+function buildOnce(context: BuildContext): Model {
+  const root = context.documents.root(context.documents.entry)
+  const entry = isRecord(root.value) ? root.value : {}
+  const schemas = new SchemaBuilder(context)
+  schemas.declareComponents()
+  schemas.buildDeclarations()
+  const operations = buildOperations(context, schemas)
+  // The schemas operations reference, named while building them.
+  schemas.buildDeclarations()
 
   // Every declaration is built: analysis may now look into referenced types.
+  applyDiscriminators(context, schemas, operations)
+  breakDirectCycles(context, schemas)
+  normalizeTypes(schemas, operations)
+  assignInputVariants(context, schemas, operations)
+  return { info: readInfo(entry), ...operations, declarations: schemas.declarations }
+}
+
+function allOperations(operations: Operations): Operation[] {
+  return [...operations.endpoints, ...operations.webhooks, ...operations.callbacks]
+}
+
+/** Narrow discriminated alternatives by their values (see `discriminators`). */
+function applyDiscriminators(
+  context: BuildContext,
+  schemas: SchemaBuilder,
+  operations: Operations,
+): void {
   const report = (message: string, location: string): void =>
-    diagnostics.warn("discriminator-mismatch", message, location)
-  transformAll(builder.declarations, all, (type) =>
+    context.diagnostics.warn("discriminator-mismatch", message, location)
+  transformAll(schemas.declarations, allOperations(operations), (type) =>
     type.kind === "narrow" ? applyNarrowing(type, report) : type,
   )
-  breakDirectCycles(builder.declarations, (owner, target) => {
-    const at = builder.stateOf(owner)?.node ?? root
-    builder.warn(
-      "circular-schema",
-      `${owner.name} and ${target.name} are defined in terms of each other only through allOf/anyOf/oneOf/$ref, which never terminates; inside ${owner.name}, ${target.name} is expanded without the parts that lead back`,
-      at,
-    )
-  })
-  // With references final, simplify again: shapes behind references are known now.
-  seal(builder.declarations)
-  transformAll(builder.declarations, all, (type) => type)
-  // What the client sends: endpoint requests, and the responses to webhooks and callbacks.
+}
+
+/** With references final, simplify every type again: shapes behind references are known now. */
+function normalizeTypes(schemas: SchemaBuilder, operations: Operations): void {
+  seal(schemas.declarations)
+  transformAll(schemas.declarations, allOperations(operations), (type) => type)
+}
+
+/**
+ * Name the request-side variants of declarations whose required properties
+ * differ by side, where what the client sends uses them: endpoint requests,
+ * and the responses to webhooks and callbacks.
+ */
+function assignInputVariants(
+  context: BuildContext,
+  schemas: SchemaBuilder,
+  operations: Operations,
+): void {
   const sent = [
     ...operations.endpoints.flatMap((op) => requestTypes(op)),
     ...[...operations.webhooks, ...operations.callbacks].flatMap((op) => responseTypes(op)),
   ]
-  for (const declaration of assignInputNames(builder.declarations, sent)) {
-    const at = builder.stateOf(declaration)?.node
+  for (const declaration of assignInputNames(schemas.declarations, sent)) {
+    const at = schemas.stateOf(declaration)?.node
     if (at && declaration.inputName !== `${declaration.name}Input`) {
-      builder.warn(
+      context.warn(
         "renamed-schema",
         `The request-side variant of ${declaration.name} is emitted as ${declaration.inputName} because ${declaration.name}Input is already taken`,
         at,
       )
     }
   }
-
-  return {
-    info: readInfo(entry),
-    ...operations,
-    declarations: builder.declarations,
-    runtime: readRuntime(builder, operations.endpoints),
-  }
-}
-
-/** Servers, security schemes, and default security of the entry document. */
-function readRuntime(builder: SchemaBuilder, endpoints: Operation[]): Runtime {
-  const root = builder.docs.root(builder.docs.entry)
-  const runtime: Runtime = {
-    servers:
-      serverUrls(builder, builder.docs.child(root, "servers")) ??
-      implicitServers(builder.docs.entry),
-    security: {},
-  }
-  const schemes = builder.docs.child(root, "components", "securitySchemes")
-  if (isRecord(schemes.value)) {
-    // Built from entries: a scheme may be named `__proto__`.
-    runtime.security = Object.fromEntries(
-      Object.keys(schemes.value).flatMap((name) => {
-        const resolved = resolveObject(builder, builder.docs.child(schemes, name))
-        const scheme = resolved && securityScheme(builder, resolved.node)
-        return scheme ? [[name, scheme]] : []
-      }),
-    )
-  }
-  const requires = requirements(builder, builder.docs.child(root, "security"))
-  if (requires) runtime.requires = requires
-  const credentials = Object.values(runtime.security).some((s) => s.type !== "mutualTLS")
-  if (credentials && !requires && endpoints.some((e) => !e.requires)) {
-    builder.warn(
-      "lenient-security",
-      "Security schemes are declared, but neither the document nor some operations require any; the client sends the credentials it is given to those operations",
-      schemes,
-    )
-  }
-  return runtime
-}
-
-function securityScheme(builder: SchemaBuilder, node: Node): SecurityScheme | undefined {
-  const value = node.value
-  const invalid = (message: string): undefined => {
-    builder.warn("invalid-security", `${message}; the scheme is left out`, node)
-    return undefined
-  }
-  if (!isRecord(value)) return invalid("A security scheme must be an object")
-  switch (value.type) {
-    case "apiKey":
-      if (typeof value.name !== "string") return invalid('An apiKey scheme needs a "name"')
-      if (value.in !== "header" && value.in !== "query" && value.in !== "cookie") {
-        return invalid('An apiKey scheme\'s "in" must be header, query, or cookie')
-      }
-      return { type: "apiKey", in: value.in, name: value.name }
-    case "http":
-      if (typeof value.scheme !== "string") return invalid('An http scheme needs a "scheme"')
-      return { type: "http", scheme: value.scheme.toLowerCase() }
-    case "oauth2":
-    case "openIdConnect":
-    case "mutualTLS":
-      return { type: value.type }
-    default:
-      return invalid(`Unknown security scheme type ${JSON.stringify(value.type)}`)
-  }
 }
 
 function readInfo(entry: Record<string, unknown>): Info {
-  const info: Info = { openapi: String(entry.openapi) }
+  const servers = Array.isArray(entry.servers) ? entry.servers : []
+  const info: Info = {
+    openapi: String(entry.openapi),
+    servers: servers.flatMap((s: unknown) =>
+      isRecord(s) && typeof s.url === "string" ? [s.url] : [],
+    ),
+  }
   const source = isRecord(entry.info) ? entry.info : {}
   for (const key of ["title", "version", "description"] as const) {
     const value = source[key]
@@ -172,7 +136,7 @@ function transformAll(
     }
     for (const media of operation.body?.content ?? []) media.type = rebuild(media.type, finish)
     for (const response of operation.responses) {
-      response.type = rebuild(response.type, finish)
+      for (const media of response.content) media.type = rebuild(media.type, finish)
       response.headers = fields(response.headers)
     }
   }
@@ -214,10 +178,15 @@ function rebuild(type: Type, finish: (type: Type) => Type): Type {
  * alone describe a schema that never terminates; such a reference is replaced
  * by the referenced type minus the parts that lead back, which is sound.
  */
-function breakDirectCycles(
-  declarations: Declaration[],
-  report: (owner: Declaration, target: Declaration) => void,
-): void {
+function breakDirectCycles(context: BuildContext, schemas: SchemaBuilder): void {
+  const report = (owner: Declaration, target: Declaration): void => {
+    const at = schemas.stateOf(owner)?.node ?? context.documents.root(context.documents.entry)
+    context.warn(
+      "circular-schema",
+      `${owner.name} and ${target.name} are defined in terms of each other only through allOf/anyOf/oneOf/$ref, which never terminates; inside ${owner.name}, ${target.name} is expanded without the parts that lead back`,
+      at,
+    )
+  }
   const state = new Map<Declaration, "active" | "done">()
   const visit = (declaration: Declaration): void => {
     state.set(declaration, "active")
@@ -255,7 +224,7 @@ function breakDirectCycles(
         return type
     }
   }
-  for (const declaration of declarations) {
+  for (const declaration of schemas.declarations) {
     if (!state.has(declaration)) visit(declaration)
   }
 }
@@ -269,7 +238,10 @@ function requestTypes(op: Operation): Type[] {
 }
 
 function responseTypes(op: Operation): Type[] {
-  return op.responses.flatMap((r) => [r.type, ...r.headers.map((f) => f.type)])
+  return op.responses.flatMap((r) => [
+    ...r.content.map((media) => media.type),
+    ...r.headers.map((f) => f.type),
+  ])
 }
 
 /**

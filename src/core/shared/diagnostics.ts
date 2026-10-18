@@ -1,10 +1,11 @@
 /**
  * Stable identifiers for everything the generator reports.
  *
- * Errors stop generation because the output would be wrong. Warnings mark
- * where the output and the letter of the specification part ways: `lenient-*`
- * where the document's evident intent (what the real API does) is followed
- * instead, the others where something is ignored or approximated.
+ * Errors stop generation because the output would be wrong. Warnings mark what
+ * someone can act on: a part of the document the output cannot apply, or one
+ * that is not valid. Where a document's evident intent departs from the letter
+ * of its version, the output follows the intent without a warning, as
+ * docs/openapi.md describes.
  */
 export type DiagnosticCode =
   // errors
@@ -13,28 +14,17 @@ export type DiagnosticCode =
   | "read-failed"
   | "unresolved-ref"
   | "circular-ref"
-  // warnings: the document's intent is followed where its version says otherwise
-  | "lenient-nullable"
-  | "lenient-request-body"
-  | "lenient-format"
-  | "lenient-ref-siblings"
-  | "lenient-keyword"
-  | "lenient-read-only"
-  | "lenient-security"
-  // warnings: something is ignored, approximated, or invalid
-  | "ignored-keyword"
-  | "invalid-schema"
-  | "unknown-dialect"
-  | "dynamic-ref"
+  // warnings: something the output cannot apply
+  | "ignored-field"
   | "circular-schema"
   | "discriminator-mismatch"
+  | "renamed-schema"
+  // warnings: something not valid
+  | "invalid-schema"
   | "invalid-parameter"
-  | "invalid-security"
-  | "invalid-server"
   | "path-parameter-mismatch"
   | "invalid-status-code"
   | "path-item-conflict"
-  | "renamed-schema"
 
 export interface Diagnostic {
   severity: "error" | "warning"

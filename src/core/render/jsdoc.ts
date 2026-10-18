@@ -1,9 +1,9 @@
-import type { Docs } from "../contract/model"
+import type { Annotations } from "../model/types"
 
 /** A JSDoc block followed by a newline, or `""` when there is nothing to say. */
-export function jsdoc(docs: Docs | undefined): string {
-  if (docs === undefined) return ""
-  const paragraphs = [docs.title, docs.summary, docs.description].filter(
+export function jsdoc(annotations: Annotations | undefined): string {
+  if (annotations === undefined) return ""
+  const paragraphs = [annotations.title, annotations.summary, annotations.description].filter(
     (p): p is string => p !== undefined,
   )
   const lines: string[] = []
@@ -12,8 +12,8 @@ export function jsdoc(docs: Docs | undefined): string {
     lines.push(...comment(paragraph).split("\n"))
   }
   const tags: string[] = []
-  if (docs.deprecated) tags.push("@deprecated")
-  for (const [name, value] of docs.tags ?? []) {
+  if (annotations.deprecated) tags.push("@deprecated")
+  for (const [name, value] of annotations.tags ?? []) {
     tags.push(value === "" ? `@${name}` : `@${name} ${comment(value).replaceAll("\n", " ")}`)
   }
   if (tags.length > 0 && lines.length > 0) lines.push("")

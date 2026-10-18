@@ -1,12 +1,10 @@
-# The API behind the examples in README.md (see tests/readme.test.ts).
+# The API behind the examples in README.md and docs/ (see tests/docs.test.ts).
 openapi: 3.2.0
 info:
   title: Petstore
   version: 1.0.0
 servers:
   - url: https://api.example.com/v1
-security:
-  - bearer: []
 paths:
   /pets:
     get:
@@ -68,6 +66,16 @@ paths:
                 name: { type: string }
       responses:
         "204": {}
+  /events:
+    get:
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              itemSchema:
+                type: object
+                required: [data]
+                properties: { data: { type: string }, event: { type: string } }
 webhooks:
   pet.created:
     post:
@@ -83,8 +91,6 @@ webhooks:
             application/json:
               schema: { type: object, required: [received], properties: { received: { type: integer } } }
 components:
-  securitySchemes:
-    bearer: { type: http, scheme: bearer }
   schemas:
     Pet:
       type: object

@@ -54,7 +54,7 @@ describe("values", () => {
     expect(await typeOf(schema)).toBe(expected)
   })
 
-  it("keeps format as documentation, and reads format: binary as raw bytes, saying so", async () => {
+  it("keeps format as documentation, and reads format: binary as raw bytes", async () => {
     const result = await genResult(
       withSchemas("3.1", {
         T: {
@@ -69,19 +69,7 @@ describe("values", () => {
     expect(declaration(result.code, "T")).toBe(
       "{\n  /** @format date-time */\n  at?: string\n  /** @format binary */\n  file?: Blob\n}",
     )
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "lenient-format #/components/schemas/T/properties/file/format",
-    ])
-  })
-
-  it("applies format mappings to strings and numbers, with precedence", async () => {
-    const doc = withSchemas("3.1", {
-      Dates: { type: "array", items: { type: "string", format: "date-time" } },
-      Id: { type: "integer", format: "int64" },
-    })
-    const code = await gen(doc, { formats: { "date-time": "Date | string", "int64": "bigint" } })
-    expect(declaration(code, "Dates")).toBe("(Date | string)[]")
-    expect(declaration(code, "Id")).toBe("bigint")
+    expect(result.diagnostics).toStrictEqual([])
   })
 
   it("follows Swagger-era and removed keywords where documents still use them", async () => {
@@ -95,11 +83,7 @@ describe("values", () => {
     expect(declaration(result.code, "A")).toBe("Blob")
     expect(declaration(result.code, "B")).toBe("string | null")
     expect(declaration(result.code, "C")).toBe("unknown")
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "lenient-format #/components/schemas/A/type",
-      "lenient-nullable #/components/schemas/B/nullable",
-      "invalid-schema #/components/schemas/C/type",
-    ])
+    expect(codes(result.diagnostics)).toStrictEqual(["invalid-schema #/components/schemas/C/type"])
   })
 })
 
@@ -380,17 +364,7 @@ describe("references and names", () => {
     await expectPassesTsc(result.code)
   })
 
-  it("reaches the global Blob when a schema shadows it", async () => {
-    const code = await gen(
-      withSchemas("3.1", {
-        Blob: { type: "object" },
-        Upload: { type: "object", properties: { data: { $ref: "#/components/schemas/Blob" } } },
-      }),
-    )
-    await expectPassesTsc(code)
-  })
-
-  it("approximates $dynamicRef statically and says so", async () => {
+  it("approximates $dynamicRef statically", async () => {
     const result = await genResult(
       withSchemas("3.1", {
         A: {
@@ -400,9 +374,8 @@ describe("references and names", () => {
         },
       }),
     )
-    expect(codes(result.diagnostics)).toStrictEqual([
-      "dynamic-ref #/components/schemas/A/properties/next/$dynamicRef",
-    ])
+    expect(declaration(result.code, "A")).toBe("{\n  next?: A\n}")
+    expect(result.diagnostics).toStrictEqual([])
   })
 
   it("breaks cycles that only pass through unions and intersections", async () => {
@@ -474,28 +447,7 @@ describe("references and names", () => {
     await expectPassesTsc(result.code)
   })
 
-  it("counts a type a format maps to as a possible alias, which defers a tuple", async () => {
-    const code = await gen(
-      withSchemas("3.1", {
-        T: {
-          anyOf: [
-            { type: "number" },
-            {
-              type: "array",
-              prefixItems: [{ type: "array", items: { type: "number" } }],
-              items: { type: "string", format: "node" },
-            },
-          ],
-        },
-      }),
-      { formats: { node: "Schemas.T" } },
-    )
-    // Labelled, the rest element would resolve its alias at once (TS2456).
-    expect(declaration(code, "T")).toBe("number | [number[]?, ...Format_node[]]")
-    await expectPassesTsc(code)
-  })
-
-  it("labels a recursive tuple beside a format mapped to a type that is not a schema", async () => {
+  it("labels a recursive tuple whose other elements name no type alias", async () => {
     const code = await gen(
       withSchemas("3.1", {
         D1: {
@@ -513,10 +465,9 @@ describe("references and names", () => {
           ],
         },
       }),
-      { formats: { "date-time": "Date" } },
     )
-    // `Date` names no type alias, so TypeScript would not defer the tuple.
-    expect(declaration(code, "D1")).toBe("number | [_0: Date, _1?: D1[]]")
+    // `string` names no type alias, so TypeScript would not defer the tuple.
+    expect(declaration(code, "D1")).toBe("number | [_0: string, _1?: D1[]]")
     await expectPassesTsc(code)
   })
 
@@ -766,26 +717,22 @@ describe("robustness", () => {
     await expectPassesTsc(code)
   })
 
-  it("keeps format mappings from being captured by schemas of the same name", async () => {
+  it("keeps raw bytes from being captured by a schema named Blob", async () => {
     const code = await gen(
       withSchemas("3.1", {
-        Date: { type: "string" },
         Blob: { type: "object" },
+        Upload: { type: "object", properties: { data: { $ref: "#/components/schemas/Blob" } } },
         Event: {
           type: "object",
-          properties: {
-            at: { type: "string", format: "date-time" },
-            file: { contentMediaType: "a/b", type: "string", format: "binary" },
-          },
+          properties: { file: { contentMediaType: "a/b", type: "string", format: "binary" } },
         },
       }),
-      { formats: { "date-time": "Date" } },
     )
-    expect(declaration(code, "Event")).toContain("at?: Format_date_time")
-    expect(code).toContain("type Format_binary = Blob\ntype Format_date_time = Date")
+    expect(declaration(code, "Upload")).toContain("data?: Blob")
+    expect(declaration(code, "Event")).toContain("file?: globalThis.Blob")
     await expectPassesTsc(
       code,
-      'import type { Schemas } from "./file0"\nexport const e: Schemas.Event = { at: new Date(), file: new Blob() }\n',
+      'import type { Schemas } from "./file0"\nexport const e: Schemas.Event = { file: new Blob() }\n',
     )
   })
 

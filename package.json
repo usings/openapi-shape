@@ -1,11 +1,11 @@
 {
   "name": "openapi-shape",
   "version": "0.13.0",
-  "description": "TypeScript types and a dependency-free typed client for OpenAPI 3.0, 3.1, and 3.2 APIs, generated as one module",
+  "description": "OpenAPI-shaped fetch: one generated TypeScript module and a dependency-free typed fetch client for OpenAPI 3.0, 3.1, and 3.2 APIs",
   "keywords": [
     "api-client",
     "codegen",
-    "dts",
+    "fetch",
     "json-schema",
     "openapi",
     "openapi-typescript",
@@ -24,7 +24,8 @@
     "openapi-shape": "./dist/cli.mjs"
   },
   "files": [
-    "dist"
+    "dist",
+    "docs"
   ],
   "type": "module",
   "exports": {
@@ -38,6 +39,7 @@
     "release": "bumpp",
     "build": "tsdown",
     "test": "vitest",
+    "verify": "pnpm test --run && pnpm typecheck && pnpm lint && pnpm format --check",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt"

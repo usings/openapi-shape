@@ -1,17 +1,15 @@
-import { union } from "../contract/algebra"
-import type { Field, Literal, Type, View } from "../contract/model"
-import { UNDEFINED, UNKNOWN } from "../contract/model"
+import { union } from "../model/algebra"
+import type { Field, Literal, Type, Side } from "../model/types"
+import { UNDEFINED, UNKNOWN } from "../model/types"
 import { propertyKey } from "../shared/naming"
 import { indentTail, jsdoc } from "./jsdoc"
 
 export interface TypeContext {
-  view: View
+  side: Side
   /** Prefix for declaration references: `Schemas.` outside the namespace, `""` inside. */
   refPrefix: string
-  /** `format` → TypeScript type, including `binary` (raw binary content). */
-  formats: Record<string, string>
-  /** The formats whose type names a declaration, and so may be a type alias that leads back. */
-  namingSchemas: ReadonlySet<string>
+  /** The global `Blob`, as named where a declaration may shadow it. */
+  blob: string
 }
 
 // A union needs parentheses inside an intersection; both need them before `[]`.
@@ -49,8 +47,8 @@ export function renderFields(
 ): string {
   const lines = fields.map((field) => {
     const optional =
-      !field.required || (field.requiredOnly !== undefined && field.requiredOnly !== context.view)
-    return `${jsdoc(field.docs)}${propertyKey(field.name)}${optional ? "?" : ""}: ${renderType(field.type, context)}`
+      !field.required || (field.requiredOnly !== undefined && field.requiredOnly !== context.side)
+    return `${jsdoc(field.annotations)}${propertyKey(field.name)}${optional ? "?" : ""}: ${renderType(field.type, context)}`
   })
   if (index !== undefined)
     lines.push(`[key: string]: ${renderType(widenIndex(index, fields), context)}`)
@@ -72,17 +70,16 @@ function render(type: Type, context: TypeContext): Rendered {
     case "undefined":
     case "null":
     case "boolean":
-      return atom(type.kind)
     case "string":
     case "number":
-      return mapped(type.format, context) ?? atom(type.kind)
+      return atom(type.kind)
     case "binary":
-      return mapped("binary", context) ?? atom("Blob")
+      return atom(context.blob)
     case "literal":
       return atom(renderLiteral(type.value))
     case "ref": {
       const name =
-        context.view === "request" ? (type.target.inputName ?? type.target.name) : type.target.name
+        context.side === "request" ? (type.target.inputName ?? type.target.name) : type.target.name
       return atom(`${context.refPrefix}${name}`)
     }
     case "array":
@@ -95,8 +92,7 @@ function render(type: Type, context: TypeContext): Rendered {
       const elements = type.rest ? [...type.items, type.rest] : type.items
       const later = elements.filter((_, i) => i >= type.required)
       const labelled =
-        !elements.some((t) => namesAlias(t, context)) &&
-        later.some((t) => aliasInList(t, false, context))
+        !elements.some((t) => namesAlias(t)) && later.some((t) => aliasInList(t, false))
       const items = type.items.map((item, i) => {
         const text = render(item, context)
         const optional = i >= type.required
@@ -112,7 +108,7 @@ function render(type: Type, context: TypeContext): Rendered {
     case "object":
       return atom(renderFields(type.fields, indexOf(type), context))
     case "union": {
-      // Distinct types can render alike (strings with different formats).
+      // Distinct types can render alike (fields required on the other side only).
       const texts = new Set(
         type.members.map((m) => {
           const r = render(m, context)
@@ -146,51 +142,31 @@ function widenIndex(index: Type, fields: Field[]): Type {
   return union(members)
 }
 
-function mapped(format: string | undefined, context: TypeContext): Rendered | undefined {
-  if (format === undefined || !Object.hasOwn(context.formats, format)) return undefined
-  const text = context.formats[format]
-  return {
-    text,
-    precedence: /^[\p{L}\p{N}_$.]+(<.*>)?$/u.test(text) ? Precedence.Atom : Precedence.Union,
-  }
-}
-
-/**
- * Whether a type names a type alias that may lead back, or unites some: a
- * declaration that is not an interface, or a type a format maps to that names
- * a declaration (`Schemas.T`).
- */
-function namesAlias(type: Type, context: TypeContext): boolean {
+/** Whether a type names a type alias that may lead back (a declaration that is not an interface), or unites some. */
+function namesAlias(type: Type): boolean {
   switch (type.kind) {
     case "ref":
       return type.target.type.kind !== "object"
-    case "string":
-    case "number":
-      return type.format !== undefined && context.namingSchemas.has(type.format)
-    case "binary":
-      return context.namingSchemas.has("binary")
     case "union":
     case "intersection":
-      return type.members.some((m) => namesAlias(m, context))
+      return type.members.some((m) => namesAlias(m))
     default:
       return false
   }
 }
 
 /** Whether a type names a type alias inside array or tuple syntax (`inList` once inside). */
-function aliasInList(type: Type, inList: boolean, context: TypeContext): boolean {
+function aliasInList(type: Type, inList: boolean): boolean {
   switch (type.kind) {
     case "union":
     case "intersection":
-      return type.members.some((m) => aliasInList(m, inList, context))
+      return type.members.some((m) => aliasInList(m, inList))
     case "array":
-      return aliasInList(type.items, true, context)
+      return aliasInList(type.items, true)
     case "tuple":
-      return [...type.items, ...(type.rest ? [type.rest] : [])].some((t) =>
-        aliasInList(t, true, context),
-      )
+      return [...type.items, ...(type.rest ? [type.rest] : [])].some((t) => aliasInList(t, true))
     default:
-      return inList && namesAlias(type, context)
+      return inList && namesAlias(type)
   }
 }
 

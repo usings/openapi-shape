@@ -6,10 +6,10 @@ import { appendPointer, parsePointer, readPointer } from "../shared/pointer"
 import type { FetchedDocument } from "./source"
 import { assertAcyclic, fetchDocument, withoutFragment } from "./source"
 
-export type OpenApiVersion = "3.0" | "3.1" | "3.2"
+type OpenApiVersion = "3.0" | "3.1" | "3.2"
 
 /** One parsed document of an OpenAPI Description. */
-export interface Doc {
+interface LoadedDocument {
   /** Retrieval URI, without fragment. */
   uri: string
   /** Base URI for relative references: `$self` (3.2) resolved against `uri`. */
@@ -22,15 +22,15 @@ export interface Doc {
 }
 
 /** A value inside a document together with the base URI in effect there. */
-export interface Node {
-  doc: Doc
+export interface DocumentNode {
+  document: LoadedDocument
   pointer: string
   value: unknown
   base: string
 }
 
-export type Resolution =
-  | { kind: "found"; node: Node }
+type Resolution =
+  | { kind: "found"; node: DocumentNode }
   /** The target document is not loaded yet; the caller should retry after loading. */
   | { kind: "pending" }
   | { kind: "error"; message: string }
@@ -66,14 +66,14 @@ const LITERAL_KEYWORDS = new Set(["example", "examples", "const", "enum", "defau
 
 const MAX_LOAD_ROUNDS = 64
 
-export function parseOpenApiVersion(value: unknown): OpenApiVersion | undefined {
+function parseOpenApiVersion(value: unknown): OpenApiVersion | undefined {
   if (typeof value !== "string") return undefined
   const match = /^3\.([0-2])\.\d+(?:-[\w.-]+)?$/.exec(value)
   return match ? (`3.${match[1]}` as OpenApiVersion) : undefined
 }
 
 /** Resolve `ref` against `base` per RFC 3986; `undefined` when it is not a valid URI reference. */
-export function resolveUri(ref: string, base: string): string | undefined {
+function resolveUri(ref: string, base: string): string | undefined {
   try {
     return new URL(ref, base).href
   } catch {
@@ -82,7 +82,7 @@ export function resolveUri(ref: string, base: string): string | undefined {
 }
 
 /** Turn a CLI/API source into an absolute URI. */
-export function sourceUri(source: string | URL): string {
+function sourceUri(source: string | URL): string {
   if (source instanceof URL) return source.href
   // Through URL, so that `FILE:` and dot segments name one document one way.
   if (/^[a-z][a-z\d+.-]*:/i.test(source) && !/^[a-z]:[\\/]/i.test(source)) {
@@ -100,82 +100,26 @@ export function sourceUri(source: string | URL): string {
  * immutable once added, so repeated builds see identical inputs.
  */
 export class DocumentSet {
-  readonly entry: Doc
-  private readonly resources = new Map<string, Node>()
-  private readonly anchors = new Map<string, Node>()
+  readonly entry: LoadedDocument
+  private readonly resources = new Map<string, DocumentNode>()
+  private readonly anchors = new Map<string, DocumentNode>()
   private readonly pending = new Set<string>()
   private readonly failed = new Map<string, string>()
   private rounds = 0
 
   /**
+   * Made by {@link loadDocuments}.
+   *
    * @param retrieval Whether other documents may be loaded. An in-memory
    *   document without a `base` has no location to load anything relative to,
    *   and must not reach files or the network by absolute URIs either.
    */
-  private constructor(
-    entry: Doc,
+  constructor(
+    entry: LoadedDocument,
     private readonly retrieval: boolean,
   ) {
     this.entry = entry
     this.register(entry)
-  }
-
-  /** Read the entry document; reports problems to `diagnostics` and returns `undefined`. */
-  static async open(
-    input: string | URL | object,
-    base: string | URL | undefined,
-    diagnostics: Diagnostics,
-  ): Promise<DocumentSet | undefined> {
-    let uri: string
-    let root: unknown
-    let remote = false
-    if (typeof input === "string" || input instanceof URL) {
-      uri = sourceUri(input)
-      try {
-        const fetched = await fetchDocument(uri)
-        uri = fetched.uri
-        root = fetched.root
-        remote = !isFileUri(uri)
-      } catch (error) {
-        diagnostics.error("read-failed", `Cannot read ${uri}: ${errorMessage(error)}`, "#")
-        return undefined
-      }
-    } else {
-      uri = base === undefined ? MEMORY_URI : sourceUri(base)
-      root = input
-      remote = /^https?:/i.test(uri)
-    }
-
-    if (!isRecord(root)) {
-      diagnostics.error("invalid-document", "An OpenAPI document must be a JSON object", "#")
-      return undefined
-    }
-    try {
-      assertAcyclic(root)
-    } catch (error) {
-      diagnostics.error("invalid-document", `Not a JSON document: ${errorMessage(error)}`, "#")
-      return undefined
-    }
-    if (root.openapi === undefined && root.swagger !== undefined) {
-      diagnostics.error(
-        "unsupported-version",
-        `Swagger ${String(root.swagger)} is not supported; convert the document to OpenAPI 3.x first`,
-        "#/swagger",
-      )
-      return undefined
-    }
-    const version = parseOpenApiVersion(root.openapi)
-    if (version === undefined) {
-      const found = root.openapi === undefined ? "no `openapi` field" : `"${String(root.openapi)}"`
-      diagnostics.error(
-        "unsupported-version",
-        `Expected OpenAPI 3.0.x, 3.1.x, or 3.2.x, found ${found}`,
-        "#/openapi",
-      )
-      return undefined
-    }
-    const inMemory = typeof input !== "string" && !(input instanceof URL)
-    return new DocumentSet(createDoc(uri, root, version, remote), !inMemory || base !== undefined)
   }
 
   get hasPending(): boolean {
@@ -206,41 +150,46 @@ export class DocumentSet {
   }
 
   /** Diagnostic location for a node: `#/pointer` in the entry document, `uri#/pointer` elsewhere. */
-  locate(doc: Doc, pointer: string): string {
-    return doc === this.entry ? `#${pointer}` : `${doc.uri}#${pointer}`
+  locate(document: LoadedDocument, pointer: string): string {
+    return document === this.entry ? `#${pointer}` : `${document.uri}#${pointer}`
   }
 
-  root(doc: Doc): Node {
-    let base = doc.base
+  root(document: LoadedDocument): DocumentNode {
+    let base = document.base
     // A schema document's own `$id` sets its base; an OpenAPI document's root has none.
-    const root = doc.root
-    if (doc.version !== "3.0" && isRecord(root) && !("openapi" in root)) {
+    const root = document.root
+    if (document.version !== "3.0" && isRecord(root) && !("openapi" in root)) {
       if (typeof root.$id === "string") base = withoutFragment(resolveUri(root.$id, base) ?? base)
     }
-    return { doc, pointer: "", value: root, base }
+    return { document, pointer: "", value: root, base }
   }
 
   /** Child node, tracking `$id` base changes for 3.1+ schemas. */
-  child(node: Node, ...segments: Array<string | number>): Node {
+  child(node: DocumentNode, ...segments: Array<string | number>): DocumentNode {
     let { value, base } = node
     for (const segment of segments) {
       value = readPointer(value, [String(segment)])
-      if (node.doc.version !== "3.0" && isRecord(value) && typeof value.$id === "string") {
+      if (node.document.version !== "3.0" && isRecord(value) && typeof value.$id === "string") {
         base = withoutFragment(resolveUri(value.$id, base) ?? base)
       }
     }
-    return { doc: node.doc, pointer: appendPointer(node.pointer, ...segments), value, base }
+    return {
+      document: node.document,
+      pointer: appendPointer(node.pointer, ...segments),
+      value,
+      base,
+    }
   }
 
   /** Resolve a `$ref` (or `$dynamicRef`, statically) relative to the node it appears in. */
-  resolve(ref: string, from: Node): Resolution {
+  resolve(ref: string, from: DocumentNode): Resolution {
     const resolution = this.lookup(ref, from)
-    if (resolution.kind !== "found" || !from.doc.remote || resolution.node.doc.remote) {
+    if (resolution.kind !== "found" || !from.document.remote || resolution.node.document.remote) {
       return resolution
     }
     // A remote document reaches a local one only at the address it publishes as
     // its `$self` (with a pointer or anchor there), not by URIs its `$id`s claim.
-    const target = resolution.node.doc
+    const target = resolution.node.document
     const absolute = withoutFragment(resolveUri(ref, from.base) ?? "")
     if (target.base !== target.uri && absolute === target.base) return resolution
     return {
@@ -249,7 +198,7 @@ export class DocumentSet {
     }
   }
 
-  private lookup(ref: string, from: Node): Resolution {
+  private lookup(ref: string, from: DocumentNode): Resolution {
     const absolute = resolveUri(ref, from.base)
     if (absolute === undefined) return { kind: "error", message: `"${ref}" is not a valid URI` }
     const hash = absolute.indexOf("#")
@@ -262,7 +211,7 @@ export class DocumentSet {
     }
 
     // A remote document may not reach local files, whether or not they are loaded.
-    if (from.doc.remote && isFileUri(docUri)) {
+    if (from.document.remote && isFileUri(docUri)) {
       return { kind: "error", message: `remote document cannot reference local file ${docUri}` }
     }
     const resource = this.resources.get(docUri)
@@ -286,7 +235,7 @@ export class DocumentSet {
     if (fragment.startsWith("/")) {
       const pointer = resource.pointer + fragment
       const tokens = parsePointer(pointer)
-      const target = tokens && this.child(this.root(resource.doc), ...tokens)
+      const target = tokens && this.child(this.root(resource.document), ...tokens)
       if (target?.value === undefined) return { kind: "error", message: `"${ref}" does not exist` }
       return { kind: "found", node: { ...target, pointer } }
     }
@@ -306,30 +255,32 @@ export class DocumentSet {
       }
       version = own
     }
-    const doc = createDoc(fetched.uri, root, version, /^https?:/i.test(fetched.uri))
-    this.register(doc)
+    const document = createDocument(fetched.uri, root, version, /^https?:/i.test(fetched.uri))
+    this.register(document)
     // A redirect leaves the requested URI pointing at the same document.
-    if (!this.resources.has(uri)) this.resources.set(uri, this.root(doc))
+    if (!this.resources.has(uri)) this.resources.set(uri, this.root(document))
   }
 
   /** The first document to claim a URI keeps it, so a later one cannot shadow it. */
-  private register(doc: Doc): void {
-    const root = this.root(doc)
-    this.claim(this.resources, doc.uri, root)
-    this.claim(this.resources, doc.base, root)
-    if (doc.version !== "3.0") this.indexResources(doc, doc.root, "", doc.base)
+  private register(document: LoadedDocument): void {
+    const root = this.root(document)
+    this.claim(this.resources, document.uri, root)
+    this.claim(this.resources, document.base, root)
+    if (document.version !== "3.0") this.indexResources(document, document.root, "", document.base)
   }
 
   /** Index `$id` resources and `$anchor`/`$dynamicAnchor` names (JSON Schema 2020-12 Core, "Base URI, Anchors, and Dereferencing"). */
   private indexResources(
-    doc: Doc,
+    document: LoadedDocument,
     value: unknown,
     pointer: string,
     base: string,
     parentKey?: string,
   ): void {
     if (Array.isArray(value)) {
-      value.forEach((item, i) => this.indexResources(doc, item, appendPointer(pointer, i), base))
+      value.forEach((item, i) =>
+        this.indexResources(document, item, appendPointer(pointer, i), base),
+      )
       return
     }
     if (!isRecord(value)) return
@@ -339,22 +290,22 @@ export class DocumentSet {
       if (typeof value.$id === "string") {
         const id = resolveUri(value.$id, base)
         // A remote document cannot pose as a local file.
-        if (id !== undefined && !(doc.remote && isFileUri(id))) {
+        if (id !== undefined && !(document.remote && isFileUri(id))) {
           here = withoutFragment(id)
-          this.claim(this.resources, here, { doc, pointer, value, base: here })
+          this.claim(this.resources, here, { document, pointer, value, base: here })
         }
       }
       for (const key of ["$anchor", "$dynamicAnchor"]) {
         const anchor = value[key]
         if (typeof anchor === "string") {
-          this.claim(this.anchors, `${here}#${anchor}`, { doc, pointer, value, base: here })
+          this.claim(this.anchors, `${here}#${anchor}`, { document, pointer, value, base: here })
         }
       }
     }
     for (const [key, child] of Object.entries(value)) {
       if (!isNameMap && LITERAL_KEYWORDS.has(key)) continue
       this.indexResources(
-        doc,
+        document,
         child,
         appendPointer(pointer, key),
         here,
@@ -363,12 +314,81 @@ export class DocumentSet {
     }
   }
 
-  private claim(map: Map<string, Node>, uri: string, node: Node): void {
+  private claim(map: Map<string, DocumentNode>, uri: string, node: DocumentNode): void {
     if (!map.has(uri)) map.set(uri, node)
   }
 }
 
-function createDoc(uri: string, root: unknown, version: OpenApiVersion, remote: boolean): Doc {
+/**
+ * Load the entry document of a description: a path, a URL, or a parsed object.
+ * Problems go to `diagnostics`, and the result is then `undefined`.
+ */
+export async function loadDocuments(
+  input: string | URL | object,
+  base: string | URL | undefined,
+  diagnostics: Diagnostics,
+): Promise<DocumentSet | undefined> {
+  let uri: string
+  let root: unknown
+  let remote = false
+  if (typeof input === "string" || input instanceof URL) {
+    uri = sourceUri(input)
+    try {
+      const fetched = await fetchDocument(uri)
+      uri = fetched.uri
+      root = fetched.root
+      remote = !isFileUri(uri)
+    } catch (error) {
+      diagnostics.error("read-failed", `Cannot read ${uri}: ${errorMessage(error)}`, "#")
+      return undefined
+    }
+  } else {
+    uri = base === undefined ? MEMORY_URI : sourceUri(base)
+    root = input
+    remote = /^https?:/i.test(uri)
+  }
+
+  if (!isRecord(root)) {
+    diagnostics.error("invalid-document", "An OpenAPI document must be a JSON object", "#")
+    return undefined
+  }
+  try {
+    assertAcyclic(root)
+  } catch (error) {
+    diagnostics.error("invalid-document", `Not a JSON document: ${errorMessage(error)}`, "#")
+    return undefined
+  }
+  if (root.openapi === undefined && root.swagger !== undefined) {
+    diagnostics.error(
+      "unsupported-version",
+      `Swagger ${String(root.swagger)} is not supported; convert the document to OpenAPI 3.x first`,
+      "#/swagger",
+    )
+    return undefined
+  }
+  const version = parseOpenApiVersion(root.openapi)
+  if (version === undefined) {
+    const found = root.openapi === undefined ? "no `openapi` field" : `"${String(root.openapi)}"`
+    diagnostics.error(
+      "unsupported-version",
+      `Expected OpenAPI 3.0.x, 3.1.x, or 3.2.x, found ${found}`,
+      "#/openapi",
+    )
+    return undefined
+  }
+  const inMemory = typeof input !== "string" && !(input instanceof URL)
+  return new DocumentSet(
+    createDocument(uri, root, version, remote),
+    !inMemory || base !== undefined,
+  )
+}
+
+function createDocument(
+  uri: string,
+  root: unknown,
+  version: OpenApiVersion,
+  remote: boolean,
+): LoadedDocument {
   let base = uri
   if (version === "3.2" && isRecord(root) && typeof root.$self === "string") {
     const self = withoutFragment(resolveUri(root.$self, uri) ?? uri)

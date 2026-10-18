@@ -1,11 +1,10 @@
-import type { Node } from "../openapi/documents"
+import type { DocumentNode } from "../load/documents"
+import { identity } from "../load/nodes"
 import { isRecord } from "../shared/object"
-import { appendPointer } from "../shared/pointer"
-import { identity } from "./nodes"
-import type { SchemaBuilder } from "./schema"
+import type { BuildContext } from "./context"
 
 export interface Resolved {
-  node: Node
+  node: DocumentNode
   /** 3.1+: `summary`/`description` next to `$ref` override the target's. */
   summary?: string
   description?: string
@@ -17,13 +16,13 @@ export interface Resolved {
  * Returns `undefined` when the reference cannot be resolved (already reported)
  * or its document is still loading.
  */
-export function resolveObject(builder: SchemaBuilder, node: Node): Resolved | undefined {
+export function resolveObject(context: BuildContext, node: DocumentNode): Resolved | undefined {
   const out: Resolved = { node }
   const seen = new Set<string>()
   let current = node
   while (isRecord(current.value) && typeof current.value.$ref === "string") {
     const ref = current.value.$ref
-    if (current.doc.version !== "3.0") {
+    if (current.document.version !== "3.0") {
       if (out.summary === undefined && typeof current.value.summary === "string") {
         out.summary = current.value.summary
       }
@@ -33,21 +32,18 @@ export function resolveObject(builder: SchemaBuilder, node: Node): Resolved | un
     }
     const id = identity(current)
     if (seen.has(id)) {
-      builder.diagnostics.error(
-        "circular-ref",
-        `Reference cycle through "${ref}"`,
-        builder.docs.locate(node.doc, appendPointer(node.pointer, "$ref")),
-      )
+      context.error("circular-ref", `Reference cycle through "${ref}"`, node, "$ref")
       return undefined
     }
     seen.add(id)
-    const resolution = builder.docs.resolve(ref, current)
+    const resolution = context.documents.resolve(ref, current)
     if (resolution.kind === "pending") return undefined
     if (resolution.kind === "error") {
-      builder.diagnostics.error(
+      context.error(
         "unresolved-ref",
         `Cannot resolve $ref "${ref}": ${resolution.message}`,
-        builder.docs.locate(current.doc, appendPointer(current.pointer, "$ref")),
+        current,
+        "$ref",
       )
       return undefined
     }

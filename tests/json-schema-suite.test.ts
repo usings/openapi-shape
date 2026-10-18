@@ -37,7 +37,7 @@ const NEEDS_REMOTES = new Set([
 
 /**
  * Valid instances knowingly rejected, with the reason. Each is a documented
- * approximation (see README, "How schemas map to TypeScript").
+ * approximation (see docs/openapi.md, "Approximations").
  */
 const SHAPE = "Shape keywords without `type` are read as implying that shape"
 const ABSENT = "Properties a schema does not mention are assumed absent"
