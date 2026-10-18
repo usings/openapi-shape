@@ -107,6 +107,32 @@ describe("building requests", () => {
     expect(requests).toHaveLength(0)
   })
 
+  it.each(["toString", "constructor", "__proto__", "id"])(
+    "requires an own path parameter named %s",
+    async (name) => {
+      const { client, sent, requests } = recorder<
+        Record<string, { params: Record<string, string>; responses: object }>
+      >({ version: 1, endpoints: {} })
+      const endpoint = `GET /x/{${name}}`
+      const inherited = Object.create({ [name]: "inherited" }) as Record<string, string>
+      await expect(client.fetch(endpoint, { params: {} })).rejects.toThrow(
+        `Missing path parameter "${name}"`,
+      )
+      await expect(client.result(endpoint, { params: inherited })).rejects.toThrow(
+        `Missing path parameter "${name}"`,
+      )
+      expect(requests).toHaveLength(0)
+      await client.fetch(endpoint, { params: Object.fromEntries([[name, "own"]]) })
+      expect(url(sent())).toBe("/x/own")
+      const own = Object.assign(Object.create(null), { [name]: "null-prototype" }) as Record<
+        string,
+        string
+      >
+      await client.fetch(endpoint, { params: own })
+      expect(url(sent())).toBe("/x/null-prototype")
+    },
+  )
+
   it("serializes the query with form style, exploding arrays and objects", async () => {
     const { client, sent } = recorder<{
       "GET /q?fixed=1": { query: Record<string, unknown>; responses: object }

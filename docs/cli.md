@@ -57,7 +57,7 @@ A warning marks a part of the description the output cannot apply, or one that i
 
 | Code                      | Severity | Meaning                                                                                                                                                                                     |
 | ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invalid-document`        | error    | The document is not a JSON object, refers to itself, or nests too deeply.                                                                                                                   |
+| `invalid-document`        | error    | The document is not a JSON object, refers to itself, nests too deeply, or a `patternProperties` match exceeds its 100 ms limit.                                                             |
 | `unsupported-version`     | error    | Not OpenAPI 3.0–3.2.                                                                                                                                                                        |
 | `read-failed`             | error    | The entry document cannot be read or parsed.                                                                                                                                                |
 | `unresolved-ref`          | error    | A `$ref` target is missing, unreadable, or not allowed.                                                                                                                                     |

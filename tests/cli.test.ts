@@ -147,6 +147,27 @@ describe("openapi-shape <source>", () => {
     })
   })
 
+  it("reports a pattern timeout without replacing an existing output", async () => {
+    const hostile = oas("3.1", {
+      components: {
+        schemas: {
+          Slow: {
+            type: "object",
+            required: [`${"a".repeat(26)}!`],
+            patternProperties: { "^(a+)+$": { type: "string" } },
+          },
+        },
+      },
+    })
+    await withFiles({ "openapi.json": hostile, "api.ts": "previous output\n" }, async (dir) => {
+      const result = await run(["openapi.json", "-o", "api.ts"], dir)
+      expect(result.code).toBe(1)
+      expect(result.stdout).toBe("")
+      expect(result.stderr).toContain("error invalid-document: A patternProperties match exceeded")
+      expect(await readFile(join(dir, "api.ts"), "utf8")).toBe("previous output\n")
+    })
+  })
+
   it("rejects --check without --output, pointing to --help", async () => {
     const result = await run(["a", "--check"], ".")
     expect(result).toMatchObject({

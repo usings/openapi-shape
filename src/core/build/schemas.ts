@@ -1,19 +1,12 @@
 import type { DocumentNode } from "../load/documents"
 import { componentNameOf, identity } from "../load/nodes"
-import {
-  includesJson,
-  intersect,
-  isJsonValue,
-  isOfType,
-  literal,
-  matchesPattern,
-  union,
-} from "../model/algebra"
+import { includesJson, intersect, isJsonValue, isOfType, literal, union } from "../model/algebra"
 import type { Declaration, Field, Type, Side } from "../model/types"
 import { NEVER, NULL, UNKNOWN } from "../model/types"
 import { classifyMediaType } from "../shared/media"
 import { toIdentifier, uniqueName } from "../shared/naming"
 import { isRecord } from "../shared/object"
+import { matchesPattern } from "../shared/patterns"
 import { parsePointer } from "../shared/pointer"
 import { schemaAnnotations } from "./annotations"
 import type { BuildContext } from "./context"

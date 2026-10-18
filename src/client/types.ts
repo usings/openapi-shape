@@ -107,7 +107,8 @@ export type EndpointResult<Endpoints, K extends Endpoint<Endpoints>> = [
 
 // Index by status first, then endpoint. The result and EndpointData read the
 // same data table, so generic returns need no comparison or intersection of
-// response bodies. Only the status keys are filtered for each call.
+// response bodies. Filter absent statuses inside each endpoint entry: intersecting
+// two large endpoint-key unions makes TypeScript expand their cross product.
 // `never` shares the finite map across calls; open maps still use the called key.
 type SuccessStatus<E> = Successes<E, never>[Endpoint<E>]["status"]
 type AtStatus<R, S extends number> = R extends { status: infer Status extends number }
@@ -125,19 +126,18 @@ type JsonAt<E, S extends number> = {
     ? J
     : never
 }
-type KeysAt<E, S extends number> = {
-  [P in Endpoint<E>]: [AtStatus<Successes<E, never>[P], S>] extends [never] ? never : P
-}[Endpoint<E>]
 type FiniteResult<E, K extends Endpoint<E>> =
   | {
       [S in SuccessStatus<E>]: {
-        [P in K & KeysAt<E, S>]: {
-          data: DataAt<E, S>[P]
-          error?: undefined
-          status: S
-          response: TypedResponse<S, true, JsonAt<E, S>[P]>
-        }
-      }[K & KeysAt<E, S>]
+        [P in K]: [AtStatus<Successes<E, never>[P], S>] extends [never]
+          ? never
+          : {
+              data: DataAt<E, S>[P]
+              error?: undefined
+              status: S
+              response: TypedResponse<S, true, JsonAt<E, S>[P]>
+            }
+      }[K]
     }[SuccessStatus<E>]
   | Failures<E, never>[K]
 

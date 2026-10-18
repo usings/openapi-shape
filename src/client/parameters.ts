@@ -41,7 +41,11 @@ export function expandPath(
     .split("/")
     .map((segment) => {
       const expanded = segment.replaceAll(/\{([^{}]+)\}/g, (_, name: string) =>
-        expandParam(name, params?.[name], declared?.[name]),
+        expandParam(
+          name,
+          params != null && Object.hasOwn(params, name) ? params[name] : undefined,
+          declared?.[name],
+        ),
       )
       // A value that leaves a segment empty, ".", or ".." would send the request
       // to another resource once the URL is normalized.

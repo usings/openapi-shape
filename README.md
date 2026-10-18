@@ -19,7 +19,7 @@ pnpm add openapi-shape
 pnpm exec openapi-shape ./openapi.yaml -o src/api.ts
 ```
 
-The source may be a file path or an HTTP(S) URL, in JSON or YAML; `$ref`s to other files and URLs are followed. Call the API through the client:
+The source may be a file path or an HTTP(S) URL, in JSON or YAML; `$ref`s to other files and URLs are followed, preserving local fields through Path Item reference chains. Call the API through the client:
 
 ```ts
 import { createClient } from "openapi-shape/client"

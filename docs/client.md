@@ -50,7 +50,7 @@ The second argument takes any `RequestInit` field but `method` (`signal`, `cache
 
 | Field         | Rule                                                                                                                                                                                                                       |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `params`      | Required when the path has parameters.                                                                                                                                                                                     |
+| `params`      | Required when the path has parameters; values must be own properties of `params`, not inherited.                                                                                                                           |
 | `query`       | Required when any query parameter is required.                                                                                                                                                                             |
 | `headers`     | Optional. Declared header parameters are type-checked and serialized by their style; other headers are allowed. A `Headers` or its entries are taken as they are. Set over the client's headers and the body's media type. |
 | `body`        | Required when the request body is required. Not taken with `GET` or `HEAD`, which `fetch` cannot send a body with.                                                                                                         |

@@ -116,25 +116,46 @@ class OperationBuilder {
   /** A Path Item's fields, merging a `$ref`'d Path Item with local fields (local wins). */
   private pathItemFields(node: DocumentNode): Map<string, DocumentNode> | undefined {
     const fields = new Map<string, DocumentNode>()
-    if (!isRecord(node.value)) return fields
-    if (typeof node.value.$ref === "string") {
-      const resolved = resolveObject(this.context, node)
-      if (resolved === undefined) return undefined
-      const target = this.pathItemFields(resolved.node)
-      if (target === undefined) return undefined
-      for (const [key, value] of target) fields.set(key, value)
-    }
-    for (const key of Object.keys(node.value)) {
-      if (key === "$ref") continue
-      if (fields.has(key)) {
-        this.context.warn(
-          "path-item-conflict",
-          `"${key}" is defined both here and in the referenced Path Item; the local definition is used`,
-          node,
-          key,
-        )
+    const chain: DocumentNode[] = []
+    const seen = new Set<string>()
+    let current = node
+    while (isRecord(current.value)) {
+      const id = identity(current)
+      if (seen.has(id)) {
+        this.context.error("circular-ref", "Reference cycle through a Path Item", node, "$ref")
+        return undefined
       }
-      fields.set(key, this.context.documents.child(node, key))
+      seen.add(id)
+      chain.push(current)
+      const ref = current.value.$ref
+      if (typeof ref !== "string") break
+      const resolution = this.context.documents.resolve(ref, current)
+      if (resolution.kind === "pending") return undefined
+      if (resolution.kind === "error") {
+        this.context.error(
+          "unresolved-ref",
+          `Cannot resolve $ref "${ref}": ${resolution.message}`,
+          current,
+          "$ref",
+        )
+        return undefined
+      }
+      current = resolution.node
+    }
+    // Start at the target so each referring Path Item overrides its inherited fields.
+    for (const link of chain.toReversed()) {
+      for (const key of Object.keys(link.value as Record<string, unknown>)) {
+        if (key === "$ref") continue
+        if (fields.has(key)) {
+          this.context.warn(
+            "path-item-conflict",
+            `"${key}" is defined both here and in the referenced Path Item; the local definition is used`,
+            link,
+            key,
+          )
+        }
+        fields.set(key, this.context.documents.child(link, key))
+      }
     }
     return fields
   }

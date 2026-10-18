@@ -1,3 +1,4 @@
+import { matchesPattern } from "../shared/patterns"
 import type { Declaration, Field, Literal, Type } from "./types"
 import { NEVER, UNKNOWN } from "./types"
 
@@ -397,29 +398,6 @@ function unionBehind(
   if (type.kind !== "ref" || !sealed.has(type.target) || seen.has(type.target)) return undefined
   seen.add(type.target)
   return unionBehind(type.target.type, seen)
-}
-
-const patternCache = new Map<string, RegExp | null>()
-
-/**
- * Whether a property name matches a `patternProperties` regular expression; `undefined` when the
- * expression is not valid JavaScript.
- */
-export function matchesPattern(pattern: string, name: string): boolean | undefined {
-  let regex = patternCache.get(pattern)
-  if (regex === undefined) {
-    regex = compile(pattern, "u") ?? compile(pattern, "")
-    patternCache.set(pattern, regex)
-  }
-  return regex === null ? undefined : regex.test(name)
-}
-
-function compile(pattern: string, flags: string): RegExp | null {
-  try {
-    return new RegExp(pattern, flags)
-  } catch {
-    return null
-  }
 }
 
 function isArrayLike(type: Type): type is Extract<Type, { kind: "array" | "tuple" }> {

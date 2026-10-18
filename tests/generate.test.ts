@@ -16,6 +16,65 @@ async function failureCodes(input: string | object): Promise<string[]> {
 }
 
 describe("generate", () => {
+  it("stops a pathological pattern match and can generate again after the timeout", async () => {
+    const hostile = oas("3.1", {
+      components: {
+        schemas: {
+          Slow: {
+            type: "object",
+            required: [`${"a".repeat(26)}!`],
+            patternProperties: { "^(a+)+$": { type: "string" } },
+          },
+        },
+      },
+    })
+    await expect(generate(hostile)).rejects.toMatchObject({
+      name: "GenerateError",
+      diagnostics: [
+        {
+          severity: "error",
+          code: "invalid-document",
+          location: "#",
+          message: expect.stringContaining("patternProperties match exceeded"),
+        },
+      ],
+    })
+    const result = await generate(
+      oas("3.1", {
+        components: {
+          schemas: {
+            Fast: {
+              type: "object",
+              required: ["x-id"],
+              patternProperties: { "(?<=x-)id$": { type: "number" } },
+            },
+          },
+        },
+      }),
+    )
+    expect(result.code).toContain('"x-id": number')
+    expect(result.diagnostics).toStrictEqual([])
+  })
+
+  it("also bounds pattern matching when merging allOf properties", async () => {
+    await expect(
+      generate(
+        oas("3.1", {
+          components: {
+            schemas: {
+              Slow: {
+                allOf: [
+                  { type: "object", properties: { [`${"a".repeat(26)}!`]: { type: "string" } } },
+                  { patternProperties: { "^(a+)+$": { type: "string" } } },
+                ],
+              },
+            },
+          },
+        }),
+      ),
+    ).rejects.toThrow("patternProperties match exceeded")
+  })
+
   it("accepts paths, file URLs, and parsed documents alike", async () => {
     const path = join(FIXTURES, "v3.0/petstore.yaml")
     const [fromPath, fromUrl, fromJson] = await Promise.all([

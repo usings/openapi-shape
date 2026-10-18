@@ -3,6 +3,7 @@ import { loadDocuments } from "./core/load/documents"
 import { renderModule } from "./core/render/module"
 import type { Diagnostic } from "./core/shared/diagnostics"
 import { Diagnostics } from "./core/shared/diagnostics"
+import { PatternTimeoutError } from "./core/shared/patterns"
 
 export type { Diagnostic, DiagnosticCode } from "./core/shared/diagnostics"
 
@@ -51,12 +52,15 @@ export async function generate(
     return await run(input, options)
   } catch (error) {
     // Deeply nested documents can exhaust the stack at any stage.
-    if (!(error instanceof RangeError)) throw error
+    if (!(error instanceof RangeError) && !(error instanceof PatternTimeoutError)) throw error
     throw new GenerateError([
       {
         severity: "error",
         code: "invalid-document",
-        message: "The description nests too deeply to process (the call stack overflowed)",
+        message:
+          error instanceof PatternTimeoutError
+            ? error.message
+            : "The description nests too deeply to process (the call stack overflowed)",
         location: "#",
       },
     ])

@@ -11,11 +11,65 @@ import type {
 } from "../src/client"
 import { createClient, defineMiddleware } from "../src/client"
 import type { EndpointResult } from "../src/client/types"
+import { generate } from "../src/index"
 import type { Endpoints, Schemas } from "./__snapshots__/client-api"
 import { contract } from "./__snapshots__/client-api"
 import { expectPassesTsc, typecheck } from "./helpers/tsc"
 
 describe("types", () => {
+  it("checks result calls on a generated API with 1000 endpoints", async () => {
+    const { code, diagnostics } = await generate({
+      openapi: "3.1.0",
+      info: { title: "Large API", version: "1" },
+      paths: Object.fromEntries(
+        Array.from({ length: 1000 }, (_, i) => [
+          `/items/${i}`,
+          {
+            get: {
+              responses: {
+                "200": {
+                  description: "An item",
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        required: ["id"],
+                        properties: { id: { type: "integer", const: i } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ]),
+      ),
+    })
+    expect(diagnostics).toStrictEqual([])
+    expect(
+      await typecheck({
+        "api.ts": code,
+        "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const api = createClient(contract)
+async function use() {
+  const first = await api.result("GET /items/0")
+  if (first.error === undefined) {
+    first.data.id satisfies 0
+    first.status satisfies 200
+    first.response.json() satisfies Promise<{ id: 0 }>
+    // @ts-expect-error another endpoint has different data
+    first.data.id satisfies 999
+  }
+  const last = await api.result("GET /items/999")
+  if (last.error === undefined) last.data.id satisfies 999
+}
+`,
+      }),
+    ).toBe("")
+  })
+
   it("treats 304 as empty across explicit, range, default, and undeclared responses", async () => {
     const responses = [
       '{ "304": Json<{ message: string }> }',

@@ -537,6 +537,76 @@ describe("webhooks and callbacks", () => {
 })
 
 describe("path items", () => {
+  it("merges every link of a Path Item reference chain, nearest fields first", async () => {
+    const result = await genResult(
+      oas("3.1", {
+        paths: { "/r": { $ref: "#/components/pathItems/Middle" } },
+        components: {
+          pathItems: {
+            Middle: {
+              $ref: "#/components/pathItems/Leaf",
+              get: { responses: { "201": { description: "middle" } } },
+              delete: { responses: ok },
+              parameters: [{ in: "query", name: "middle", schema: { type: "string" } }],
+            },
+            Leaf: { get: { responses: ok }, post: { responses: ok } },
+          },
+        },
+      }),
+    )
+    expect(entry(result.code, "GET /r")).toContain('"201"')
+    expect(entry(result.code, "GET /r")).not.toContain('"200"')
+    expect(entry(result.code, "POST /r")).toContain("middle?: string")
+    expect(result.code).toContain('"DELETE /r"')
+    expect(codes(result.diagnostics)).toStrictEqual([
+      "path-item-conflict #/components/pathItems/Middle/get",
+    ])
+  })
+
+  it("keeps intermediate Path Item fields relative to their own document", async () => {
+    await withFiles(
+      {
+        "entry.json": oas("3.1", {
+          paths: {
+            "/a": { $ref: "paths/middle.json" },
+            "/b": { $ref: "paths/middle.json" },
+          },
+        }),
+        "paths/middle.json": {
+          $ref: "leaf.json",
+          get: { responses: { "200": json({ $ref: "../model.json" }) } },
+        },
+        "paths/leaf.json": { post: { responses: ok } },
+        "model.json": { type: "string" },
+      },
+      async (dir) => {
+        const result = await generate(join(dir, "entry.json"))
+        expect(entry(result.code, "GET /a")).toContain('"application/json": Schemas.model')
+        expect(entry(result.code, "GET /b")).toContain('"application/json": Schemas.model')
+        expect(result.code).toContain("export type model = string")
+        expect(result.code).toContain('"POST /a"')
+        expect(result.code).toContain('"POST /b"')
+        expect(result.diagnostics).toStrictEqual([])
+      },
+    )
+  })
+
+  it("rejects a Path Item reference cycle even when its links have local operations", async () => {
+    await expect(
+      genResult(
+        oas("3.1", {
+          paths: { "/r": { $ref: "#/components/pathItems/A" } },
+          components: {
+            pathItems: {
+              A: { $ref: "#/components/pathItems/B", get: { responses: ok } },
+              B: { $ref: "#/components/pathItems/A", post: { responses: ok } },
+            },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ diagnostics: [expect.objectContaining({ code: "circular-ref" })] })
+  })
+
   it("skips specification extensions in the Paths Object", async () => {
     const code = await gen(
       oas("3.1", {
