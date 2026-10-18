@@ -5,64 +5,57 @@
 [![Node.js][node-src]][node-href]
 [![License][license-src]][license-href]
 
-**OpenAPI-shaped fetch.** One generated TypeScript module types every operation of an OpenAPI 3.0, 3.1, or 3.2 API by `"METHOD /path"`, and a small client turns it into a typed `fetch`: a standard `Request` in, a standard `Response` out.
+**OpenAPI-shaped fetch.** Generate a TypeScript module from an OpenAPI 3.0, 3.1, or 3.2 description. Call operations by `"METHOD /path"` with a typed `fetch` client built around standard `Request` and `Response` objects.
 
-- **Web standards.** Requests are `Request`s and responses `Response`s; bodies are JSON, `FormData`, `Blob`s, and streams. Middleware takes a `Request` and the next step, and resolves to a `Response`.
-- **Types that follow the API.** Every component schema becomes a named type, and every response is typed by status and media type. Where a document's letter and the real API part ways, the output follows the API, by rules the docs set out; warnings are left for what someone can act on.
-- **Small.** One generated `.ts` file; the client is one dependency-free module.
-- **CI-ready.** `--check` fails when the committed file is out of date.
+- **Web standards.** Send JSON, `FormData`, `Blob`s, and streams. Add middleware for authentication, retries, and logging.
+- **Types for real APIs.** Get named component schemas, typed request inputs, and responses that narrow by HTTP status. Documented compatibility rules handle common OpenAPI quirks.
+- **Small footprint.** One generated `.ts` file and a dependency-free client.
+- **CI-ready.** Use `--check` to catch outdated generated files.
 
 ## Quick start
+
+Install the package and generate a module from your API description:
 
 ```sh
 pnpm add openapi-shape
 pnpm exec openapi-shape ./openapi.yaml -o src/api.ts
 ```
 
-The source may be a file path or an HTTP(S) URL, in JSON or YAML; `$ref`s to other files and URLs are followed. Call the API through the client:
+The source can be a local JSON or YAML file or an HTTP(S) URL. External references resolve automatically. Import the generated contract to make a request:
 
 ```ts
 import { createClient } from "openapi-shape/client"
 import { contract } from "./api"
 
-const api = createClient(contract, {
-  baseUrl: "https://api.example.com/v1",
-  headers: { authorization: `Bearer ${token}` },
-})
+const api = createClient(contract, { baseUrl: "https://api.example.com/v1" })
 
-// The body, read and decoded: `data` for a 2xx status, `error` for any other, never both.
-const { data, error } = await api.result("GET /pets", { query: { limit: 10 } })
-if (error !== undefined) throw new Error(error?.message ?? "Request failed") // error: Schemas.Error | null
-console.log(data.length) // data: Schemas.Pet[]
+const { data: pets, error } = await api.result("GET /pets", { query: { limit: 10 } })
+if (error !== undefined) throw new Error(error?.message ?? "Could not load pets")
 
-// The Response itself, typed by status.
-const res = await api.fetch("GET /pets/{petId}", { params: { petId: 1 } })
-if (res.status === 404) console.warn((await res.json()).message) // Schemas.Error
+console.log(pets.map((pet) => pet.name)) // pets: Schemas.Pet[]
 ```
 
-Or use the types alone, with a client of your own:
+Use `api.result()` for decoded data or `api.fetch()` for a typed `Response`. See the [client guide](./docs/client.md) for response handling, middleware, and streams.
 
-```ts
-import type { Endpoints, Schemas } from "./api"
+The generated module has no imports or runtime dependencies. Its `Endpoints` and `Schemas` [types also work with your own client](./docs/output.md).
 
-type Pet = Schemas.Pet
-type ListPets = Endpoints["GET /pets"]["responses"]["200"]["content"]["application/json"] // Schemas.Pet[]
-```
+## Requirements
 
-The module imports nothing, so `import type` reads its types without loading it or needing `openapi-shape` installed.
+- **Generator:** Node.js 22 or later.
+- **Client:** a runtime with `fetch` support.
 
-The generated module and the client are ES modules; CommonJS is not supported. The generator runs on Node.js 22 or later, and the client wherever `fetch` does.
+The generated module and client use ES modules. CommonJS is not supported.
 
 ## Documentation
 
 - [The generated module](./docs/output.md): `Endpoints`, `Webhooks`, `Callbacks`, `Schemas`, and the runtime `contract`.
-- [Client](./docs/client.md): the two calls, what they take, how requests are encoded and responses decoded, middleware, and passing calls on.
-- [OpenAPI support](./docs/openapi.md): versions and references, operations, media types, schemas, and where the output follows the real API or approximates.
+- [Client](./docs/client.md): requests, responses, serialization, middleware, and typed wrappers.
+- [OpenAPI support](./docs/openapi.md): supported versions, references, schemas, media types, compatibility rules, and approximations.
 - [CLI and programmatic API](./docs/cli.md): options, `--check`, `generate()`, and diagnostics.
 
 ## Development
 
-Run `pnpm verify` to run the tests, TypeScript checks, lint, and formatting checks. The TypeScript check also validates the compile-time assertions in the tests; `pnpm test --run` alone does not check those assertions.
+Run `pnpm verify` for tests, type checking, lint, and formatting checks. This also validates the compile-time assertions that `pnpm test --run` alone does not check.
 
 ## License
 

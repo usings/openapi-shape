@@ -1,6 +1,10 @@
 # The generated module
 
-`openapi-shape` writes one TypeScript module per OpenAPI description: an interface of every operation, a namespace of every schema, and the runtime `contract` that [the client](./client.md) needs. For [this description](https://github.com/usings/openapi-shape/blob/main/tests/fixtures/readme.yaml), it is:
+`openapi-shape` generates one TypeScript module per OpenAPI description. It contains operation types (`Endpoints`, plus `Webhooks` and `Callbacks` when present), named schema types in `Schemas`, and the runtime `contract` used by [the client](./client.md).
+
+## Example
+
+This excerpt is generated from [the example description](https://github.com/usings/openapi-shape/blob/main/tests/fixtures/readme.yaml):
 
 ```ts
 // Petstore 1.0.0
@@ -77,7 +81,7 @@ export const contract: {
 
 ## Operations
 
-`Endpoints` holds every operation under `paths`, `Webhooks` every webhook, and `Callbacks` every callback. All three share one entry shape, keyed by `"METHOD target"`:
+Operations are keyed by `"METHOD target"`. `Endpoints`, `Webhooks`, and `Callbacks` use the same entry structure, with different targets:
 
 | Interface   | Key                                                       |
 | ----------- | --------------------------------------------------------- |
@@ -85,9 +89,13 @@ export const contract: {
 | `Webhooks`  | `"POST pet.created"` (the webhook name)                   |
 | `Callbacks` | `"POST /subscribe > onEvent > POST {$request.body#/url}"` |
 
-Callback keys chain the parent operation, the callback name, and the callback's own method and URL expression; nested callbacks continue the chain. Methods are uppercase. OpenAPI 3.2's `query` field becomes `QUERY`, and `additionalOperations` keys are used exactly as declared, as the spec requires.
+Callback keys combine the parent operation, callback name, and callback method and URL expression. Nested callbacks extend this chain.
 
-An entry has these members. Each is present only when the operation declares something for it, except `responses`, which always is:
+Standard method fields produce uppercase names; OpenAPI 3.2's `query` becomes `QUERY`. Keys from `additionalOperations` retain their declared spelling.
+
+### Entry fields
+
+Fields appear only when the operation declares corresponding inputs or outputs. `responses` is always present, even when empty:
 
 | Member      | Type                                                                                   |
 | ----------- | -------------------------------------------------------------------------------------- |
@@ -98,11 +106,15 @@ An entry has these members. Each is present only when the operation declares som
 | `body`      | Request body, by media type; `body?:` when `required` is not `true`.                   |
 | `responses` | By status key (`"200"`, `"4XX"`, `"default"`): `{ headers?, content? }`; `{}` if none. |
 
-A response's `headers` are its declared headers, typed by their schemas, and its `content` maps each media type to the type of its content ([Media types](./openapi.md#media-types)); a response without either is `{}`. Documentation (summary, description, `operationId`, deprecation, external docs) becomes JSDoc on entries, parameters, and responses.
+Each response contains its declared `headers`, typed by their schemas, and a `content` map from media types to [content types](./openapi.md#media-types). A response with neither is `{}`.
+
+Summaries, descriptions, operation IDs, deprecation markers, and external documentation become JSDoc on operation entries, parameters, and responses.
 
 ## Webhooks and callbacks
 
-The API sends webhook and callback requests, and your server answers them, so `Webhooks` and `Callbacks` are types only, for your handlers; the client and the contract leave them out. In their entries, `headers`, `query`, and `body` are what you receive, and `responses` what you return:
+Webhooks and callbacks reverse the usual direction: the API sends a request and your server returns a response. Their types describe your handlers; they are excluded from the client contract.
+
+In these entries, `headers`, `query`, and `body` describe what your server receives, while `responses` describes what it returns:
 
 ```ts
 import type { Webhooks } from "./api"
@@ -117,21 +129,27 @@ export async function onPetCreated(request: Request): Promise<Response> {
 }
 ```
 
-The types describe what the API documents, not what reaches your server: a webhook URL takes requests from anyone. Check the sender first (the signature header the document declares is in `headers`), and validate the payload at run time where a malformed one would do harm.
+These types describe the documented API without validating incoming requests. Authenticate the sender and validate payloads as needed. Declared signature headers appear in `headers`.
 
 ## Schemas
 
-Every entry of `components.schemas` becomes a declaration in the `Schemas` namespace, in document order. A plain object becomes an `interface`; anything else becomes a `type` alias. Names are kept when they are valid identifiers; other characters become `_`, and reserved words get a `_` prefix (`user-id` → `user_id`, `class` → `_class`). If two names collide, the later one gets a number (`User_Profile2`) and a `renamed-schema` warning.
+Every `components.schemas` entry becomes a declaration in the `Schemas` namespace, in document order. Plain objects become interfaces; other schemas become type aliases.
 
-Some schemas outside `components.schemas` are named too. These are the ones defined in other documents' components, under `$defs`, as whole schema files, or with an `$id`. A component that only references such a schema lends it its name. Other referenced schemas are inlined where first used; one referenced again, or recursively, gets a name from its location.
+### Names and references
 
-JSDoc on declarations and properties carries the title, description, deprecation, and the constraints TypeScript cannot express: `@format`, `@default`, `@minimum`, `@maximum`, `@exclusiveMinimum`, `@exclusiveMaximum`, `@multipleOf`, `@minLength`, `@maxLength`, `@pattern`, `@minItems`, `@maxItems`, `@uniqueItems`, `@minProperties`, `@maxProperties`, `@contentMediaType`, `@contentEncoding`, `@readOnly`, `@writeOnly`, and `@see`.
+Valid declaration names are preserved. Unsupported characters become `_`, and reserved words receive a `_` prefix: `user-id` becomes `user_id`, and `class` becomes `_class`. If names collide, later declarations receive a numeric suffix such as `User_Profile2` and a `renamed-schema` warning.
 
-A `format` documents a value and does not change its type, except `binary`: raw bytes, a `Blob`. JSON carries no dates or big integers, so a `date-time` is a `string` and an `int64` a `number` (beyond 2^53, imprecisely); convert them in your own code.
+Schemas in external components, under `$defs`, in standalone schema files, or with an `$id` can also receive names. A component that only references such a schema supplies its name. Other references are inlined on first use and named from their location when reused or recursive.
+
+### Documentation and formats
+
+JSDoc preserves titles, descriptions, deprecation, and constraints that TypeScript cannot express: `@format`, `@default`, `@minimum`, `@maximum`, `@exclusiveMinimum`, `@exclusiveMaximum`, `@multipleOf`, `@minLength`, `@maxLength`, `@pattern`, `@minItems`, `@maxItems`, `@uniqueItems`, `@minProperties`, `@maxProperties`, `@contentMediaType`, `@contentEncoding`, `@readOnly`, `@writeOnly`, and `@see`.
+
+Formats usually add documentation without changing the type. The exception is `binary`, which produces `Blob`. A `date-time` remains a `string`, and an `int64` remains a `number`, with JavaScript's precision limits beyond 2^53. Convert these values in application code as needed.
 
 ### Input variants
 
-A required `readOnly` property is required in responses only, and a required `writeOnly` property in requests only. A schema with such properties gets a second declaration, `<Name>Input`, with the request-side requiredness, which what you send refers to; the main declaration has the response side:
+A required `readOnly` property is required only in responses; a required `writeOnly` property is required only in requests. When a schema needs both views, the main declaration describes responses and `<Name>Input` describes requests:
 
 ```ts
 export interface User {
@@ -148,22 +166,30 @@ export interface UserInput {
 }
 ```
 
-The variant is emitted only when something you send uses the schema, and it propagates to schemas that contain one. `readOnly` and `writeOnly` count when set on the property, on a schema it references, or in an `allOf` member, and a property one `allOf` member declares and another requires is one-sided too. Webhook and callback requests are sent by the API, so they use the main declaration, and their responses, which you send, use the variants.
+Input variants are emitted only when the schema is used in data you send. They propagate to schemas that contain a variant.
+
+The generator recognizes `readOnly` and `writeOnly` on properties, referenced property schemas, and `allOf` members. It also handles a property declared in one `allOf` member and required in another. See [Approximations](./openapi.md#approximations) for limits when requiredness comes through a reference.
+
+Webhook and callback requests use the main declarations because the API sends them. Their responses use input variants because you send those responses.
 
 This is OpenAPI 3.0's rule, applied in 3.1+ too ([Following the real API](./openapi.md#following-the-real-api)).
 
 ## The runtime contract
 
-`contract` holds what the client needs to send a request and types cannot carry, per endpoint, and only where it differs from OpenAPI's defaults:
+`contract` stores the serialization metadata the client needs at runtime. Entries contain only settings that differ from OpenAPI's defaults:
 
 - Parameter encodings under `params`, `query`, and `headers`: `{ style, explode }` (with `allowReserved` when set), or `{ contentType }` for a parameter with `content`.
-- The 3.2 `querystring` media type, or for form content, its Encoding Objects under `query`.
-- `contentType`: the media type to send when the call names none and it is not JSON, because it is the only one declared.
-- `json`: the label of the JSON the client encodes when the call names no media type, where that is the declared `application/json` one with parameters ([Client](./client.md#what-a-call-takes)).
+- `querystring`: the media type of an OpenAPI 3.2 querystring parameter. Form querystrings instead store their field encodings under `query`.
+- `contentType`: the non-JSON default request media type, when it is the only declared type.
+- `json`: the default `application/json` media type when it has parameters, such as `application/json; charset=utf-8`, used to label encoded JSON when the call omits `contentType`. See [call inputs](./client.md#what-a-call-takes).
 - `encoding`: the Encoding Objects of an `application/x-www-form-urlencoded` body, by field.
 
 `GET` and `HEAD` endpoints have no `contentType`, `json`, or `encoding`: the client sends them without a body.
 
-Nothing else goes over the wire from the description: the client sends every request to its `baseUrl`, whatever the servers ([Operations](./openapi.md#operations)); credentials go in headers or a middleware, cookies are the runtime's to send, and multipart parts are labelled by the `FormData` they are sent as ([Client](./client.md)).
+The client uses its configured `baseUrl`, rather than the description's [servers](./openapi.md#operations). Credentials come from headers or middleware, cookies are managed by the runtime, and multipart part types come from `FormData`. See the [client guide](./client.md) for request encoding.
 
-The module imports nothing. `contract` carries its own type, with `Endpoints` under `types` for `createClient` to infer, and its format as `version`. A change to the format is a new version, and a client accepts the versions it reads: a module and a client that disagree fail to compile at `createClient`, or, in JavaScript, `createClient` throws.
+### Format compatibility
+
+The generated module has no imports. Its contract type carries `Endpoints` through the optional `types` field for inference; that field is absent at runtime. The `version` field identifies the contract format.
+
+Format changes use a new version. A client accepts only formats it supports. A mismatch fails to compile at `createClient`; JavaScript callers receive a runtime error.

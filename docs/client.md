@@ -1,6 +1,6 @@
 # Client
 
-`openapi-shape/client` turns [the generated module](./output.md) into a typed `fetch`. Each call builds a standard `Request` the way the description declares (parameter styles, media types, form encodings) and sends it, through any middleware, with `fetch`; the response is a standard `Response`, typed by status. The client is one dependency-free module that runs wherever `fetch` does. It does not validate responses.
+`openapi-shape/client` uses [the generated contract](./output.md#the-runtime-contract) to build typed requests with standard `Request` and `Response` objects. It handles parameter styles, media types, and form encodings, and supports middleware around each request. The client has no dependencies and runs wherever `fetch` is available. It does not validate response data.
 
 ```ts
 import { createClient } from "openapi-shape/client"
@@ -8,23 +8,32 @@ import { contract } from "./api"
 
 const api = createClient(contract, { baseUrl: "https://api.example.com/v1" })
 
-const { data, error, status } = await api.result("GET /pets/{petId}", {
+const {
+  data: pet,
+  error,
+  status,
+} = await api.result("GET /pets/{petId}", {
   params: { petId: 1 },
 })
-if (error === undefined) console.log(data.name) // data: Schemas.Pet
-else if (status === 404) console.warn(error.message) // error: Schemas.Error
+if (error === undefined) {
+  console.log(pet.name) // pet: Schemas.Pet
+} else if (status === 404) {
+  console.warn(error.message) // error: Schemas.Error
+} else {
+  console.error(status, error)
+}
 ```
 
 ## Creating a client
 
-`createClient(contract, options?)` takes the generated `contract`, which carries the generated `Endpoints` in its type, and these options:
+`createClient(contract, options?)` infers the API types from the generated `contract`. Its options configure the base URL, request defaults, and how requests are sent:
 
-| Option                  | Description                                                                                                                                                                               |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `baseUrl`               | The URL endpoint paths go under, such as `https://api.example.com/v1`, without a query or fragment. Without it, URLs are relative, as `fetch` takes them: fine in a browser, not in Node. |
-| `middleware`            | Functions that wrap the sending of every request, the first outermost. See [Middleware](#middleware).                                                                                     |
-| `fetch`                 | Sends each `Request`, after the last middleware, and resolves to its `Response`: a test double, say. Default: the global `fetch`.                                                         |
-| Any `RequestInit` field | Defaults for every request: `headers`, `credentials`, `cache`, and so on, but not `signal`. A call's own fields override them; its headers are set over these.                            |
+| Option           | Description                                                                                                                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseUrl`        | The prefix for endpoint paths, such as `https://api.example.com/v1`. Queries and fragments are not allowed. Omit it for relative URLs in a browser; Node requires an absolute URL.                                |
+| `middleware`     | Functions that wrap each request, with the first running outermost. See [Middleware](#middleware).                                                                                                                |
+| `fetch`          | The transport function: takes a `Request` and resolves to a `Response` after the middleware runs. Defaults to global `fetch`; replace it with a test double or custom transport.                                  |
+| Request defaults | `RequestInit` fields other than `method`, `body`, and `signal`, including `headers`, `credentials`, and `cache`. Each call overrides these defaults; headers are merged with the call's values taking precedence. |
 
 ## Two calls
 
@@ -33,34 +42,29 @@ else if (status === 404) console.warn(error.message) // error: Schemas.Error
 | `api.result(endpoint, init?)` | `{ data, error, status, response }`: the body, read and decoded, as `data` for a 2xx status or `error` for any other, never both. |
 | `api.fetch(endpoint, init?)`  | The `Response`, typed by status, its body unread, for streams, downloads, and anything else `fetch` does.                         |
 
-Neither rejects for an HTTP status, as `fetch` does not. A network failure, a body that does not match its `Content-Type`, or what a middleware throws rejects; so does a request that cannot be built (a missing path parameter, say), with a `TypeError`, as `fetch` does. Both take the same arguments, and both narrow by `status`:
+Both calls accept the same arguments and resolve for any HTTP status, including errors. They reject for network failures, middleware errors, or requests that cannot be built. Missing path parameters reject with a `TypeError`. `result` also rejects if the body cannot be decoded according to its `Content-Type`.
 
-```ts
-const res = await api.fetch("GET /pets/{petId}", { params: { petId: 1 } })
-if (res.ok) {
-  const pet = await res.json() // Schemas.Pet
-} else if (res.status === 404) {
-  const error = await res.json() // Schemas.Error
-}
-```
+Use `result` for decoded data, or `fetch` to [read the response yourself](#typed-responses).
 
 ### What a call takes
 
-The second argument takes any `RequestInit` field but `method` (`signal`, `cache`, `keepalive`, …), and these, typed by the operation; it is required exactly when the operation requires something. An endpoint the API does not have fails to compile with an error on the endpoint argument, whether or not a second argument is supplied:
+The second argument combines request options such as `signal`, `cache`, and `keepalive` with the operation's typed inputs below. The endpoint determines `method`; the client types `headers` and `body` from the operation.
+
+This argument is required only when the operation has required inputs. Unknown endpoints produce a compile error on the endpoint argument, whether or not options are supplied.
 
 | Field         | Rule                                                                                                                                                                                                                       |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `params`      | Required when the path has parameters; values must be own properties of `params`, not inherited.                                                                                                                           |
 | `query`       | Required when any query parameter is required.                                                                                                                                                                             |
-| `headers`     | Optional. Declared header parameters are type-checked and serialized by their style; other headers are allowed. A `Headers` or its entries are taken as they are. Set over the client's headers and the body's media type. |
+| `headers`     | Optional. Object values use the declared parameter types and styles; additional headers are allowed. A `Headers` instance or entries are passed through. Call headers override defaults and the encoded body's media type. |
 | `body`        | Required when the request body is required. Not taken with `GET` or `HEAD`, which `fetch` cannot send a body with.                                                                                                         |
-| `contentType` | Which declared media type `body` is. May be omitted for the default: the declared `application/json` one, parameters and all, where one alone is; else the only one declared.                                              |
+| `contentType` | The declared media type of `body`. Optional when there is a default: the sole `application/json` entry, including media type parameters, or otherwise the sole declared media type.                                        |
 
-Cookie parameters are typed in `Endpoints`, but a call does not take them: a browser sends its own cookies, and elsewhere a `cookie` header does.
+Cookie parameters appear in `Endpoints`, but client calls have no cookie input. Browsers manage cookies; other runtimes can send a `cookie` header.
 
 ### Request bodies
 
-What `body` may be follows its media type:
+The media type determines which body values the client accepts and how it sends them:
 
 | Media type                                       | `body`                                  | Sent as                                                                                                             |
 | ------------------------------------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -70,34 +74,62 @@ What `body` may be follows its media type:
 | `text/*`, except `text/event-stream`             | A string                                | As given                                                                                                            |
 | Anything else                                    | A `Blob`, buffer, stream, or string     | As given                                                                                                            |
 
-A `Blob`, `FormData`, `URLSearchParams`, buffer, or stream is taken for every media type and passed through. `FormData` and `URLSearchParams` bring their own content type; anything else is labelled with the media type the call names, or else the operation's default unless that is JSON. Otherwise, as for a wildcard such as `image/*`, a `Blob`'s own type applies. Streams, web or Node.js, are sent in half duplex. To label a multipart part, as some servers need for a JSON part, append a `Blob` of that type, or pass a `FormData` of your own.
+A `Blob`, `FormData`, `URLSearchParams`, buffer, or stream passes through for any media type. `FormData` and `URLSearchParams` supply their own content type. Other ready-made bodies use the explicitly selected media type, or the operation's non-JSON default. Without a label, a `Blob`'s own type applies, including under a wildcard such as `image/*`. Web and Node.js streams use half duplex.
+
+To set a multipart part's content type, such as `application/json`, append a `Blob` with that type or supply your own `FormData`.
 
 ### Serialization
 
-Parameters are encoded as the contract declares: every path, query, and header style (`label`, `matrix`, `pipeDelimited`, `deepObject` as `created[gte]=1`, …), `allowReserved`, JSON `content` parameters, and the 3.2 `querystring`. `Date` values become ISO strings. A missing, `null`, or `undefined` path parameter rejects. Style-based query and form encoding omits `null` and `undefined` fields and array elements; headers and multipart parts omit such values too. Path and header arrays keep them as the text `null` or `undefined`. JSON-encoded values follow JSON serialization rules.
+The contract controls path, query, and header styles (`label`, `matrix`, `pipeDelimited`, `deepObject`, and others), `allowReserved`, JSON `content` parameters, and the OpenAPI 3.2 `querystring`. For example, `deepObject` encodes a field as `created[gte]=1`.
 
-Values are percent-encoded; commas between list items stay as they are, and space and pipe delimiters are percent-encoded. A `Blob` is refused wherever the client writes text or JSON (a JSON body, a form field, an object part, a parameter, a header), not sent as `{}`. `allowReserved` keeps reserved characters only where they cannot change the URL: in a path, all but `?`, `#`, `[`, and `]`; in a query or form field, also not `&`, `=`, and `+`; existing percent-encodings stay as they are. A path parameter value that would empty its segment or make it `.` or `..` is refused, since the request would reach another resource.
+Value handling follows these rules:
+
+- `Date` values become ISO strings.
+- Missing, `null`, or `undefined` path parameters reject.
+- Style-based query and form encoding omits `null` and `undefined` fields and array elements. Headers and multipart parts omit nullish values too.
+- Path and header arrays serialize nullish elements as the text `null` or `undefined`.
+- JSON content follows JSON serialization rules. A `Blob` is rejected anywhere the client writes text or JSON: inside JSON bodies, form fields, object parts, parameters, and headers.
+
+Values are percent-encoded. Commas used as list delimiters remain literal; space and pipe delimiters are encoded. With `allowReserved`, existing percent-encodings are preserved, and reserved characters remain literal except for:
+
+- Paths: `?`, `#`, `[`, and `]`.
+- Query parameters and form fields: the same characters, plus `&`, `=`, and `+`.
+
+Path values that create an empty segment, `.` or `..` are rejected because URL normalization would target a different resource.
 
 ## Responses
 
-Both calls are typed by the statuses the operation declares:
+### Status handling
+
+Both calls derive their response types from the operation's declared statuses:
 
 - A range such as `4XX` stands for each of its statuses not declared on their own.
-- A 2xx status is taken to be one the description declares. `default` stands for every other status, and for 2xx ones too when no 2xx is declared.
+- If any 2xx status is declared, the types assume successful responses use one of those statuses. `default` covers all other statuses, including 2xx statuses when none are declared.
 - Without `default`, an undeclared 3xx, 4xx, or 5xx status has an `unknown` body, and so does a 2xx status when no 2xx is declared.
-- A response to `HEAD`, and one with status 204, 205, or 304, has no content, whatever the description declares, under a range or `default` too. A 304 is a failure result with `error: null`; its `json()` rejects and is typed as `Promise<never>`. Every other status carries what the description declares for it, nothing where it declares no content.
-- Opaque responses (status 0), from `mode: "no-cors"` or `redirect: "manual"` in a browser, and statuses outside 100–599 are taken as the description says, though they may differ at runtime.
+- `HEAD` responses and statuses 204, 205, and 304 have no content, even if the description declares content through an explicit status, range, or `default`. A 304 is a failure result with `error: null`; its `json()` rejects and has type `Promise<never>`. Other statuses use the declared content, or no content when none is declared.
+- The types follow the description for opaque browser responses (status 0, from `mode: "no-cors"` or `redirect: "manual"`) and statuses outside 100–599. Runtime responses may differ.
 
 ### Results
 
-`api.result` reads the body whatever the status, so the connection is free again, and decodes it by its `Content-Type`:
+`api.result()` reads the response body for every status, allowing the connection to be reused. It decodes the body by `Content-Type`:
 
 - JSON (`…/json`, `…+json`): parsed; an empty body, or one of only JSON whitespace (spaces, tabs, line breaks), is no content. A body that does not parse rejects, with the status in the message.
 - Other `text/*`: a string.
 - No content (`HEAD`, 204, 205, 304, or an empty body without a content type): `undefined`.
 - Anything else: a `Blob`.
 
-The body is `data` for a 2xx status and `error` for any other; the other one is `undefined`. A failure's `error` is never `undefined`, but `null` where its body decodes to nothing, so `error === undefined` tells a success, and narrows `data` also once destructured. `if (error)` narrows as far as it can: where an error may be `null`, `data` stays possibly `undefined`. `status` narrows both to that status's body; it is the response's own, beside `data` and `error` because TypeScript narrows them by a field of the result, not through `response.status`. `response` is the typed `Response`, its body read, for its headers.
+The result contains four fields:
+
+| Field      | Meaning                                                                                   |
+| ---------- | ----------------------------------------------------------------------------------------- |
+| `data`     | Decoded body for a 2xx response; otherwise `undefined`.                                   |
+| `error`    | Decoded body for any other status, or `null` if there is no body; `undefined` on success. |
+| `status`   | The response status, used to narrow `data`, `error`, and `response`.                      |
+| `response` | The typed `Response`, with its body already read. Use it to inspect headers.              |
+
+Check `error === undefined` to identify success and narrow `data`, including after destructuring. A truthiness check such as `if (error)` cannot rule out an empty error body (`null`), so `data` may remain possibly `undefined`.
+
+Use the result's top-level `status` to narrow by status. TypeScript cannot narrow `data` and `error` through the nested `response.status`.
 
 ```ts
 const { data, error } = await api.result("GET /pets", { query: { limit: 10 } })
@@ -108,15 +140,32 @@ if (error === undefined) {
 }
 ```
 
-The types follow from the declared content the same way: `data` is the union over the success statuses, and `error` over the others. Where the description declares no `default`, any undeclared status may answer, so `error` alone is no narrower than `{} | null` until `status` narrows it. A response declared as JSON and XML is `Schemas.Pet | Blob`, since the server chooses, and raw bytes under a wildcard (`*/*`) are `unknown`, since the server may label them anything; read a download with `api.fetch` and `blob()`.
+`data` is the union of decoded bodies for successful statuses; `error` covers the others. Without a declared `default`, undeclared error statuses keep `error` as broad as `{} | null` until a status check narrows it.
+
+The server chooses the response media type. A response declared as both JSON and XML therefore produces `Schemas.Pet | Blob`. Raw bytes declared under a wildcard such as `*/*` produce `unknown`, since the actual content type determines decoding. Use `api.fetch()` and `blob()` for downloads.
 
 ### Typed responses
 
-`api.fetch` resolves to a `TypedResponse`: `status` and `ok` narrow it, and `json()` resolves to that status's JSON content, from its `…/json`, `…+json`, or wildcard media types (raw bytes are `unknown` there), or to `never` where the response has no content, since `json()` then rejects. Everything else is the standard `Response`: `headers`, `text()`, `blob()`, and `body`, a stream. As with `fetch`, read or cancel a body you do not need (`res.body?.cancel()`), so the connection can be reused.
+`api.fetch()` returns a `TypedResponse`. Its `ok` and `status` fields narrow the response, and `json()` returns the declared JSON type for that status, including JSON-compatible wildcard media types. Raw bytes under a wildcard are typed as `unknown`. Where no content is declared, `json()` is typed as `Promise<never>` because parsing an empty body rejects.
+
+The remaining API is the standard `Response`: `headers`, `text()`, `blob()`, and the `body` stream. Read or cancel unused bodies (`response.body?.cancel()`) so the connection can be reused.
+
+```ts
+const response = await api.fetch("GET /pets/{petId}", { params: { petId: 1 } })
+if (response.ok) {
+  const pet = await response.json() // Schemas.Pet
+  console.log(pet.name)
+} else if (response.status === 404) {
+  const error = await response.json() // Schemas.Error
+  console.warn(error.message)
+} else {
+  console.error(response.status, await response.text())
+}
+```
 
 ### Streams
 
-`api.result` reads a body whole, so event streams and JSON sequences arrive as text or a `Blob`. Read them as they come through `api.fetch`; `Endpoints` types their items for a parser of your own:
+`api.result()` buffers the entire body, so it returns event streams and JSON sequences as text or a `Blob`. Use `api.fetch()` to read incrementally. The generated `Endpoints` types describe the items for your own parser:
 
 ```ts
 const { body } = await api.fetch("GET /events")
@@ -130,7 +179,9 @@ while (reader) {
 
 ## Middleware
 
-Middleware changes how requests are sent: credentials, timeouts, retries, logging. Each takes the `Request` and `next`, which sends a request on through the rest, and resolves to a `Response`: code before `next` sees the request, code after it the response, and a `try` around it a network failure. The first in `middleware` is the outermost, and the `fetch` option sends the request after the last:
+Middleware wraps requests for authentication, timeouts, retries, or logging. Each function receives a `Request` and `next`, and resolves to a `Response`. Call `next(request)` to continue through the remaining middleware. Code before `next` handles the request; code after it handles the response; a `try`/`catch` around it handles failures.
+
+The first middleware runs outermost. The client's `fetch` option sends the request after the last middleware:
 
 ```ts
 import { createClient, defineMiddleware } from "openapi-shape/client"
@@ -163,17 +214,31 @@ export const api = createClient(contract, {
 })
 ```
 
-`defineMiddleware` returns a middleware as it is, typed where it is written; its type is `Middleware`, and `next` is a `Fetcher`, the type of the `fetch` option too. A middleware may pass on another request, answer without calling `next`, or call `next` again, each time through the rest. Mind what it shares:
+`defineMiddleware()` provides contextual types and returns the same function. `Middleware` is the middleware type; `Fetcher` is the type of both `next` and the client's `fetch` option.
 
-- A middleware gets the very `Request` the one around it passed on, so a change made in place shows there once `next` returns, where an outer logger reading the headers would log the token. To change a request, pass on a copy: `new Request(request)`, or `new Request(request, init)`, which takes over its body.
-- A body is read once. To send a request again, as a retry does, send a `request.clone()` made before the first try. To read a response's body, read a `response.clone()` and pass the response on, or `api.result` rejects. Cancel the body of a response you drop (`response.body?.cancel()`), as a retry drops the failed try's, so the connection is free again.
-- A function that takes the request alone is a middleware too, one that sends nothing on: a test double belongs in `fetch`, where it cannot cut middleware off.
+A middleware may forward a different request, return a response without calling `next`, or call `next` repeatedly. Each call continues through the remaining middleware.
 
-Static credentials can go in `headers` instead. The client's options take no `signal`: one signal would be shared by every request, and a timeout would cancel them all once it ran out. A timeout belongs in a middleware, where each request gets its own, or in a call's `signal`.
+### Requests, bodies, and retries
+
+- Middleware receives the same `Request` object passed by its caller. In-place changes remain visible to outer middleware, so an outer logger could expose a newly added token. Forward a copy with `new Request(request)` or `new Request(request, init)` to isolate changes. These constructors take over the original body.
+- Bodies can be read only once. For retries, clone the request before the first attempt. To inspect a response body, read a `response.clone()` and return the original; consuming the original causes `api.result()` to reject. Cancel discarded response bodies with `response.body?.cancel()` so their connections can be reused.
+- A function that takes only a request also qualifies as middleware and can stop the chain. Put transport test doubles in the `fetch` option so every middleware still runs.
+
+### Credentials and timeouts
+
+Put static credentials in the client's `headers` defaults. Use middleware when credentials need to be refreshed for each request.
+
+Set timeouts in middleware or a call's `signal`. Client-wide options exclude `signal`: sharing one timeout signal across all requests would cancel every request after it expires.
 
 ## Passing calls on
 
-A function that passes a call on takes the endpoint as an `Endpoint` and the rest as `EndpointArgs`, and keeps every type a call has; `EndpointData` is the data of the endpoint's 2xx responses, for what it returns. A query for TanStack Query, which counts a request as failed only when its function throws:
+Use `Endpoint`, `EndpointArgs`, and `EndpointData` to preserve types in wrappers:
+
+- `Endpoint<Endpoints>` selects a callable endpoint.
+- `EndpointArgs<Endpoints, K>` carries that endpoint's arguments and requiredness.
+- `EndpointData<Endpoints, K>` describes its decoded success data.
+
+The following wrapper builds query options for a consumer such as TanStack Query. It throws for HTTP errors so the consumer treats the query as failed:
 
 ```ts
 import type { Endpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
@@ -202,6 +267,6 @@ export function query<K extends Endpoint<Endpoints>>(
 const pet = await query("GET /pets/{petId}", { params: { petId: 1 } }).queryFn() // Schemas.Pet
 ```
 
-Checking `error` narrows `data` to `EndpointData<Endpoints, K>` even while `K` is a type parameter, whether the result is kept whole or destructured first; returning `data` unchecked, or `error`, fails to compile where it could break that type. Each caller gets the data type of the endpoint it passes.
+Checking `error` narrows `data` to `EndpointData<Endpoints, K>`, even when `K` is generic and the result is destructured. Returning unchecked data or an error body fails to compile when it could violate that return type. Each caller receives the data type for its selected endpoint.
 
-A call takes one endpoint, not a union of them. Handwritten `Endpoints` maps with string or template index signatures work too: a literal call such as `"HEAD /health"` supplies the method that decides its body and response types.
+Each call must select a single endpoint. Handwritten `Endpoints` maps can also use string or template index signatures. A literal key such as `"HEAD /health"` supplies the method used to determine its body and response types.
