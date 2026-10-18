@@ -8,7 +8,7 @@
 **OpenAPI-shaped fetch.** One generated TypeScript module types every operation of an OpenAPI 3.0, 3.1, or 3.2 API by `"METHOD /path"`, and a small client turns it into a typed `fetch`: a standard `Request` in, a standard `Response` out.
 
 - **Web standards.** Requests are `Request`s and responses `Response`s; bodies are JSON, `FormData`, `Blob`s, and streams. Middleware takes a `Request` and the next step, and resolves to a `Response`.
-- **Types that follow the API.** Every schema becomes a named type, and every response is typed by status and media type. Where a document's letter and the real API part ways, the output follows the API, by rules the docs set out; warnings are left for what someone can act on.
+- **Types that follow the API.** Every component schema becomes a named type, and every response is typed by status and media type. Where a document's letter and the real API part ways, the output follows the API, by rules the docs set out; warnings are left for what someone can act on.
 - **Small.** One generated `.ts` file; the client is one dependency-free module.
 - **CI-ready.** `--check` fails when the committed file is out of date.
 
@@ -19,7 +19,7 @@ pnpm add openapi-shape
 pnpm exec openapi-shape ./openapi.yaml -o src/api.ts
 ```
 
-The source may be a file path or an HTTP(S) URL, in JSON or YAML; `$ref`s to other files and URLs are followed, preserving local fields through Path Item reference chains. Call the API through the client:
+The source may be a file path or an HTTP(S) URL, in JSON or YAML; `$ref`s to other files and URLs are followed. Call the API through the client:
 
 ```ts
 import { createClient } from "openapi-shape/client"

@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 import { GenerateError, generate } from "../src/index"
-import { codes, gen, oas } from "./helpers/generate"
+import { codes, declaration, gen, oas } from "./helpers/generate"
 import { withFiles } from "./helpers/tmp"
 
 const FIXTURES = join(import.meta.dirname, "fixtures/oai")
@@ -139,15 +139,31 @@ describe("generate", () => {
     })
   })
 
-  it("reads unknown JSON Schema dialects as 2020-12", async () => {
+  it.each([
+    ["https://json-schema.org/draft/2020-12/schema", undefined],
+    ["http://json-schema.org/draft-07/schema#", "https://example.com/custom"],
+    ["https://example.com/custom", "http://json-schema.org/draft-07/schema#"],
+    [undefined, "https://json-schema.org/draft/2020-12/schema"],
+  ])("uses 2020-12 semantics with jsonSchemaDialect %s and $schema %s", async (dialect, schema) => {
     const result = await generate(
       oas("3.1", {
-        jsonSchemaDialect: "http://json-schema.org/draft-07/schema#",
-        components: { schemas: { A: { $schema: "https://example.com/custom", type: "string" } } },
+        ...(dialect === undefined ? {} : { jsonSchemaDialect: dialect }),
+        components: {
+          schemas: {
+            A: {
+              ...(schema === undefined ? {} : { $schema: schema }),
+              type: "array",
+              prefixItems: [{ type: "string" }],
+              minItems: 1,
+              items: false,
+            },
+          },
+        },
       }),
     )
+    // In draft-07, items: false forbids every item; 2020-12 lets prefixItems describe the first.
+    expect(declaration(result.code, "A")).toBe("[string]")
     expect(result.diagnostics).toStrictEqual([])
-    expect(result.code).toContain("export type A = string")
   })
 
   it("accepts every 3.x patch version", async () => {

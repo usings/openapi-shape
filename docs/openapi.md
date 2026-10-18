@@ -102,4 +102,4 @@ Validation that TypeScript cannot express is dropped, and the type is wider:
 - `additionalProperties: false` closing an object.
 - An `allOf` whose unions, including those behind references and inside intersections, would multiply into more than 10,000 alternatives widens its largest ones until they would not: a union of objects to any object, other unions to `unknown`.
 
-`integer` is `number`. The generator's soundness is tested against the official [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite): every valid instance must type-check, apart from the cases above.
+`integer` is `number`. The generator's soundness is tested against the vendored subset of the official [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite): valid instances in the included groups must type-check, apart from the cases above. Groups requiring remote documents or the metaschema are skipped; the exclusions are listed in [the test runner](https://github.com/usings/openapi-shape/blob/main/tests/json-schema-suite.test.ts).

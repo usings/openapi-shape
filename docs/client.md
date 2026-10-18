@@ -74,7 +74,7 @@ A `Blob`, `FormData`, `URLSearchParams`, buffer, or stream is taken for every me
 
 ### Serialization
 
-Parameters are encoded as the contract declares: every path, query, and header style (`label`, `matrix`, `pipeDelimited`, `deepObject` as `created[gte]=1`, …), `allowReserved`, JSON `content` parameters, and the 3.2 `querystring`. `Date` values become ISO strings; `null` and `undefined` parameters, fields, and parts are left out.
+Parameters are encoded as the contract declares: every path, query, and header style (`label`, `matrix`, `pipeDelimited`, `deepObject` as `created[gte]=1`, …), `allowReserved`, JSON `content` parameters, and the 3.2 `querystring`. `Date` values become ISO strings. A missing, `null`, or `undefined` path parameter rejects. Style-based query and form encoding omits `null` and `undefined` fields and array elements; headers and multipart parts omit such values too. Path and header arrays keep them as the text `null` or `undefined`. JSON-encoded values follow JSON serialization rules.
 
 Values are percent-encoded; commas between list items stay as they are, and space and pipe delimiters are percent-encoded. A `Blob` is refused wherever the client writes text or JSON (a JSON body, a form field, an object part, a parameter, a header), not sent as `{}`. `allowReserved` keeps reserved characters only where they cannot change the URL: in a path, all but `?`, `#`, `[`, and `]`; in a query or form field, also not `&`, `=`, and `+`; existing percent-encodings stay as they are. A path parameter value that would empty its segment or make it `.` or `..` is refused, since the request would reach another resource.
 

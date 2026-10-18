@@ -66,29 +66,41 @@ describe("3.0 keyword set", () => {
     expect(result.diagnostics).toStrictEqual([])
   })
 
-  it("applies JSON Schema keywords the 3.0 Schema Object lacks", async () => {
-    const result = await genResult(
-      withSchemas("3.0", {
-        T: {
-          type: "object",
-          properties: {
-            kind: { type: "string", const: "x" },
-            pair: {
-              type: "array",
-              prefixItems: [{ type: "string" }],
-              minItems: 1,
-              items: { type: "number" },
-            },
+  it.each([
+    {
+      keyword: "const, prefixItems, and patternProperties",
+      schema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", const: "x" },
+          pair: {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            minItems: 1,
+            items: { type: "number" },
           },
-          patternProperties: { "^x-": { type: "string" } },
         },
-        U: { type: ["string", "null"] },
-      }),
-    )
-    expect(declaration(result.code, "T")).toBe(
-      '{\n  kind?: "x"\n  /** @minItems 1 */\n  pair?: [string, ...number[]]\n  [key: string]: string | [string, ...number[]] | undefined\n}',
-    )
-    expect(declaration(result.code, "U")).toBe("string | null")
+        patternProperties: { "^x-": { type: "string" } },
+      },
+      expected:
+        '{\n  kind?: "x"\n  /** @minItems 1 */\n  pair?: [string, ...number[]]\n  [key: string]: string | [string, ...number[]] | undefined\n}',
+    },
+    { keyword: "type arrays", schema: { type: ["string", "null"] }, expected: "string | null" },
+    { keyword: "type: null", schema: { type: "null" }, expected: "null" },
+    {
+      keyword: "tuple items and additionalItems",
+      schema: { type: "array", items: [{ type: "string" }], additionalItems: false },
+      expected: "[string?]",
+    },
+    { keyword: "items: false", schema: { type: "array", items: false }, expected: "[]" },
+    {
+      keyword: "boolean property schemas",
+      schema: { type: "object", properties: { a: false } },
+      expected: "{\n  a?: never\n}",
+    },
+  ])("applies $keyword in 3.0", async ({ schema, expected }) => {
+    const result = await genResult(withSchemas("3.0", { T: schema }))
+    expect(declaration(result.code, "T")).toBe(expected)
     expect(result.diagnostics).toStrictEqual([])
   })
 
@@ -264,21 +276,5 @@ describe("readOnly and writeOnly across schemas", () => {
     )
     expect(declaration(result.code, "UserInput2")).toContain("id?: number")
     expect(codes(result.diagnostics)).toStrictEqual(["renamed-schema #/components/schemas/User"])
-  })
-})
-
-describe("3.1 keywords in 3.0 documents", () => {
-  it("applies them", async () => {
-    const result = await genResult(
-      withSchemas("3.0", {
-        N: { type: "null" },
-        T: { type: "array", items: [{ type: "string" }], additionalItems: false },
-        E: { type: "array", items: false },
-        B: { type: "object", properties: { a: false } },
-      }),
-    )
-    expect(declaration(result.code, "N")).toBe("null")
-    expect(declaration(result.code, "T")).toBe("[string?]")
-    expect(result.diagnostics).toStrictEqual([])
   })
 })

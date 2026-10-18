@@ -865,11 +865,4 @@ describe("composition through references", () => {
     )
     expect(declaration(code, "A")).toBe("{\n  b?: a_zz\n}")
   })
-
-  it("accepts the JSON Schema 2020-12 dialect as jsonSchemaDialect", async () => {
-    const doc = withSchemas("3.1", { A: { type: "string" } })
-    doc.jsonSchemaDialect = "https://json-schema.org/draft/2020-12/schema"
-    const { diagnostics } = await genResult(doc)
-    expect(diagnostics).toStrictEqual([])
-  })
 })
