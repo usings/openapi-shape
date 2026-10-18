@@ -1,8 +1,3 @@
-// The published format a generated module exports as `contract`: what the
-// generator writes and the client reads. A change to it is a new `version`,
-// which the generator writes and the client accepts; a client keeps accepting
-// the versions it can still read, so committed contracts keep working.
-
 /** The format version of the contracts this client reads. */
 export const CONTRACT_VERSION = 1
 

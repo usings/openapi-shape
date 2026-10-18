@@ -1,7 +1,3 @@
-// The types of a call: what it takes, by the operation, and what it resolves
-// to, by status. Status keys, ranges, and media types become TypeScript
-// literals here, so that `status`, `ok`, and `error` narrow.
-
 /** A `Response` for one declared status or range: `json()` resolves to its JSON content. */
 export interface TypedResponse<Status extends number, Ok extends boolean, Json> extends Response {
   readonly status: Status

@@ -1,5 +1,3 @@
-// Values as the wire carries them: media type classes, text, and JSON.
-
 /** Lowercased `type/subtype` without parameters. */
 export function mediaTypeEssence(mediaType: string): string {
   // Only spaces and tabs surround it (RFC 9110, OWS), as the client's types trim them.

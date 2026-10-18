@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { Client, ClientOptions, Contract } from "../src/client"
-import { createClient } from "../src/client"
+import type { Client, ClientOptions, Contract, Middleware } from "../src/client"
+import { createClient, defineMiddleware } from "../src/client"
 import { contract } from "./__snapshots__/client-api"
 
 /**
@@ -49,6 +49,11 @@ function shared(values: number[]): SharedArrayBuffer {
   const buffer = new SharedArrayBuffer(values.length)
   new Uint8Array(buffer).set(values)
   return buffer
+}
+
+/** A middleware, or a `fetch` option, that throws as it is called. */
+function refuse(): never {
+  throw new Error("no token")
 }
 
 // A Node.js-style stream: an async iterable of bytes.
@@ -541,5 +546,100 @@ describe("responses", () => {
     await expect(client.result("GET /pets")).rejects.toThrow(
       "The 502 response is not the JSON it says",
     )
+  })
+})
+
+describe("middleware", () => {
+  it("wraps sending, the first outermost, with the fetch option after the last", async () => {
+    const answered: string[] = []
+    const via = (name: string): Middleware =>
+      defineMiddleware(async (request, next) => {
+        request.headers.append("x-via", name)
+        const response = await next(request)
+        answered.push(name)
+        return response
+      })
+    const { client, sent } = recorder(contract, { middleware: [via("outer"), via("inner")] })
+    await client.fetch("GET /pets")
+    expect(sent().headers.get("x-via")).toBe("outer, inner")
+    expect(answered).toStrictEqual(["inner", "outer"])
+  })
+
+  it("sends what a middleware passes on, and again each time it calls next", async () => {
+    let tries = 0
+    const passed: string[] = []
+    const { client, requests } = recorder(
+      contract,
+      {
+        middleware: [
+          // A retry: the second try sends the request the first one did not use up.
+          async (request, next) => {
+            const first = await next(request.clone())
+            if (first.status !== 503) return first
+            await first.body?.cancel()
+            return next(request)
+          },
+          (request, next) => {
+            passed.push(request.method)
+            return next(new Request(request, { headers: { "x-try": String(passed.length) } }))
+          },
+        ],
+      },
+      () => new Response(null, { status: ++tries === 1 ? 503 : 204 }),
+    )
+    const response = await client.fetch("GET /pets")
+    expect(response.status).toBe(204)
+    expect(passed).toStrictEqual(["GET", "GET"])
+    expect(requests.map((request) => request.headers.get("x-try"))).toStrictEqual(["1", "2"])
+  })
+
+  it("reads the body of the response the middleware pass on", async () => {
+    const seen: unknown[] = []
+    const { client } = recorder(
+      contract,
+      {
+        middleware: [
+          async (request, next) => {
+            const response = await next(request)
+            seen.push(await response.clone().json())
+            return response
+          },
+        ],
+      },
+      () => Response.json({ id: 1, name: "Rex" }),
+    )
+    const { data } = await client.result("GET /pets/{id}", { params: { id: 1 } })
+    expect(data).toStrictEqual({ id: 1, name: "Rex" })
+    expect(seen).toStrictEqual([data])
+  })
+
+  it("takes a middleware's own answer, sending nothing", async () => {
+    const { client, requests } = recorder(contract, {
+      middleware: [() => Promise.resolve(Response.json({ id: 1, name: "Rex" }))],
+    })
+    const { data } = await client.result("GET /pets/{id}", { params: { id: 1 } })
+    expect(data).toStrictEqual({ id: 1, name: "Rex" })
+    expect(requests).toStrictEqual([])
+  })
+
+  it("rejects what a middleware throws", async () => {
+    const { client } = recorder(contract, { middleware: [refuse] })
+    await expect(client.fetch("GET /pets")).rejects.toThrow("no token")
+    await expect(client.result("GET /pets")).rejects.toThrow("no token")
+  })
+
+  it("rejects next, never throws from it, whatever throws inside", async () => {
+    const fallback = defineMiddleware((request, next) =>
+      next(request).catch(() => new Response(null, { status: 503 })),
+    )
+    for (const options of [
+      { middleware: [fallback, refuse] },
+      { middleware: [fallback], fetch: refuse },
+    ]) {
+      const client = createClient(contract, { baseUrl: "https://x.test", ...options })
+      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+      const response = await client.fetch("GET /pets")
+      expect(response.status).toBe(503)
+    }
   })
 })

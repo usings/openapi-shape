@@ -1,6 +1,6 @@
 # Client
 
-`openapi-shape/client` turns [the generated module](./output.md) into a typed `fetch`. Each call builds a standard `Request` the way the description declares (parameter styles, media types, form encodings) and sends it with `fetch`; the response is a standard `Response`, typed by status. The client is one dependency-free module that runs wherever `fetch` does. It does not validate responses.
+`openapi-shape/client` turns [the generated module](./output.md) into a typed `fetch`. Each call builds a standard `Request` the way the description declares (parameter styles, media types, form encodings) and sends it, through any middleware, with `fetch`; the response is a standard `Response`, typed by status. The client is one dependency-free module that runs wherever `fetch` does. It does not validate responses.
 
 ```ts
 import { createClient } from "openapi-shape/client"
@@ -22,7 +22,8 @@ else if (status === 404) console.warn(error.message) // error: Schemas.Error
 | Option                  | Description                                                                                                                                                                               |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `baseUrl`               | The URL endpoint paths go under, such as `https://api.example.com/v1`, without a query or fragment. Without it, URLs are relative, as `fetch` takes them: fine in a browser, not in Node. |
-| `fetch`                 | Sends each `Request` and resolves to its `Response`. Default: the global `fetch`. See [Middleware](#middleware).                                                                          |
+| `middleware`            | Functions that wrap the sending of every request, the first outermost. See [Middleware](#middleware).                                                                                     |
+| `fetch`                 | Sends each `Request`, after the last middleware, and resolves to its `Response`: a test double, say. Default: the global `fetch`.                                                         |
 | Any `RequestInit` field | Defaults for every request: `headers`, `credentials`, `cache`, and so on, but not `signal`. A call's own fields override them; its headers are set over these.                            |
 
 ## Two calls
@@ -32,7 +33,7 @@ else if (status === 404) console.warn(error.message) // error: Schemas.Error
 | `api.result(endpoint, init?)` | `{ data, error, status, response }`: the body, read and decoded, as `data` for a 2xx status or `error` for any other, never both. |
 | `api.fetch(endpoint, init?)`  | The `Response`, typed by status, its body unread, for streams, downloads, and anything else `fetch` does.                         |
 
-Neither rejects for an HTTP status, as `fetch` does not. A network failure, or a body that does not match its `Content-Type`, rejects; so does a request that cannot be built (a missing path parameter, say), with a `TypeError`, as `fetch` does. Both take the same arguments, and both narrow by `status`:
+Neither rejects for an HTTP status, as `fetch` does not. A network failure, a body that does not match its `Content-Type`, or what a middleware throws rejects; so does a request that cannot be built (a missing path parameter, say), with a `TypeError`, as `fetch` does. Both take the same arguments, and both narrow by `status`:
 
 ```ts
 const res = await api.fetch("GET /pets/{petId}", { params: { petId: 1 } })
@@ -129,24 +130,46 @@ while (reader) {
 
 ## Middleware
 
-The `fetch` option is the one place to change how requests are sent: credentials, timeouts, retries, logging, or a test double. It takes each `Request` and resolves to a `Response`:
+Middleware changes how requests are sent: credentials, timeouts, retries, logging. Each takes the `Request` and `next`, which sends a request on through the rest, and resolves to a `Response`: code before `next` sees the request, code after it the response, and a `try` around it a network failure. The first in `middleware` is the outermost, and the `fetch` option sends the request after the last:
 
 ```ts
-import { createClient } from "openapi-shape/client"
+import { createClient, defineMiddleware } from "openapi-shape/client"
 import { contract } from "./api"
+
+// A fresh token for every request, set on a copy, out of sight of the middleware around it.
+const auth = defineMiddleware(async (request, next) => {
+  const authorized = new Request(request)
+  authorized.headers.set("authorization", `Bearer ${await getToken()}`)
+  return next(authorized)
+})
+
+// A 10-second timeout for every request.
+const timeout = defineMiddleware((request, next) => {
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(10_000)])
+  return next(new Request(request, { signal }))
+})
+
+// Each request's method, URL, status, and time.
+const logger = defineMiddleware(async (request, next) => {
+  const start = performance.now()
+  const response = await next(request)
+  console.log(request.method, request.url, response.status, performance.now() - start)
+  return response
+})
 
 export const api = createClient(contract, {
   baseUrl: "https://api.example.com/v1",
-  // A fresh token and a 10-second timeout for every request.
-  fetch: async (request) => {
-    request.headers.set("authorization", `Bearer ${await getToken()}`)
-    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(10_000)])
-    return fetch(request, { signal })
-  },
+  middleware: [logger, timeout, auth],
 })
 ```
 
-Static credentials can go in `headers` instead. The client's options take no `signal`: one signal would be shared by every request, and a timeout would cancel them all once it ran out. A timeout belongs here, where each request gets its own, or in a call's `signal`.
+`defineMiddleware` returns a middleware as it is, typed where it is written; its type is `Middleware`, and `next` is a `Fetcher`, the type of the `fetch` option too. A middleware may pass on another request, answer without calling `next`, or call `next` again, each time through the rest. Mind what it shares:
+
+- A middleware gets the very `Request` the one around it passed on, so a change made in place shows there once `next` returns, where an outer logger reading the headers would log the token. To change a request, pass on a copy: `new Request(request)`, or `new Request(request, init)`, which takes over its body.
+- A body is read once. To send a request again, as a retry does, send a `request.clone()` made before the first try. To read a response's body, read a `response.clone()` and pass the response on, or `api.result` rejects. Cancel the body of a response you drop (`response.body?.cancel()`), as a retry drops the failed try's, so the connection is free again.
+- A function that takes the request alone is a middleware too, one that sends nothing on: a test double belongs in `fetch`, where it cannot cut middleware off.
+
+Static credentials can go in `headers` instead. The client's options take no `signal`: one signal would be shared by every request, and a timeout would cancel them all once it ran out. A timeout belongs in a middleware, where each request gets its own, or in a call's `signal`.
 
 ## Passing calls on
 
@@ -179,8 +202,6 @@ export function query<K extends Endpoint<Endpoints>>(
 const pet = await query("GET /pets/{petId}", { params: { petId: 1 } }).queryFn() // Schemas.Pet
 ```
 
-These helpers bind a concrete `Endpoints` map and make the called key `K` generic. The check of `error` narrows `data` to `EndpointData<Endpoints, K>` even while the endpoint is a type parameter. Returning unchecked `data`, or returning `error`, fails to compile when it could violate that success type. Callers retain the data type of the endpoint they pass.
+Checking `error` narrows `data` to `EndpointData<Endpoints, K>` even while `K` is a type parameter, whether the result is kept whole or destructured first; returning `data` unchecked, or `error`, fails to compile where it could break that type. Each caller gets the data type of the endpoint it passes.
 
-Handwritten maps with string or template index signatures are also callable; a literal call such as `"HEAD /health"` supplies the method used to determine its body and response types. Each call accepts one endpoint, not a union of distinct endpoints.
-
-Both keeping the result together and destructuring `data` and `error` before the check are supported. The scale test covers 300 endpoints with distinct object-array bodies and multiple success statuses, called directly and through both generic wrapper forms. It checks status narrowing, array methods, and rejection of unchecked returns as well as the returned data types.
+A call takes one endpoint, not a union of them. Handwritten `Endpoints` maps with string or template index signatures work too: a literal call such as `"HEAD /health"` supplies the method that decides its body and response types.

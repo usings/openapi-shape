@@ -8,8 +8,6 @@ import {
   toJson,
 } from "./values"
 
-// Parameters and form fields, serialized by their OpenAPI styles and percent-encoded.
-
 interface Normalized {
   style: string
   explode: boolean

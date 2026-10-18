@@ -150,7 +150,7 @@ export interface UserInput {
 
 The variant is emitted only when something you send uses the schema, and it propagates to schemas that contain one. `readOnly` and `writeOnly` count when set on the property, on a schema it references, or in an `allOf` member, and a property one `allOf` member declares and another requires is one-sided too. Webhook and callback requests are sent by the API, so they use the main declaration, and their responses, which you send, use the variants.
 
-This is OpenAPI 3.0's rule; 3.1+ calls `readOnly` and `writeOnly` annotations, but APIs written for 3.1 still mean them this way, so the rule applies there too.
+This is OpenAPI 3.0's rule, applied in 3.1+ too ([Following the real API](./openapi.md#following-the-real-api)).
 
 ## The runtime contract
 
@@ -162,8 +162,8 @@ This is OpenAPI 3.0's rule; 3.1+ calls `readOnly` and `writeOnly` annotations, b
 - `json`: the label of the JSON the client encodes when the call names no media type, where that is the declared `application/json` one with parameters ([Client](./client.md#what-a-call-takes)).
 - `encoding`: the Encoding Objects of an `application/x-www-form-urlencoded` body, by field.
 
-GET and HEAD have neither, since the client sends them without a body.
+`GET` and `HEAD` endpoints have no `contentType`, `json`, or `encoding`: the client sends them without a body.
 
-Nothing else goes over the wire from the description. The client sends every request to its `baseUrl`; the document's servers are listed at the top of the module, and those of a path or operation are reported (`ignored-field`). Credentials go in headers or the client's `fetch`, cookies are the runtime's to send, and multipart parts are labelled by the `FormData` they are sent as ([Client](./client.md)).
+Nothing else goes over the wire from the description: the client sends every request to its `baseUrl`, whatever the servers ([Operations](./openapi.md#operations)); credentials go in headers or a middleware, cookies are the runtime's to send, and multipart parts are labelled by the `FormData` they are sent as ([Client](./client.md)).
 
-The module imports nothing. `contract` carries its own type, with `Endpoints` under `types` for `createClient` to infer, and its format as `version`. A change to the format is a new version, and a client accepts the versions it reads: a module and a client that disagree fail to compile at `createClient`, or, in JavaScript, `createClient` throws. A client of your own reads the types alone with `import type`, which loads nothing and needs nothing installed.
+The module imports nothing. `contract` carries its own type, with `Endpoints` under `types` for `createClient` to infer, and its format as `version`. A change to the format is a new version, and a client accepts the versions it reads: a module and a client that disagree fail to compile at `createClient`, or, in JavaScript, `createClient` throws.

@@ -1,8 +1,15 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, expectTypeOf, it } from "vitest"
-import type { Client, Endpoint, EndpointArgs, EndpointData, TypedResponse } from "../src/client"
-import { createClient } from "../src/client"
+import type {
+  Client,
+  Endpoint,
+  EndpointArgs,
+  EndpointData,
+  Middleware,
+  TypedResponse,
+} from "../src/client"
+import { createClient, defineMiddleware } from "../src/client"
 import type { EndpointResult } from "../src/client/types"
 import type { Endpoints, Schemas } from "./__snapshots__/client-api"
 import { contract } from "./__snapshots__/client-api"
@@ -38,6 +45,21 @@ type Json<T> = { content: { "application/json": T } }
 declare const api: Client<{ ${endpoints.join("\n")} }>
 async function use() { ${calls.join("\n")} }
 `)
+  })
+
+  it("types a middleware where it is written, keeping what it carries", () => {
+    const auth = defineMiddleware((request, next) => {
+      expectTypeOf(request).toEqualTypeOf<Request>()
+      return next(request)
+    })
+    expectTypeOf(auth).toEqualTypeOf<Middleware>()
+    const named = defineMiddleware(Object.assign(auth, { label: "auth" }))
+    expectTypeOf(named.label).toEqualTypeOf<string>()
+    expect(named).toBe(auth)
+    // @ts-expect-error a middleware resolves to a Response
+    defineMiddleware((request: Request) => Promise.resolve(request))
+    // @ts-expect-error the global fetch takes options, not next
+    createClient(contract, { middleware: [fetch] })
   })
 
   it("keeps successes when a declared error body is never", async () => {
