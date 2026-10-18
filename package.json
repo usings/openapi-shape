@@ -1,6 +1,6 @@
 {
   "name": "openapi-shape",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "description": "OpenAPI-shaped fetch: one generated TypeScript module and a dependency-free typed fetch client for OpenAPI 3.0, 3.1, and 3.2 APIs",
   "keywords": [
     "api-client",
