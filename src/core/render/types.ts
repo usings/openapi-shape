@@ -129,7 +129,7 @@ function render(type: Type, context: TypeContext): Rendered {
         precedence: Precedence.Intersection,
       }
     case "narrow":
-      // Applied while building the contract; never present when rendering.
+      // Applied while building the model; never present when rendering.
       return render(type.type, context)
   }
 }

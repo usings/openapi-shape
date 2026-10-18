@@ -37,6 +37,7 @@ export interface ClientOptions extends Omit<RequestInit, "method" | "body" | "si
   fetch?: (request: Request) => Promise<Response>
 }
 
+/** A typed `fetch` for the generated `Endpoints`: each call names one endpoint, `"METHOD /path"`. */
 export interface Client<Endpoints> {
   // Infer the supplied string before checking membership, so an unknown endpoint
   // does not fall back to the endpoint union and report a missing init argument.

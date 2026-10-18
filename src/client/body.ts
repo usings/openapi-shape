@@ -102,8 +102,6 @@ export async function decodeBody(response: Response, method: string): Promise<un
   return response.blob()
 }
 
-// --- helpers --------------------------------------------------------------------
-
 /** A body `fetch` sends as it is, `undefined` for a value to encode. */
 function readyBody(value: unknown): BodyLike | undefined {
   const ready =
@@ -137,5 +135,3 @@ export function isStream(value: unknown): boolean {
     (typeof value === "object" && value !== null && Symbol.asyncIterator in value)
   )
 }
-
-// --- types ----------------------------------------------------------------------

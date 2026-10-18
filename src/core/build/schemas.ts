@@ -79,7 +79,7 @@ interface DeclarationState {
 }
 
 /**
- * Converts Schema Objects into contract types and owns the named declarations.
+ * Converts Schema Objects into model types and owns the named declarations.
  *
  * Every entry-document component becomes a declaration. Other referenced schemas become
  * declarations when they look like definitions (another document's components, `$defs`, whole
@@ -144,7 +144,7 @@ export class SchemaBuilder {
     }
   }
 
-  /** The contract type of a schema node. */
+  /** The model type of a schema node. */
   type(node: DocumentNode): Type {
     const schema = node.value
     if (schema === undefined || schema === true) return UNKNOWN

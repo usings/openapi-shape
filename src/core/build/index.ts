@@ -73,8 +73,8 @@ function normalizeTypes(schemas: SchemaBuilder, operations: Operations): void {
 }
 
 /**
- * Name the request-side variants of declarations whose required properties differ by side, where
- * what the client sends uses them: endpoint requests, and the responses to webhooks and callbacks.
+ * Name request-side variants (see `assignInputNames`) for what the client sends: endpoint requests,
+ * and the responses to webhooks and callbacks.
  */
 function assignInputVariants(
   context: BuildContext,
@@ -114,7 +114,7 @@ function readInfo(entry: Record<string, unknown>): Info {
 }
 
 /**
- * Rebuild every type of the contract bottom-up, renormalizing unions and intersections, and passing
+ * Rebuild every type of the model bottom-up, renormalizing unions and intersections, and passing
  * each node through `finish`.
  */
 function transformAll(

@@ -30,6 +30,7 @@ export interface Encoding {
   readonly contentType?: string
 }
 
+/** One endpoint's serialization, where it differs from OpenAPI's defaults. */
 export interface EndpointContract {
   readonly params?: Readonly<Record<string, Encoding>>
   readonly query?: Readonly<Record<string, Encoding>>
