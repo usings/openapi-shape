@@ -289,9 +289,8 @@ const MAX_DISTRIBUTION = 16
 const MAX_COMBINATIONS = 10_000
 
 /**
- * Declarations whose types are final. References are opaque while
- * declarations are still being built, so that simplification cannot depend on
- * the order in which they are built.
+ * Declarations whose types are final. References are opaque while declarations are still being
+ * built, so that simplification cannot depend on the order in which they are built.
  */
 const sealed = new WeakSet<Declaration>()
 
@@ -351,8 +350,8 @@ function isBareObject(type: Type): boolean {
 }
 
 /**
- * A union whose members an intersection can simplify with: objects, arrays,
- * scalars; and references, where an implied shape must give way to them.
+ * A union whose members an intersection can simplify with: objects, arrays, scalars; and
+ * references, where an implied shape must give way to them.
  */
 function isDistributable(type: Type, references: boolean): boolean {
   return (
@@ -366,9 +365,8 @@ function isDistributable(type: Type, references: boolean): boolean {
 }
 
 /**
- * How many alternatives TypeScript expands a type into, through references to
- * sealed declarations; each declaration is counted once per call, and a
- * reference back into itself counts as one.
+ * How many alternatives TypeScript expands a type into, through references to sealed declarations;
+ * each declaration is counted once per call, and a reference back into itself counts as one.
  */
 function expansions(type: Type, counted = new Map<Declaration, number>()): number {
   switch (type.kind) {
@@ -404,8 +402,8 @@ function unionBehind(
 const patternCache = new Map<string, RegExp | null>()
 
 /**
- * Whether a property name matches a `patternProperties` regular expression;
- * `undefined` when the expression is not valid JavaScript.
+ * Whether a property name matches a `patternProperties` regular expression; `undefined` when the
+ * expression is not valid JavaScript.
  */
 export function matchesPattern(pattern: string, name: string): boolean | undefined {
   let regex = patternCache.get(pattern)

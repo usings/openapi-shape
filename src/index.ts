@@ -8,8 +8,8 @@ export type { Diagnostic, DiagnosticCode } from "./core/shared/diagnostics"
 
 export interface GenerateOptions {
   /**
-   * Where an in-memory document lives (file path or URL), so its relative
-   * `$ref`s can be resolved. Ignored when `input` is a path or URL.
+   * Where an in-memory document lives (file path or URL), so its relative `$ref`s can be resolved.
+   * Ignored when `input` is a path or URL.
    */
   base?: string | URL
 }
@@ -36,12 +36,12 @@ export class GenerateError extends Error {
 }
 
 /**
- * Generate a TypeScript module from an OpenAPI 3.0, 3.1, or 3.2 description:
- * its types, and the runtime `contract` for `openapi-shape/client`.
+ * Generate a TypeScript module from an OpenAPI 3.0, 3.1, or 3.2 description: its types, and the
+ * runtime `contract` for `openapi-shape/client`.
  *
- * `input` is a file path, a `file:`/`http(s):` URL, or an already parsed
- * document. Referenced documents are loaded as needed. Throws
- * {@link GenerateError} when the description cannot be turned into correct types.
+ * `input` is a file path, a `file:`/`http(s):` URL, or an already parsed document. Referenced
+ * documents are loaded as needed. Throws {@link GenerateError} when the description cannot be turned
+ * into correct types.
  */
 export async function generate(
   input: string | URL | object,

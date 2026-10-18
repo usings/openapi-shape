@@ -12,9 +12,9 @@ import { buildOperations } from "./operations"
 import { SchemaBuilder } from "./schemas"
 
 /**
- * Build the model of an OpenAPI Description. A build that reaches documents
- * not loaded yet asks for them; they are loaded and the build starts over, so
- * that every build sees the same documents from start to end.
+ * Build the model of an OpenAPI Description. A build that reaches documents not loaded yet asks for
+ * them; they are loaded and the build starts over, so that every build sees the same documents from
+ * start to end.
  */
 export async function buildModel(
   documents: DocumentSet,
@@ -73,9 +73,8 @@ function normalizeTypes(schemas: SchemaBuilder, operations: Operations): void {
 }
 
 /**
- * Name the request-side variants of declarations whose required properties
- * differ by side, where what the client sends uses them: endpoint requests,
- * and the responses to webhooks and callbacks.
+ * Name the request-side variants of declarations whose required properties differ by side, where
+ * what the client sends uses them: endpoint requests, and the responses to webhooks and callbacks.
  */
 function assignInputVariants(
   context: BuildContext,
@@ -115,8 +114,8 @@ function readInfo(entry: Record<string, unknown>): Info {
 }
 
 /**
- * Rebuild every type of the contract bottom-up, renormalizing unions and
- * intersections, and passing each node through `finish`.
+ * Rebuild every type of the contract bottom-up, renormalizing unions and intersections, and passing
+ * each node through `finish`.
  */
 function transformAll(
   declarations: Declaration[],
@@ -173,10 +172,10 @@ function rebuild(type: Type, finish: (type: Type) => Type): Type {
 }
 
 /**
- * A type alias may refer to itself only through object properties or array
- * elements. References that reach back through unions and intersections
- * alone describe a schema that never terminates; such a reference is replaced
- * by the referenced type minus the parts that lead back, which is sound.
+ * A type alias may refer to itself only through object properties or array elements. References
+ * that reach back through unions and intersections alone describe a schema that never terminates;
+ * such a reference is replaced by the referenced type minus the parts that lead back, which is
+ * sound.
  */
 function breakDirectCycles(context: BuildContext, schemas: SchemaBuilder): void {
   const report = (owner: Declaration, target: Declaration): void => {
@@ -245,9 +244,8 @@ function responseTypes(op: Operation): Type[] {
 }
 
 /**
- * Give a request-side name to declarations whose required properties differ
- * between the two sides (readOnly/writeOnly), when something the client sends
- * (`sent`) uses them.
+ * Give a request-side name to declarations whose required properties differ between the two sides
+ * (readOnly/writeOnly), when something the client sends (`sent`) uses them.
  */
 function assignInputNames(declarations: Declaration[], sent: Type[]): Declaration[] {
   const differs = new Set<Declaration>()

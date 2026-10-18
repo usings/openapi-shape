@@ -25,10 +25,9 @@ const DEFAULT_CONFIG = {
 }
 
 /**
- * Type-check files written to a temporary directory (so they can import each
- * other by name). Resolves to tsc's diagnostics, `""` when there are none,
- * and rejects when tsc checked nothing. Files may bring their own
- * `tsconfig.json`.
+ * Type-check files written to a temporary directory (so they can import each other by name).
+ * Resolves to tsc's diagnostics, `""` when there are none, and rejects when tsc checked nothing.
+ * Files may bring their own `tsconfig.json`.
  */
 export async function typecheck(files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "openapi-shape-tsc-"))

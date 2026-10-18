@@ -14,7 +14,10 @@ import { typecheck } from "./helpers/tsc"
 
 /** How the client reads a response of a media type. */
 type Read = "json" | "text" | "blob"
-/** How the client takes a request body of a media type: a value it encodes, a string, or a ready-made body. */
+/**
+ * How the client takes a request body of a media type: a value it encodes, a string, or a
+ * ready-made body.
+ */
 type Write = "value" | "string" | "ready"
 
 const MEDIA: Array<[mediaType: string, read: Read, write: Write]> = [

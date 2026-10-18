@@ -170,10 +170,9 @@ export function encodeContent(value: unknown, contentType: string): string {
 }
 
 /**
- * Reserved characters that `allowReserved` leaves as they are (RFC 3986): in a
- * path, all but those ending it (`?`, `#`) or not allowed there (`[`, `]`); in
- * a query or form field, also not `&`, `=`, and `+`, which delimit or mean a space
- * there (OpenAPI 3.1.1, "Parameter Object").
+ * Reserved characters that `allowReserved` leaves as they are (RFC 3986): in a path, all but those
+ * ending it (`?`, `#`) or not allowed there (`[`, `]`); in a query or form field, also not `&`,
+ * `=`, and `+`, which delimit or mean a space there (OpenAPI 3.1.1, "Parameter Object").
  */
 const PATH_RESERVED = /%(?:3A|2F|40|21|24|26|27|28|29|2A|2B|2C|3B|3D)/gi
 

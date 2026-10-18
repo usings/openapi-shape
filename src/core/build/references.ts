@@ -11,10 +11,9 @@ export interface Resolved {
 }
 
 /**
- * Follow Reference Objects (`$ref` in a non-schema position) to their target.
- * The target is read as the object type of the referencing position.
- * Returns `undefined` when the reference cannot be resolved (already reported)
- * or its document is still loading.
+ * Follow Reference Objects (`$ref` in a non-schema position) to their target. The target is read as
+ * the object type of the referencing position. Returns `undefined` when the reference cannot be
+ * resolved (already reported) or its document is still loading.
  */
 export function resolveObject(context: BuildContext, node: DocumentNode): Resolved | undefined {
   const out: Resolved = { node }

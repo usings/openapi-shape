@@ -51,8 +51,8 @@ const OBJECT_KEYWORDS = ["properties", "patternProperties", "additionalPropertie
 const ARRAY_KEYWORDS = ["items", "prefixItems"]
 
 /**
- * Whether a schema describes raw bytes: a `format: binary` string, a string
- * of a binary `contentMediaType` without `contentEncoding`, or Swagger's `type: file`.
+ * Whether a schema describes raw bytes: a `format: binary` string, a string of a binary
+ * `contentMediaType` without `contentEncoding`, or Swagger's `type: file`.
  */
 export function describesRawBytes(node: DocumentNode): boolean {
   const schema = node.value
@@ -81,18 +81,17 @@ interface DeclarationState {
 /**
  * Converts Schema Objects into contract types and owns the named declarations.
  *
- * Every entry-document component becomes a declaration. Other referenced
- * schemas become declarations when they look like definitions (another
- * document's components, `$defs`, whole schema documents, `$id` resources) or
- * when inlining them would recurse; all other references are inlined.
+ * Every entry-document component becomes a declaration. Other referenced schemas become
+ * declarations when they look like definitions (another document's components, `$defs`, whole
+ * schema documents, `$id` resources) or when inlining them would recurse; all other references are
+ * inlined.
  *
- * Declarations are built one at a time from a queue: a reference only names
- * its target, so no type depends on the order declarations are built in.
+ * Declarations are built one at a time from a queue: a reference only names its target, so no type
+ * depends on the order declarations are built in.
  *
- * Every OpenAPI version is read with JSON Schema 2020-12 semantics. Where an
- * older document uses something its version does not define, or defines
- * differently, the document's evident intent wins, as docs/openapi.md
- * describes: the types must work against the real API.
+ * Every OpenAPI version is read with JSON Schema 2020-12 semantics. Where an older document uses
+ * something its version does not define, or defines differently, the document's evident intent
+ * wins, as docs/openapi.md describes: the types must work against the real API.
  */
 export class SchemaBuilder {
   readonly declarations: Declaration[] = []
@@ -245,7 +244,10 @@ export class SchemaBuilder {
     return { ...type, fields }
   }
 
-  /** `if`/`then`/`else` as the sound union `(if & then) | else` (the negation of `if` is not expressible). */
+  /**
+   * `if`/`then`/`else` as the sound union `(if & then) | else` (the negation of `if` is not
+   * expressible).
+   */
   private conditional(node: DocumentNode, schema: Record<string, unknown>): Type {
     if (!("if" in schema) || !("else" in schema)) return UNKNOWN
     const condition = this.type(this.context.documents.child(node, "if"))
@@ -415,7 +417,10 @@ export class SchemaBuilder {
     return out
   }
 
-  /** Whether a boolean annotation holds: set on the schema, a schema it references, or an allOf member. */
+  /**
+   * Whether a boolean annotation holds: set on the schema, a schema it references, or an allOf
+   * member.
+   */
   private flag(
     node: DocumentNode,
     keyword: "readOnly" | "writeOnly",

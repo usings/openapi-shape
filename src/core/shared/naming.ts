@@ -1,8 +1,7 @@
 /**
- * Identifier characters: ASCII, plus letters of long-established scripts
- * (Latin, Greek, Cyrillic, CJK, kana, Hangul). Letters added in recent Unicode
- * versions are left out: engines and TypeScript disagree about them, which
- * would make output invalid or differ between environments.
+ * Identifier characters: ASCII, plus letters of long-established scripts (Latin, Greek, Cyrillic,
+ * CJK, kana, Hangul). Letters added in recent Unicode versions are left out: engines and TypeScript
+ * disagree about them, which would make output invalid or differ between environments.
  */
 const STABLE_LETTERS: Array<[number, number]> = [
   [0x00c0, 0x024f],

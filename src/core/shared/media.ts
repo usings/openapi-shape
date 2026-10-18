@@ -1,8 +1,8 @@
 /**
  * What content of a media type carries, which decides its type:
  *
- * - `json`: parsed JSON: `…/json`, `…/…+json`, and the wildcards that take
- *   JSON, `*` + `/*` and `application/*`.
+ * - `json`: parsed JSON: `…/json`, `…/…+json`, and the wildcards that take JSON, `*` + `/*` and
+ *   `application/*`.
  * - `events`: `text/event-stream`, a list of server-sent events.
  * - `sequence`: a list of JSON values (`application/jsonl`, `application/x-ndjson`,
  *   `application/json-seq`, `…+json-seq`).
@@ -35,10 +35,9 @@ export function classifyMediaType(mediaType: string): MediaClass {
 }
 
 /**
- * The media type a request body is sent as when the call names none: the
- * declared `application/json` one, parameters and all, where one alone is;
- * else the only one declared; else none. The client's types apply the same
- * rule (`DefaultMediaType` in src/client/types.ts).
+ * The media type a request body is sent as when the call names none: the declared
+ * `application/json` one, parameters and all, where one alone is; else the only one declared; else
+ * none. The client's types apply the same rule (`DefaultMediaType` in src/client/types.ts).
  */
 export function defaultMediaType(mediaTypes: string[]): string | undefined {
   const json = mediaTypes.filter((m) => isApplicationJson(m))

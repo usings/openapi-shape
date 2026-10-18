@@ -142,7 +142,10 @@ function widenIndex(index: Type, fields: Field[]): Type {
   return union(members)
 }
 
-/** Whether a type names a type alias that may lead back (a declaration that is not an interface), or unites some. */
+/**
+ * Whether a type names a type alias that may lead back (a declaration that is not an interface), or
+ * unites some.
+ */
 function namesAlias(type: Type): boolean {
   switch (type.kind) {
     case "ref":

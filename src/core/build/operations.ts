@@ -525,8 +525,8 @@ function formEncoding(media: DocumentNode): Record<string, Encoding> | undefined
 }
 
 /**
- * A parameter's or Encoding Object's serialization, where it differs from the
- * default: then always with its style and explode, so it reads on its own.
+ * A parameter's or Encoding Object's serialization, where it differs from the default: then always
+ * with its style and explode, so it reads on its own.
  */
 function encodingOf(
   value: Record<string, unknown>,

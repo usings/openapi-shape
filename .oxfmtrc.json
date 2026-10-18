@@ -1,9 +1,10 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["dist", "node_modules", "tests/__snapshots__", "tests/fixtures"],
+  "ignorePatterns": ["tests/__snapshots__", "tests/fixtures"],
   "semi": false,
   "quoteProps": "consistent",
   "sortImports": {
     "newlinesBetween": false
-  }
+  },
+  "jsdoc": true
 }

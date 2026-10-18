@@ -6,10 +6,9 @@ import { isRecord } from "../shared/object"
 import type { SchemaBuilder } from "./schemas"
 
 /**
- * Discriminator Objects are hints that "MUST NOT change the validation
- * outcome". They narrow types only where a branch leaves the property open:
- * a branch that already declares string literals for it keeps them, and an
- * explicit mapping that contradicts those literals is reported instead.
+ * Discriminator Objects are hints that "MUST NOT change the validation outcome". They narrow types
+ * only where a branch leaves the property open: a branch that already declares string literals for
+ * it keeps them, and an explicit mapping that contradicts those literals is reported instead.
  * Narrowings are recorded while building and applied by `applyNarrowing`.
  */
 export function narrowDiscriminated(
@@ -38,10 +37,9 @@ export function narrowDiscriminated(
 }
 
 /**
- * Narrow a named component by the discriminators of the schemas it extends
- * through `allOf`: such a component is one of the parent's alternatives, and
- * so is every component extending it in turn (OpenAPI 3.0.4 recommends
- * searching the components for them).
+ * Narrow a named component by the discriminators of the schemas it extends through `allOf`: such a
+ * component is one of the parent's alternatives, and so is every component extending it in turn
+ * (OpenAPI 3.0.4 recommends searching the components for them).
  */
 export function parentDiscriminators(
   schemas: SchemaBuilder,
@@ -174,8 +172,8 @@ function narrow(
 }
 
 /**
- * Apply a recorded discriminator narrowing, now that declarations are built.
- * A schema that already fixes the property to string literals keeps them.
+ * Apply a recorded discriminator narrowing, now that declarations are built. A schema that already
+ * fixes the property to string literals keeps them.
  */
 export function applyNarrowing(
   node: Extract<Type, { kind: "narrow" }>,

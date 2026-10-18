@@ -1,11 +1,10 @@
 /**
  * Stable identifiers for everything the generator reports.
  *
- * Errors stop generation because the output would be wrong. Warnings mark what
- * someone can act on: a part of the document the output cannot apply, or one
- * that is not valid. Where a document's evident intent departs from the letter
- * of its version, the output follows the intent without a warning, as
- * docs/openapi.md describes.
+ * Errors stop generation because the output would be wrong. Warnings mark what someone can act on:
+ * a part of the document the output cannot apply, or one that is not valid. Where a document's
+ * evident intent departs from the letter of its version, the output follows the intent without a
+ * warning, as docs/openapi.md describes.
  */
 export type DiagnosticCode =
   // errors

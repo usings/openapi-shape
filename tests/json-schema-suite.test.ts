@@ -6,13 +6,12 @@ import { withFiles } from "./helpers/tmp"
 import { typecheck } from "./helpers/tsc"
 
 /**
- * Soundness against the official JSON Schema Test Suite: every instance the
- * suite marks valid must be assignable to the generated type. (Invalid
- * instances may still be assignable: TypeScript cannot express every
- * constraint, and the generator widens rather than guesses.)
+ * Soundness against the official JSON Schema Test Suite: every instance the suite marks valid must
+ * be assignable to the generated type. (Invalid instances may still be assignable: TypeScript
+ * cannot express every constraint, and the generator widens rather than guesses.)
  *
- * Each schema is served as its own document, so `#`-relative references
- * resolve inside it, exactly as in the suite.
+ * Each schema is served as its own document, so `#`-relative references resolve inside it, exactly
+ * as in the suite.
  */
 
 const DIR = join(import.meta.dirname, "fixtures/json-schema-test-suite")
@@ -36,8 +35,8 @@ const NEEDS_REMOTES = new Set([
 ])
 
 /**
- * Valid instances knowingly rejected, with the reason. Each is a documented
- * approximation (see docs/openapi.md, "Approximations").
+ * Valid instances knowingly rejected, with the reason. Each is a documented approximation (see
+ * docs/openapi.md, "Approximations").
  */
 const SHAPE = "Shape keywords without `type` are read as implying that shape"
 const ABSENT = "Properties a schema does not mention are assumed absent"

@@ -11,11 +11,10 @@ const STRING: Type = { kind: "string" }
 
 /**
  * The type of one Media Type Object's content, by the class of its media type
- * (`classifyMediaType`): JSON, form, and multipart content is typed by its
- * schema; a sequence (`itemSchema`, or a JSON sequence's `schema`) is an array
- * of its items; other text is a string, or the schema's type when it says
- * which strings; anything else is raw bytes, a `Blob`. A parameter's content
- * is typed by its schema when it is JSON, and as a string otherwise.
+ * (`classifyMediaType`): JSON, form, and multipart content is typed by its schema; a sequence
+ * (`itemSchema`, or a JSON sequence's `schema`) is an array of its items; other text is a string,
+ * or the schema's type when it says which strings; anything else is raw bytes, a `Blob`. A
+ * parameter's content is typed by its schema when it is JSON, and as a string otherwise.
  */
 export function typeOfContent(
   schemas: SchemaBuilder,
@@ -66,7 +65,10 @@ export function typeOfContent(
   }
 }
 
-/** Whether a schema says its values are text strings: `type: string`, or string `enum`/`const` values. */
+/**
+ * Whether a schema says its values are text strings: `type: string`, or string `enum`/`const`
+ * values.
+ */
 function describesStrings(schemas: SchemaBuilder, node: DocumentNode): boolean {
   const target = schemas.aliasTarget(node) ?? node
   const schema = target.value

@@ -6,8 +6,8 @@ import type { TypeContext } from "./types"
 import { block, indexOf, renderFields, renderType } from "./types"
 
 /**
- * Render the model as a TypeScript module that imports nothing: its types,
- * and the runtime `contract` for openapi-shape/client.
+ * Render the model as a TypeScript module that imports nothing: its types, and the runtime
+ * `contract` for openapi-shape/client.
  */
 export function renderModule(model: Model): string {
   // Inside `Schemas`, a schema named `Blob` would capture raw bytes.
@@ -130,14 +130,14 @@ function declare(name: string, declaration: Declaration, context: TypeContext): 
 }
 
 /**
- * The format of the contract written here, which openapi-shape/client's
- * `Contract` must accept: a change to the format is a new version, in both.
+ * The format of the contract written here, which openapi-shape/client's `Contract` must accept: a
+ * change to the format is a new version, in both.
  */
 const CONTRACT_VERSION = 1
 
 /**
- * How requests go over the wire, for `openapi-shape/client`: each endpoint's
- * serialization and default media type, where they differ from OpenAPI's defaults.
+ * How requests go over the wire, for `openapi-shape/client`: each endpoint's serialization and
+ * default media type, where they differ from OpenAPI's defaults.
  */
 function contract(endpoints: Operation[]): string {
   const entries = Object.fromEntries(
@@ -195,8 +195,8 @@ function fieldEncodings(fields: Field[]): Record<string, unknown> | undefined {
 const WIDTH = 100
 
 /**
- * A JavaScript value literal with identifier keys unquoted: on one line when it
- * fits within `WIDTH` from `column`, else one entry per line.
+ * A JavaScript value literal with identifier keys unquoted: on one line when it fits within `WIDTH`
+ * from `column`, else one entry per line.
  */
 function literal(value: unknown, indent = "", column = indent.length, expand = false): string {
   const flat = flatLiteral(value)

@@ -95,9 +95,9 @@ function sourceUri(source: string | URL): string {
 /**
  * The documents of an OpenAPI Description, addressed by URI.
  *
- * References into documents that are not loaded yet resolve to `pending`;
- * `loadPending` fetches them so the caller can build again. Documents are
- * immutable once added, so repeated builds see identical inputs.
+ * References into documents that are not loaded yet resolve to `pending`; `loadPending` fetches
+ * them so the caller can build again. Documents are immutable once added, so repeated builds see
+ * identical inputs.
  */
 export class DocumentSet {
   readonly entry: LoadedDocument
@@ -110,9 +110,9 @@ export class DocumentSet {
   /**
    * Made by {@link loadDocuments}.
    *
-   * @param retrieval Whether other documents may be loaded. An in-memory
-   *   document without a `base` has no location to load anything relative to,
-   *   and must not reach files or the network by absolute URIs either.
+   * @param retrieval Whether other documents may be loaded. An in-memory document without a `base`
+   *   has no location to load anything relative to, and must not reach files or the network by
+   *   absolute URIs either.
    */
   constructor(
     entry: LoadedDocument,
@@ -269,7 +269,10 @@ export class DocumentSet {
     if (document.version !== "3.0") this.indexResources(document, document.root, "", document.base)
   }
 
-  /** Index `$id` resources and `$anchor`/`$dynamicAnchor` names (JSON Schema 2020-12 Core, "Base URI, Anchors, and Dereferencing"). */
+  /**
+   * Index `$id` resources and `$anchor`/`$dynamicAnchor` names (JSON Schema 2020-12 Core, "Base
+   * URI, Anchors, and Dereferencing").
+   */
   private indexResources(
     document: LoadedDocument,
     value: unknown,
@@ -320,8 +323,8 @@ export class DocumentSet {
 }
 
 /**
- * Load the entry document of a description: a path, a URL, or a parsed object.
- * Problems go to `diagnostics`, and the result is then `undefined`.
+ * Load the entry document of a description: a path, a URL, or a parsed object. Problems go to
+ * `diagnostics`, and the result is then `undefined`.
  */
 export async function loadDocuments(
   input: string | URL | object,

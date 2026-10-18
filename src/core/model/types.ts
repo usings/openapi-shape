@@ -1,7 +1,6 @@
 /**
- * The model: every operation and named type of an OpenAPI Description, with
- * all OpenAPI and JSON Schema semantics already applied. Renderers only choose
- * syntax.
+ * The model: every operation and named type of an OpenAPI Description, with all OpenAPI and JSON
+ * Schema semantics already applied. Renderers only choose syntax.
  */
 export interface Model {
   info: Info
@@ -32,8 +31,8 @@ export interface Info {
 }
 
 /**
- * Which side of an exchange a type describes. OpenAPI 3.0 `readOnly` and
- * `writeOnly` make `required` apply to one side only (OpenAPI 3.0 Schema Object, `readOnly`).
+ * Which side of an exchange a type describes. OpenAPI 3.0 `readOnly` and `writeOnly` make
+ * `required` apply to one side only (OpenAPI 3.0 Schema Object, `readOnly`).
  */
 export type Side = "request" | "response"
 
@@ -127,16 +126,16 @@ export type Type =
   | { kind: "literal"; value: Literal }
   | { kind: "ref"; target: Declaration }
   /**
-   * `inferred` marks shapes implied only by type-specific keywords (no `type`):
-   * JSON Schema applies those keywords to arrays/objects alone, so an inferred
-   * shape yields to a definite non-matching type in an intersection.
+   * `inferred` marks shapes implied only by type-specific keywords (no `type`): JSON Schema applies
+   * those keywords to arrays/objects alone, so an inferred shape yields to a definite non-matching
+   * type in an intersection.
    */
   | { kind: "array"; items: Type; inferred?: true }
   /** Leading elements; those at index `>= required` are optional. `rest` absent means closed. */
   | { kind: "tuple"; items: Type[]; required: number; rest?: Type; inferred?: true }
   /**
-   * `additional` types properties no field or pattern names (additionalProperties);
-   * `patterns` types properties whose names match a regular expression.
+   * `additional` types properties no field or pattern names (additionalProperties); `patterns`
+   * types properties whose names match a regular expression.
    */
   | {
       kind: "object"
@@ -148,8 +147,8 @@ export type Type =
   | { kind: "union"; members: Type[] }
   | { kind: "intersection"; members: Type[] }
   /**
-   * A discriminator's values for `property`, applied to `type` once every
-   * declaration is built (the schema's own literals win). Never rendered.
+   * A discriminator's values for `property`, applied to `type` once every declaration is built (the
+   * schema's own literals win). Never rendered.
    */
   | {
       kind: "narrow"

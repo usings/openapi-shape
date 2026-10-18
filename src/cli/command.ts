@@ -85,8 +85,8 @@ export const cli = defineCommand({
 })
 
 /**
- * A file TypeScript reads as an ES module: `.ts` or `.mts`, but not a
- * declaration file, which TypeScript tells by `.d.` in its name.
+ * A file TypeScript reads as an ES module: `.ts` or `.mts`, but not a declaration file, which
+ * TypeScript tells by `.d.` in its name.
  */
 function isModule(path: string): boolean {
   const name = basename(path).toLowerCase()
@@ -94,8 +94,8 @@ function isModule(path: string): boolean {
 }
 
 /**
- * One line per diagnostic, as compilers write them, so that a CI log or an
- * agent can read each on its own: `<location>: <severity> <code>: <message>`.
+ * One line per diagnostic, as compilers write them, so that a CI log or an agent can read each on
+ * its own: `<location>: <severity> <code>: <message>`.
  */
 function report(diagnostics: Diagnostic[], source: string, cwd: string): void {
   for (const d of diagnostics) {
@@ -133,8 +133,8 @@ function severity(kind: Diagnostic["severity"]): string {
 }
 
 /**
- * A diagnostic's location: the source's own pointers after its name, and other
- * files relative to the working directory.
+ * A diagnostic's location: the source's own pointers after its name, and other files relative to
+ * the working directory.
  */
 function where(location: string, source: string, cwd: string): string {
   if (location.startsWith("#")) return `${source}${location}`

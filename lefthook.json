@@ -11,7 +11,6 @@
     "parallel": true,
     "commands": {
       "format": {
-        "glob": "*.{ts,tsx,js,mjs,cjs,jsx}",
         "run": "pnpm exec oxfmt {staged_files} --no-error-on-unmatched-pattern",
         "stage_fixed": true
       },

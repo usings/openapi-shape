@@ -3,8 +3,8 @@ import type { Annotations } from "../model/types"
 import { isRecord } from "../shared/object"
 
 /**
- * Documentation for a schema: title, description, deprecation, and the
- * constraints TypeScript cannot express, as JSDoc tags.
+ * Documentation for a schema: title, description, deprecation, and the constraints TypeScript
+ * cannot express, as JSDoc tags.
  */
 export function schemaAnnotations(node: DocumentNode): Annotations | undefined {
   const schema = node.value

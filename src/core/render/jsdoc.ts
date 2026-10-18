@@ -28,7 +28,10 @@ function comment(value: string): string {
   return text(value).replaceAll("*/", "*\\/")
 }
 
-/** Comment text: unified line breaks (JavaScript also ends lines at U+2028/U+2029), trimmed line ends. */
+/**
+ * Comment text: unified line breaks (JavaScript also ends lines at U+2028/U+2029), trimmed line
+ * ends.
+ */
 export function text(value: string): string {
   return value
     .replaceAll(/\r\n?|[\u2028\u2029]/g, "\n")

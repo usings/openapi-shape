@@ -14,10 +14,9 @@ import {
 // Request bodies encoded by their media type, and response bodies decoded by theirs.
 
 /**
- * A request body: JSON, form, and multipart content is encoded from its value
- * (multipart as `FormData`), text is sent as given, and any other media type
- * takes a ready body. A `Blob`, `FormData`, `URLSearchParams`, buffer, or
- * stream always passes through.
+ * A request body: JSON, form, and multipart content is encoded from its value (multipart as
+ * `FormData`), text is sent as given, and any other media type takes a ready body. A `Blob`,
+ * `FormData`, `URLSearchParams`, buffer, or stream always passes through.
  */
 export function encodeBody(
   body: unknown,
@@ -53,7 +52,10 @@ export function encodeBody(
   throw new TypeError(`Cannot encode a ${typeof body} as ${type}; pass it encoded`)
 }
 
-/** Blobs and buffers become files; other values text fields, objects as JSON; array properties repeat. */
+/**
+ * Blobs and buffers become files; other values text fields, objects as JSON; array properties
+ * repeat.
+ */
 function formData(body: Record<string, unknown>): FormData {
   const form = new FormData()
   for (const [name, value] of Object.entries(body)) {
@@ -69,8 +71,8 @@ function formData(body: Record<string, unknown>): FormData {
 }
 
 /**
- * A response body, by its content type: JSON parsed, `text/*` as a string, no
- * content as `undefined`, anything else as a `Blob`.
+ * A response body, by its content type: JSON parsed, `text/*` as a string, no content as
+ * `undefined`, anything else as a `Blob`.
  */
 export async function decodeBody(response: Response, method: string): Promise<unknown> {
   if (method === "HEAD" || [204, 205, 304].includes(response.status)) {
@@ -113,8 +115,8 @@ function readyBody(value: unknown): BodyLike | undefined {
 }
 
 /**
- * Raw bytes, `undefined` for any other value. Bytes in shared memory are
- * copied out, since `fetch` and `Blob` take only unshared ones.
+ * Raw bytes, `undefined` for any other value. Bytes in shared memory are copied out, since `fetch`
+ * and `Blob` take only unshared ones.
  */
 function bytes(value: unknown): ArrayBuffer | Uint8Array<ArrayBuffer> | undefined {
   if (value instanceof ArrayBuffer) return value

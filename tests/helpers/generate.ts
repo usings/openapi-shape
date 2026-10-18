@@ -35,8 +35,8 @@ export function codes(diagnostics: Diagnostic[]): string[] {
 }
 
 /**
- * The rendered type of one schema: the right-hand side of `type T = …`, or
- * the body of `interface T { … }` (dedented).
+ * The rendered type of one schema: the right-hand side of `type T = …`, or the body of `interface T
+ * { … }` (dedented).
  */
 export async function typeOf(schema: unknown, version: Version = "3.1"): Promise<string> {
   return declaration(await gen(withSchemas(version, { T: schema })), "T")

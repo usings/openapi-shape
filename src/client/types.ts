@@ -42,8 +42,8 @@ export type OperationOf<Endpoints, K extends keyof Endpoints> = Endpoints[K] ext
 export type MethodOf<K extends string> = K extends `${infer Method} ${string}` ? Method : string
 
 /**
- * The endpoints of `Endpoints` a client calls, such as `"GET /pets"`: every key
- * but those whose method `fetch` refuses (`CONNECT`, `TRACE`, `TRACK`).
+ * The endpoints of `Endpoints` a client calls, such as `"GET /pets"`: every key but those whose
+ * method `fetch` refuses (`CONNECT`, `TRACE`, `TRACK`).
  */
 export type Endpoint<Endpoints> = Callable<keyof Endpoints & string>
 type Callable<K> = K extends `${infer Method} ${string}`
@@ -64,9 +64,9 @@ type Init<Op extends Operation, Method extends string> = Omit<
   (Uppercase<Method> extends "GET" | "HEAD" ? { body?: never; contentType?: never } : BodyField<Op>)
 
 /**
- * What a call takes after its endpoint, for functions that pass calls on: the
- * init argument, required exactly when the operation requires something. A
- * call names one endpoint: a union of them would mix their inputs and responses.
+ * What a call takes after its endpoint, for functions that pass calls on: the init argument,
+ * required exactly when the operation requires something. A call names one endpoint: a union of
+ * them would mix their inputs and responses.
  */
 export type EndpointArgs<Endpoints, K extends Endpoint<Endpoints>> =
   // An unknown endpoint intersects to never; report it on the endpoint, not init.
@@ -79,8 +79,8 @@ export type EndpointArgs<Endpoints, K extends Endpoint<Endpoints>> =
         : [init: Init<OperationOf<Endpoints, K>, MethodOf<K>>]
 
 /**
- * The data of an endpoint's 2xx responses: what `result` gives as `data` once
- * `error` is `undefined`, for functions that pass calls on and return it.
+ * The data of an endpoint's 2xx responses: what `result` gives as `data` once `error` is
+ * `undefined`, for functions that pass calls on and return it.
  */
 export type EndpointData<Endpoints, K extends Endpoint<Endpoints>> = [OpenKeys<Endpoints>] extends [
   never,
@@ -97,9 +97,9 @@ type OpenData<Endpoints, K extends Endpoint<Endpoints>> = {
 }
 
 /**
- * What `result` resolves to: the call's results, its successes and its
- * failures apart, so that `error === undefined` narrows `data` to
- * {@link EndpointData} also while the endpoint is a type parameter.
+ * What `result` resolves to: the call's results, its successes and its failures apart, so that
+ * `error === undefined` narrows `data` to {@link EndpointData} also while the endpoint is a type
+ * parameter.
  */
 export type EndpointResult<Endpoints, K extends Endpoint<Endpoints>> = [
   OpenKeys<Endpoints>,
@@ -162,9 +162,9 @@ type Failures<Endpoints, K extends Endpoint<Endpoints>> = {
 }
 
 /**
- * The results of a call to endpoint `P`. An index or template key, which an
- * empty object fills, stands for many endpoints: its results are those of the
- * endpoint the call names, `K`, as `ResultOf` gives a concrete call.
+ * The results of a call to endpoint `P`. An index or template key, which an empty object fills,
+ * stands for many endpoints: its results are those of the endpoint the call names, `K`, as
+ * `ResultOf` gives a concrete call.
  */
 type CallResult<Endpoints, P, K> = ResultOf<
   OperationOf<Endpoints, CallKey<P, K> & keyof Endpoints>,
@@ -190,8 +190,8 @@ type Field<Name extends "params" | "query", Op extends Operation> = Name extends
   : Partial<Record<Name, never>>
 
 /**
- * Declared headers keep their types, others are allowed; or a `Headers` or
- * its entries, taken as they are. Never required per call.
+ * Declared headers keep their types, others are allowed; or a `Headers` or its entries, taken as
+ * they are. Never required per call.
  */
 interface HeadersField<Op extends Operation> {
   headers?:
@@ -209,9 +209,9 @@ type BodyField<Op extends Operation> = "body" extends keyof Op
   : { body?: never; contentType?: never }
 
 /**
- * The media type sent when the call names none: the declared `application/json`
- * one, parameters and all, where one alone is; else the only one declared. The
- * generator writes it into the contract by the same rule (`defaultMediaType`).
+ * The media type sent when the call names none: the declared `application/json` one, parameters and
+ * all, where one alone is; else the only one declared. The generator writes it into the contract by
+ * the same rule (`defaultMediaType`).
  */
 type DefaultMediaType<Content, M extends string = keyof Content & string> = [
   Only<ApplicationJson<M>>,
@@ -306,11 +306,10 @@ interface Undeclared {
 }
 
 /**
- * Each status an operation may answer with, and what its response carries: one
- * entry per declared status or range. A declared 2xx status is the only
- * success; `default` stands for every other status, 2xx ones too when no 2xx
- * is declared. Without it, an undeclared 3xx, 4xx, or 5xx status may carry
- * anything, and so may a 2xx status when no success is declared at all.
+ * Each status an operation may answer with, and what its response carries: one entry per declared
+ * status or range. A declared 2xx status is the only success; `default` stands for every other
+ * status, 2xx ones too when no 2xx is declared. Without it, an undeclared 3xx, 4xx, or 5xx status
+ * may carry anything, and so may a 2xx status when no success is declared at all.
  */
 type Outcomes<Op extends Operation, Method extends string, R = Op["responses"]> =
   | {
@@ -337,11 +336,10 @@ export type ResponseOf<Op extends Operation, Method extends string> =
     : never
 
 /**
- * One result per status the operation may answer with: its body, decoded, as
- * `data` for a success and `error` for a failure, never both. A failure's
- * `error` is never `undefined`, so `error === undefined` tells a success, also
- * once destructured. `status` is the response's, at the top so that it narrows
- * them too: TypeScript does not narrow a union through `response.status`.
+ * One result per status the operation may answer with: its body, decoded, as `data` for a success
+ * and `error` for a failure, never both. A failure's `error` is never `undefined`, so `error ===
+ * undefined` tells a success, also once destructured. `status` is the response's, at the top so
+ * that it narrows them too: TypeScript does not narrow a union through `response.status`.
  */
 export type ResultOf<Op extends Operation, Method extends string> =
   Outcomes<Op, Method> extends infer O
@@ -372,8 +370,8 @@ type ErrorBody<T> = unknown extends T
     : T
 
 /**
- * What `json()` resolves to: the response's JSON content, `unknown` where it
- * declares other content, and nothing where it has none, since `json()` rejects.
+ * What `json()` resolves to: the response's JSON content, `unknown` where it declares other
+ * content, and nothing where it has none, since `json()` rejects.
  */
 type JsonOf<Shape> = Shape extends { content: infer Content }
   ? [JsonContent<Content>] extends [never]
@@ -395,8 +393,8 @@ type DecodedAs<M extends string, T> =
   IsJson<M> extends true ? JsonValue<M, T> : Essence<M> extends `text/${string}` ? TextOf<T> : Blob
 
 /**
- * JSON is parsed, never a Blob, whatever the schema says; under a wildcard,
- * raw bytes may come labelled as anything, and are decoded so: `unknown`.
+ * JSON is parsed, never a Blob, whatever the schema says; under a wildcard, raw bytes may come
+ * labelled as anything, and are decoded so: `unknown`.
  */
 type JsonValue<M extends string, T> = [Extract<T, Blob>] extends [never]
   ? T

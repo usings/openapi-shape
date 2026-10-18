@@ -7,11 +7,14 @@
 export const CONTRACT_VERSION = 1
 
 /**
- * The runtime details a generated module exports as `contract`. Encodings are
- * listed only where they differ from OpenAPI's defaults.
+ * The runtime details a generated module exports as `contract`. Encodings are listed only where
+ * they differ from OpenAPI's defaults.
  */
 export interface Contract<Endpoints = unknown> {
-  /** The format, so that a client and a contract that do not agree on it fail to compile, or to start. */
+  /**
+   * The format, so that a client and a contract that do not agree on it fail to compile, or to
+   * start.
+   */
   readonly version: typeof CONTRACT_VERSION
   /** Carries the generated `Endpoints` for inference; never set. */
   readonly types?: Endpoints
@@ -36,8 +39,8 @@ export interface EndpointContract {
   /** The media type sent when the call names none and JSON is not accepted. */
   readonly contentType?: string
   /**
-   * The label of the JSON the client encodes when the call names no media
-   * type, where it is not `application/json`: the declared one, parameters and all.
+   * The label of the JSON the client encodes when the call names no media type, where it is not
+   * `application/json`: the declared one, parameters and all.
    */
   readonly json?: string
   /** Encoding Objects of a form body, by field. */

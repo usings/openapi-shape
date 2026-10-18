@@ -4,8 +4,8 @@ import { createClient } from "../src/client"
 import { contract } from "./__snapshots__/client-api"
 
 /**
- * A client whose `fetch` records each request and answers with `respond()`;
- * `sent()` is the last request. Endpoint paths go under `https://x.test`.
+ * A client whose `fetch` records each request and answers with `respond()`; `sent()` is the last
+ * request. Endpoint paths go under `https://x.test`.
  */
 function recorder<Api>(
   given: Contract<Api>,
