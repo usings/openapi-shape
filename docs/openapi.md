@@ -17,6 +17,8 @@ References resolve against the document location, OpenAPI 3.2's `$self`, or the 
 
 An `$id` or anchor inside an extension (`x-…`), instance data (`example`, `examples`, `default`, `const`, `enum`), or a Link is ignored: it claims no URI, and references inside it resolve against the base outside it.
 
+External schema entries named `x-…`, `links`, or an instance-data keyword can still be used through an explicit JSON Pointer schema reference. For files without `openapi`, that reference enables `$id` and anchor indexing along the pointer and within the target schema. Extensions and instance data inside the target remain excluded unless themselves explicitly referenced.
+
 Non-schema Reference Objects are supported wherever components can be referenced, including 3.2 media types. In 3.1+, sibling `summary` and `description` fields override the target's annotations.
 
 Path Item references merge every link in the chain. Nearer fields override inherited fields, with a `path-item-conflict` warning at each override. Relative references retain the base of the document where each field was defined. Reference cycles are rejected.

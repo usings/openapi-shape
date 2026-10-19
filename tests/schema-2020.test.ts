@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { codes, declaration, gen, genResult, typeOf, withSchemas } from "./helpers/generate"
+import { generate } from "../src/index"
+import { codes, declaration, gen, typeOf, withSchemas } from "./helpers/generate"
 import { expectPassesTsc } from "./helpers/tsc"
 
 // OpenAPI 3.1 and 3.2 Schema Objects are JSON Schema 2020-12.
@@ -55,7 +56,7 @@ describe("values", () => {
   })
 
   it("keeps format as documentation, and reads format: binary as raw bytes", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         T: {
           type: "object",
@@ -73,7 +74,7 @@ describe("values", () => {
   })
 
   it("follows Swagger-era and removed keywords where documents still use them", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         A: { type: "file" },
         B: { type: "string", nullable: true },
@@ -346,7 +347,7 @@ describe("references and names", () => {
   })
 
   it("sanitizes names and reports collisions", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         "User-Profile": { type: "string" },
         "User.Profile": { type: "number" },
@@ -365,7 +366,7 @@ describe("references and names", () => {
   })
 
   it("approximates $dynamicRef statically", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         A: {
           $dynamicAnchor: "node",
@@ -379,7 +380,7 @@ describe("references and names", () => {
   })
 
   it("breaks cycles that only pass through unions and intersections", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         Pet: {
           type: "object",
@@ -412,7 +413,7 @@ describe("references and names", () => {
   })
 
   it("labels tuples whose optional or rest items hold arrays, so that they may recur", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         // Unlabelled, TypeScript would resolve `[B[]?]` at once (TS2456).
         A: {
@@ -737,7 +738,7 @@ describe("robustness", () => {
   })
 
   it("reports empty applicators", async () => {
-    const result = await genResult(withSchemas("3.1", { E: { anyOf: [] } }))
+    const result = await generate(withSchemas("3.1", { E: { anyOf: [] } }))
     expect(declaration(result.code, "E")).toBe("never")
     expect(codes(result.diagnostics)).toStrictEqual(["invalid-schema #/components/schemas/E/anyOf"])
   })

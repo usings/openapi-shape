@@ -21,6 +21,8 @@ interface LoadedDocument {
   remote: boolean
   /** The base URI each `$id` resource in it sets, by pointer (3.1+). */
   bases: Map<string, string>
+  /** Subtrees omitted from the resource index unless explicitly reached as external schemas. */
+  excluded: Map<string, { value: unknown; base: string; owned: boolean }>
 }
 
 /** A value inside a document together with the base URI in effect there. */
@@ -33,7 +35,7 @@ export interface DocumentNode {
 
 type Resolution =
   | { kind: "found"; node: DocumentNode }
-  /** The target document is not loaded yet; the caller should retry after loading. */
+  /** The target needs loading or indexing; the caller should retry after `loadPending`. */
   | { kind: "pending" }
   | { kind: "error"; message: string }
 
@@ -108,6 +110,7 @@ export class DocumentSet {
   private readonly anchors = new Map<string, DocumentNode>()
   private readonly pending = new Set<string>()
   private readonly failed = new Map<string, string>()
+  private readonly schemaTargets = new Map<LoadedDocument, Set<string>>()
   private rounds = 0
 
   /**
@@ -127,11 +130,32 @@ export class DocumentSet {
   }
 
   get hasPending(): boolean {
-    return this.pending.size > 0
+    return this.pending.size > 0 || this.schemaTargets.size > 0
   }
 
-  /** Load every document a build asked for. Returns false once loading cannot progress. */
+  /**
+   * Index schema targets or load requested documents between builds. Returns false at the load
+   * limit.
+   */
   async loadPending(): Promise<boolean> {
+    if (this.schemaTargets.size > 0) {
+      for (const [document, targets] of this.schemaTargets) {
+        for (const target of targets) {
+          let pointer = ""
+          for (const token of parsePointer(target) ?? []) {
+            pointer = appendPointer(pointer, token)
+            const excluded = document.excluded.get(pointer)
+            if (excluded === undefined) continue
+            document.excluded.delete(pointer)
+            this.indexResources(document, excluded.value, pointer, excluded.base, excluded.owned)
+          }
+        }
+      }
+      this.schemaTargets.clear()
+      // Rebuild before fetching: newly indexed $ids may satisfy earlier requests.
+      this.pending.clear()
+      return true
+    }
     if (this.pending.size === 0 || ++this.rounds > MAX_LOAD_ROUNDS) return false
     const uris = [...this.pending]
     this.pending.clear()
@@ -206,6 +230,27 @@ export class DocumentSet {
       kind: "error",
       message: `remote document cannot reference local document ${target.uri}`,
     }
+  }
+
+  /** A schema pointer can identify a dictionary entry whose name otherwise looks like metadata. */
+  resolveSchema(ref: string, from: DocumentNode): Resolution {
+    const resolution = this.resolve(ref, from)
+    if (resolution.kind !== "found") return resolution
+    const { document, pointer } = resolution.node
+    if (isRecord(document.root) && "openapi" in document.root) return resolution
+    let at = ""
+    for (const token of parsePointer(pointer) ?? []) {
+      at = appendPointer(at, token)
+      if (!document.excluded.has(at)) continue
+      let targets = this.schemaTargets.get(document)
+      if (targets === undefined) {
+        targets = new Set()
+        this.schemaTargets.set(document, targets)
+      }
+      targets.add(pointer)
+      return { kind: "pending" }
+    }
+    return resolution
   }
 
   private lookup(ref: string, from: DocumentNode): Resolution {
@@ -332,7 +377,10 @@ export class DocumentSet {
     for (const [key, child] of Object.entries(value)) {
       const at = appendPointer(pointer, key)
       const extension = key.startsWith("x-") && (map === undefined || EXTENSIBLE_MAPS.has(map))
-      if (extension || (map === undefined && NO_SCHEMAS.has(key))) continue
+      if (extension || (map === undefined && NO_SCHEMAS.has(key))) {
+        document.excluded.set(at, { value: child, base, owned })
+        continue
+      }
       if (map === undefined && NAME_MAPS.has(key)) {
         this.indexChildren(document, child, at, base, owned, key)
       } else this.indexResources(document, child, at, base, owned)
@@ -429,7 +477,7 @@ function createDocument(
     // A remote document cannot pose as a local file.
     if (!(remote && isFileUri(self))) base = self
   }
-  return { uri, base, root, version, remote, bases: new Map() }
+  return { uri, base, root, version, remote, bases: new Map(), excluded: new Map() }
 }
 
 /**

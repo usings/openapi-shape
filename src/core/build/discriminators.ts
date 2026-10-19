@@ -124,7 +124,7 @@ function mappingTarget(
       }
     }
   } else {
-    const resolution = schemas.context.documents.resolve(target, at)
+    const resolution = schemas.context.documents.resolveSchema(target, at)
     if (resolution.kind === "found") node = resolution.node
     else if (resolution.kind === "pending") return new Set()
   }
@@ -334,7 +334,7 @@ function refChain(schemas: SchemaBuilder, node: DocumentNode): DocumentNode[] {
   let current = node
   let reference = referencesOf(current.value)[0]
   while (reference !== undefined) {
-    const resolution = schemas.context.documents.resolve(reference[1], current)
+    const resolution = schemas.context.documents.resolveSchema(reference[1], current)
     if (resolution.kind !== "found") break
     const id = identity(resolution.node)
     if (seen.has(id)) break

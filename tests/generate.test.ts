@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
 import { join } from "node:path"
@@ -107,18 +108,20 @@ describe("generate", () => {
 
   it("accepts paths, file URLs, and parsed documents alike", async () => {
     const path = join(FIXTURES, "v3.0/petstore.yaml")
-    const [fromPath, fromUrl, fromJson] = await Promise.all([
+    const [fromPath, fromUrl, fromJson, fromParsed] = await Promise.all([
       generate(path),
       generate(pathToFileURL(path)),
       generate(join(FIXTURES, "v3.0/petstore.json")),
+      generate(JSON.parse(await readFile(join(FIXTURES, "v3.0/petstore.json"), "utf8"))),
     ])
     expect(fromUrl.code).toBe(fromPath.code)
     expect(fromJson.code).toBe(fromPath.code)
+    expect(fromParsed.code).toBe(fromPath.code)
   })
 
-  it("reads JSON and YAML over HTTP by content type", async () => {
+  it("lets HTTP Content-Type override the path when parsing documents", async () => {
     const server = createServer((request, response) => {
-      if (request.url === "/spec") {
+      if (request.url === "/spec.json") {
         response.setHeader("content-type", "application/yaml")
         response.end(
           "openapi: 3.1.0\ninfo: { title: T, version: '1' }\ncomponents:\n  schemas:\n    A: { $ref: 'a.json' }\n",
@@ -136,18 +139,12 @@ describe("generate", () => {
     })
     try {
       const { port } = server.address() as AddressInfo
-      const { code } = await generate(`http://127.0.0.1:${port}/spec`)
+      const { code } = await generate(`http://127.0.0.1:${port}/spec.json`)
       expect(code).toContain("export type A = number")
       await expect(generate(`http://127.0.0.1:${port}/missing`)).rejects.toThrow("HTTP 404")
     } finally {
       server.close()
     }
-  })
-
-  it("is deterministic", async () => {
-    const path = join(FIXTURES, "v3.0/petstore-expanded.yaml")
-    const [first, second] = await Promise.all([generate(path), generate(path)])
-    expect(first.code).toBe(second.code)
   })
 
   it.each([

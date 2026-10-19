@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { dirname, join, relative } from "node:path"
+import ts from "typescript"
 import { expect, it } from "vitest"
 
 // What each part of src/ may import. The generator is a pipeline, load → build
@@ -41,15 +42,50 @@ function resolveSource(from: string, specifier: string): string | undefined {
   return [`${base}.ts`, join(base, "index.ts")].find((file) => existsSync(file))
 }
 
+/** Static dependencies, including side effects, re-exports, and literal dynamic imports. */
+function importsOf(text: string): string[] {
+  const file = ts.createSourceFile("source.ts", text, ts.ScriptTarget.Latest, true)
+  const imports: string[] = []
+  const visit = (node: ts.Node): void => {
+    let specifier: ts.Node | undefined
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      specifier = node.moduleSpecifier
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      specifier = node.arguments[0]
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      specifier = node.argument.literal
+    } else if (ts.isExternalModuleReference(node)) {
+      specifier = node.expression
+    }
+    if (specifier !== undefined && ts.isStringLiteralLike(specifier)) imports.push(specifier.text)
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return imports
+}
+
+it("finds dependencies in import syntax, ignoring comments and ordinary strings", () => {
+  expect(
+    importsOf(
+      [
+        'import { readFile } from "node:fs"',
+        'import "./side-effect"',
+        'export * from "./exported"',
+        'const lazy = () => import("./lazy")',
+        'type T = import("./types").T',
+        'import legacy = require("./legacy")',
+        '// import "./comment"',
+        "const text = 'import \"./string\"'",
+      ].join("\n"),
+    ),
+  ).toStrictEqual(["node:fs", "./side-effect", "./exported", "./lazy", "./types", "./legacy"])
+})
+
 it("imports flow one way between the parts of src/", () => {
   const violations: string[] = []
   for (const file of sources(SRC)) {
     const part = partOf(file)
-    // Import and export statements, also over several lines; not code in strings.
-    const statements = readFileSync(file, "utf8").matchAll(
-      /^(?:import|export)\s[\w*{},\s]*?\bfrom "([^"]+)"/gm,
-    )
-    for (const [, specifier] of statements) {
+    for (const specifier of importsOf(readFileSync(file, "utf8"))) {
       const at = `${relative(SRC, file)} imports "${specifier}"`
       if (!specifier.startsWith(".")) {
         // Bounded pattern matching uses Node's execution deadline, without file or network I/O.

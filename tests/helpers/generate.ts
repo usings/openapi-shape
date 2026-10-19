@@ -1,4 +1,4 @@
-import type { Diagnostic, GenerateOptions, GenerateResult } from "../../src/index"
+import type { Diagnostic, GenerateOptions } from "../../src/index"
 import { generate } from "../../src/index"
 
 export type Version = "3.0" | "3.1" | "3.2"
@@ -23,10 +23,6 @@ export function withSchemas(
 export async function gen(doc: object, options?: GenerateOptions): Promise<string> {
   const { code } = await generate(doc, options)
   return code
-}
-
-export function genResult(doc: object, options?: GenerateOptions): Promise<GenerateResult> {
-  return generate(doc, options)
 }
 
 /** Diagnostic codes with their locations, for compact assertions. */

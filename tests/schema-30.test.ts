@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest"
-import {
-  codes,
-  declaration,
-  entry,
-  gen,
-  genResult,
-  oas,
-  typeOf,
-  withSchemas,
-} from "./helpers/generate"
+import { generate } from "../src/index"
+import { codes, declaration, entry, gen, oas, typeOf, withSchemas } from "./helpers/generate"
 import { expectPassesTsc } from "./helpers/tsc"
 
 // OpenAPI 3.0 Schema Objects: an extended subset of JSON Schema Wright-00.
@@ -27,7 +19,7 @@ describe("nullable: the schema also admits null", () => {
   })
 
   it("admits null where 3.0.3+ would not", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.0", {
         Base: { type: "object", properties: { id: { type: "string" } } },
         NoType: { nullable: true, allOf: [{ $ref: "#/components/schemas/Base" }] },
@@ -49,7 +41,7 @@ describe("nullable: the schema also admits null", () => {
 
 describe("3.0 keyword set", () => {
   it("applies keywords next to $ref, which 3.0 would ignore", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.0", {
         Base: { type: "object", properties: { id: { type: "string" } } },
         Extended: {
@@ -99,7 +91,7 @@ describe("3.0 keyword set", () => {
       expected: "{\n  a?: never\n}",
     },
   ])("applies $keyword in 3.0", async ({ schema, expected }) => {
-    const result = await genResult(withSchemas("3.0", { T: schema }))
+    const result = await generate(withSchemas("3.0", { T: schema }))
     expect(declaration(result.code, "T")).toBe(expected)
     expect(result.diagnostics).toStrictEqual([])
   })
@@ -176,7 +168,7 @@ describe("readOnly and writeOnly: `required` applies to one side only", () => {
   })
 
   it("applies them in 3.1+ too, where they are annotations", async () => {
-    const result = await genResult(readWriteDoc("3.1"))
+    const result = await generate(readWriteDoc("3.1"))
     expect(declaration(result.code, "UserInput")).toContain("  id?: string")
     expect(entry(result.code, "POST /users")).toContain(
       'body: { "application/json": Schemas.TeamInput }',
@@ -259,7 +251,7 @@ describe("readOnly and writeOnly across schemas", () => {
   })
 
   it("reports a request-side name it had to change", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.0", {
         paths: post(ref("User")),
         components: {

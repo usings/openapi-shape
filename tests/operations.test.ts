@@ -1,11 +1,10 @@
 import { readdirSync } from "node:fs"
 import { join } from "node:path"
-import { pathToFileURL } from "node:url"
-import { describe, expect, it } from "vitest"
-import type { Contract } from "../src/client"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import type { Encoding, EndpointContract } from "../src/client/contract"
 import { generate } from "../src/index"
-import { codes, entry, gen, genResult, oas } from "./helpers/generate"
+import { contractOf } from "./helpers/contract"
+import { codes, entry, gen, oas } from "./helpers/generate"
 import { withFiles } from "./helpers/tmp"
 import { expectPassesTsc, typecheck } from "./helpers/tsc"
 
@@ -34,7 +33,7 @@ describe("methods", () => {
   })
 
   it("supports QUERY and additionalOperations in 3.2", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.2", {
         paths: {
           "/r": {
@@ -53,7 +52,7 @@ describe("methods", () => {
   })
 
   it("applies 3.2 fields in earlier versions too", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/r": { query: { responses: ok }, additionalOperations: { COPY: { responses: ok } } },
@@ -201,7 +200,7 @@ describe("parameters", () => {
   })
 
   it("matches path parameters to the path template", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/a/{x}/b/{y}": {
@@ -224,7 +223,7 @@ describe("parameters", () => {
   })
 
   it("reports invalid parameters", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/r/{id}": {
@@ -265,7 +264,7 @@ describe("parameters", () => {
   })
 
   it("types a 3.2 querystring parameter as the whole query", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.2", {
         paths: {
           "/search": {
@@ -333,10 +332,10 @@ describe("request bodies", () => {
 
   it("keeps request bodies on GET, HEAD, and DELETE, also in 3.0, which says to ignore them", async () => {
     const paths = { "/r": { delete: { requestBody: json({ type: "string" }), responses: ok } } }
-    const result30 = await genResult(oas("3.0", { paths }))
+    const result30 = await generate(oas("3.0", { paths }))
     expect(entry(result30.code, "DELETE /r")).toContain('body?: { "application/json": string }')
     expect(result30.diagnostics).toStrictEqual([])
-    const result31 = await genResult(oas("3.1", { paths }))
+    const result31 = await generate(oas("3.1", { paths }))
     expect(entry(result31.code, "DELETE /r")).toContain("body?:")
     expect(result31.diagnostics).toStrictEqual([])
   })
@@ -344,7 +343,7 @@ describe("request bodies", () => {
 
 describe("responses", () => {
   it("keeps status keys and media types, and leaves out content that is not declared", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/r": {
@@ -385,7 +384,7 @@ describe("responses", () => {
   })
 
   it("merges status keys that differ only in case", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/r": {
@@ -454,7 +453,7 @@ describe("webhooks and callbacks", () => {
     expect(code).toContain(
       'export interface Webhooks {\n  "POST pet.created": {\n    body?: { "application/json": string }',
     )
-    const result30 = await genResult(oas("3.0", { webhooks }))
+    const result30 = await generate(oas("3.0", { webhooks }))
     expect(result30.code).toContain('"POST pet.created"')
     expect(result30.diagnostics).toStrictEqual([])
   })
@@ -538,7 +537,7 @@ describe("webhooks and callbacks", () => {
 
 describe("path items", () => {
   it("merges every link of a Path Item reference chain, nearest fields first", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: { "/r": { $ref: "#/components/pathItems/Middle" } },
         components: {
@@ -593,7 +592,7 @@ describe("path items", () => {
 
   it("rejects a Path Item reference cycle even when its links have local operations", async () => {
     await expect(
-      genResult(
+      generate(
         oas("3.1", {
           paths: { "/r": { $ref: "#/components/pathItems/A" } },
           components: {
@@ -618,7 +617,7 @@ describe("path items", () => {
   })
 
   it("merges a referenced Path Item with local fields, reporting conflicts", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/r": {
@@ -636,16 +635,6 @@ describe("path items", () => {
     expect(codes(result.diagnostics)).toStrictEqual(["path-item-conflict #/paths/~1r/get"])
   })
 })
-
-/** The `contract` a generated module exports, imported as a consumer would. */
-function contractOf(code: string): Promise<Contract<Record<string, unknown>>> {
-  return withFiles({ "api.ts": code }, async (dir) => {
-    const module = (await import(pathToFileURL(join(dir, "api.ts")).href)) as {
-      contract: Contract<Record<string, unknown>>
-    }
-    return module.contract
-  })
-}
 
 /** The fields of the contract format, as the client's types define them, every one listed. */
 const ENTRY_FIELDS = [
@@ -666,10 +655,8 @@ const ENCODING_FIELDS = [
 type Lists<T, L extends readonly unknown[]> = [Exclude<keyof T, L[number]>] extends [never]
   ? true
   : false
-const listed: [
-  Lists<EndpointContract, typeof ENTRY_FIELDS>,
-  Lists<Encoding, typeof ENCODING_FIELDS>,
-] = [true, true]
+expectTypeOf<Lists<EndpointContract, typeof ENTRY_FIELDS>>().toEqualTypeOf<true>()
+expectTypeOf<Lists<Encoding, typeof ENCODING_FIELDS>>().toEqualTypeOf<true>()
 
 /** Fields of a contract the client does not read. */
 function unknownFields(contract: object): string[] {
@@ -696,7 +683,6 @@ function unknownFields(contract: object): string[] {
 
 describe("runtime contract", () => {
   it("has only fields the client reads, in every fixture", async () => {
-    expect(listed).toStrictEqual([true, true])
     const fixtures = join(import.meta.dirname, "fixtures")
     const documents = [
       join(fixtures, "client.yaml"),
@@ -746,7 +732,7 @@ describe("runtime contract", () => {
   })
 
   it("records each endpoint's serialization where it differs from OpenAPI's defaults", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         servers: [{ url: "https://api.test/v1" }],
         paths: {

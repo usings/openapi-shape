@@ -1,12 +1,10 @@
-import { join } from "node:path"
-import { pathToFileURL } from "node:url"
 import { expect, it } from "vitest"
 import type { Contract } from "../src/client"
 import { createClient } from "../src/client"
 import { generate } from "../src/index"
+import { contractOf } from "./helpers/contract"
 import type { Version } from "./helpers/generate"
 import { codes, oas } from "./helpers/generate"
-import { withFiles } from "./helpers/tmp"
 
 const multipart = "multipart/form-data"
 const form = "application/x-www-form-urlencoded"
@@ -22,20 +20,15 @@ function document(content: object, version: Version = "3.2") {
 async function generatedClient(content: object) {
   const { code, diagnostics } = await generate(document(content))
   expect(diagnostics).toStrictEqual([])
-  const contract = await withFiles({ "api.ts": code }, async (dir) => {
-    const module = (await import(pathToFileURL(join(dir, "api.ts")).href)) as {
-      contract: Contract<{
-        "POST /upload": {
-          body: Record<
-            typeof multipart | `${typeof multipart};${string}` | typeof form,
-            Record<string, unknown>
-          >
-          responses: object
-        }
-      }>
+  const contract = await contractOf<{
+    "POST /upload": {
+      body: Record<
+        typeof multipart | `${typeof multipart};${string}` | typeof form,
+        Record<string, unknown>
+      >
+      responses: object
     }
-    return module.contract
-  })
+  }>(code)
   const requests: Request[] = []
   const client = createClient(contract, {
     baseUrl: "https://api.test",

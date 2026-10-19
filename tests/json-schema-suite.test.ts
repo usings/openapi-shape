@@ -30,7 +30,6 @@ const NEEDS_REMOTES = new Set([
   "dynamicRef.json / $ref and $dynamicAnchor are independent of order - $ref first",
   "dynamicRef.json / $ref to $dynamicRef finds detached $dynamicAnchor",
   // These reference the draft 2020-12 metaschema at json-schema.org.
-  "defs.json / validate definition against metaschema",
   "ref.json / remote ref, containing refs itself",
 ])
 

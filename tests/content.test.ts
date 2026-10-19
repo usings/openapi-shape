@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
+import { generate } from "../src/index"
 import type { Version } from "./helpers/generate"
-import { codes, entry, gen, genResult, oas } from "./helpers/generate"
+import { codes, entry, gen, oas } from "./helpers/generate"
 import { expectPassesTsc } from "./helpers/tsc"
 
 /** The type of one media type's content in a 200 response of `GET /r`. */
@@ -72,22 +73,32 @@ describe("media types with a schema", () => {
     expect(await contentType(mediaType, { schema })).toBe(expected)
   })
 
-  it("types raw bytes as a Blob, but as text under text/*", async () => {
+  it("types raw bytes as Blob, string, or unknown according to the media type", async () => {
     const bytes = { schema: { type: "string", format: "binary" } }
     const types = await Promise.all(
       (["3.0", "3.1"] as const).flatMap((version) => [
         contentType("application/json", bytes, version),
         contentType("text/plain", bytes, version),
+        contentType("text/*", bytes, version),
         contentType("*/*", bytes, version),
       ]),
     )
-    expect(types).toStrictEqual(["Blob", "string", "Blob", "Blob", "string", "Blob"])
+    expect(types).toStrictEqual([
+      "Blob",
+      "string",
+      "unknown",
+      "Blob",
+      "Blob",
+      "string",
+      "unknown",
+      "Blob",
+    ])
   })
 
   it("reads a binary contentMediaType as raw bytes, also in 3.0, which lacks it", async () => {
     const image = { schema: { type: "string", contentMediaType: "image/png" } }
     expect(await contentType("*/*", image, "3.1")).toBe("Blob")
-    const result = await genResult(
+    const result = await generate(
       oas("3.0", {
         paths: { "/pic": { get: { responses: { "200": { content: { "*/*": image } } } } } },
       }),
@@ -112,7 +123,7 @@ describe("streams and sequences", () => {
     )
     // itemSchema is a 3.2 field, applied in earlier versions too; it
     // applies to sequential media types only.
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/r": {
@@ -139,7 +150,7 @@ describe("streams and sequences", () => {
   })
 
   it("reads the schema of a JSON sequence as the type of each item", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/r": {
@@ -164,7 +175,7 @@ describe("streams and sequences", () => {
 
 describe("multipart parts", () => {
   it("types parts by their schemas, raw bytes as Blobs, whatever the Encoding Objects say", async () => {
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/r": {
@@ -212,7 +223,7 @@ describe("multipart parts", () => {
 
   it("types raw bytes as a Blob wherever a schema declares them", async () => {
     const bytes = { type: "string", format: "binary" }
-    const result = await genResult(
+    const result = await generate(
       oas("3.1", {
         paths: {
           "/f": {
@@ -245,7 +256,7 @@ describe("multipart parts", () => {
         'import type { Endpoints } from "./file0"',
         'type Body = Endpoints["POST /f"]["body"]',
         'export const parts: Body["multipart/form-data"] = { file: new Blob([]) }',
-        // An approximation: JSON, form fields, and parameters carry them as text.
+        // The types preserve file declarations; the client rejects Blob values in these text locations.
         'export const json: Body["application/json"] = { file: new Blob([]) }',
         'export const form: Body["application/x-www-form-urlencoded"] = { file: new Blob([]) }',
         'export const query: Endpoints["POST /f"]["query"] = { q: new Blob([]) }',

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { codes, declaration, gen, genResult, withSchemas } from "./helpers/generate"
+import { generate } from "../src/index"
+import { codes, declaration, gen, withSchemas } from "./helpers/generate"
 import { expectPassesTsc } from "./helpers/tsc"
 
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -37,7 +38,7 @@ describe("discriminated oneOf/anyOf", () => {
   })
 
   it("maps to absolute URIs such as URNs, and narrows $dynamicRef branches", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         Cat: { $id: "urn:cat", ...object({ kind: { type: "string" } }, ["kind"]) },
         Dog: object({ kind: { type: "string" } }, ["kind"]),
@@ -54,7 +55,7 @@ describe("discriminated oneOf/anyOf", () => {
   })
 
   it("lets the schema's own literals win", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         Auto: object({ type: { type: "string", enum: ["auto"] } }, ["type"]),
         Static: object({ type: { const: "static" } }, ["type"]),
@@ -75,7 +76,7 @@ describe("discriminated oneOf/anyOf", () => {
   })
 
   it("leaves non-object branches alone and reports them", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         List: { type: "array", items: { type: "string" } },
         Item: object({ type: { type: "string" } }),
@@ -140,7 +141,7 @@ describe("discriminated allOf hierarchies", () => {
 
 describe("discriminators that cannot apply", () => {
   it("leaves non-string properties alone, and keeps a branch's non-object values", async () => {
-    const result = await genResult(
+    const result = await generate(
       withSchemas("3.1", {
         Pet: {
           oneOf: [{ $ref: "#/components/schemas/Cat" }, { $ref: "#/components/schemas/Dog" }],

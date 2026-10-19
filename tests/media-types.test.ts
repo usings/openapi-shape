@@ -1,10 +1,8 @@
-import { join } from "node:path"
-import { pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
-import type { Contract } from "../src/client"
 import { createClient } from "../src/client"
+import { generate } from "../src/index"
+import { contractOf } from "./helpers/contract"
 import { gen, oas } from "./helpers/generate"
-import { withFiles } from "./helpers/tmp"
 import { typecheck } from "./helpers/tsc"
 
 // The rules for media types live in four places that must agree: how the
@@ -83,12 +81,7 @@ describe("media types", () => {
 
   it("are read and written at run time as their types say", async () => {
     const code = await gen(description)
-    const contract = await withFiles({ "api.ts": code }, async (dir) => {
-      const module = (await import(pathToFileURL(join(dir, "api.ts")).href)) as {
-        contract: Contract<Record<string, { responses: object }>>
-      }
-      return module.contract
-    })
+    const contract = await contractOf(code)
     // What the client did with each: how it read the response, and what it labelled a request.
     const observed: Array<[string, string, string]> = []
     for (const [i, [mediaType, , write]] of MEDIA.entries()) {
@@ -186,12 +179,7 @@ const defaults = oas("3.1", {
 /** A client of the module generated from `document`, recording what it sends. */
 async function recording(document: object) {
   const code = await gen(document)
-  const contract = await withFiles({ "api.ts": code }, async (dir) => {
-    const module = (await import(pathToFileURL(join(dir, "api.ts")).href)) as {
-      contract: Contract<Record<string, { responses: object }>>
-    }
-    return module.contract
-  })
+  const contract = await contractOf(code)
   const sent: Request[] = []
   const api = createClient(contract, {
     baseUrl: "https://x.test",
@@ -261,4 +249,96 @@ describe("the default media type", () => {
     }
     expect(labels).toStrictEqual(["application/json;charset=UTF-8", "image/png", null])
   })
+})
+
+it("requires narrowing wildcard results before accessing schema properties", async () => {
+  const mediaSchema = {
+    schema: { type: "object", required: ["id"], properties: { id: { type: "integer" } } },
+  }
+  const { code } = await generate(
+    oas("3.1", {
+      paths: Object.fromEntries(
+        ["application/*", "*/*", "application/json"].map((media, i) => [
+          `/r${i}`,
+          {
+            get: { responses: { "200": { description: "OK", content: { [media]: mediaSchema } } } },
+          },
+        ]),
+      ),
+    }),
+  )
+  expect(
+    await typecheck({
+      "api.ts": code,
+      "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const client = createClient(contract)
+async function check() {
+  const app = await client.result("GET /r0")
+  if (app.error === undefined) {
+    app.data satisfies { id: number } | Blob
+    // @ts-expect-error application/* may return a Blob
+    app.data.id.toFixed()
+    if (!(app.data instanceof Blob)) app.data.id.toFixed()
+  }
+  const any = await client.result("GET /r1")
+  if (any.error === undefined) {
+    any.data satisfies { id: number } | Blob | string
+    // @ts-expect-error */* may also return text
+    any.data.id.toFixed()
+    if (typeof any.data !== "string" && !(any.data instanceof Blob)) any.data.id.toFixed()
+  }
+  const json = await client.result("GET /r2")
+  if (json.error === undefined) json.data.id.toFixed()
+  const raw = await client.fetch("GET /r0")
+  if (raw.ok) (await raw.json()).id.toFixed()
+}
+`,
+    }),
+  ).toBe("")
+})
+
+/** `text/*` content, with `schema` if given. */
+const textRange = (value?: object) => ({ "text/*": value ? { schema: value } : {} })
+
+it("types a text/* response as JSON or text, and its request body as text", async () => {
+  const { code } = await generate(
+    oas("3.1", {
+      paths: {
+        "/any": {
+          get: { responses: { "200": { description: "OK", content: textRange() } } },
+          post: { requestBody: { content: textRange() }, responses: { "204": {} } },
+        },
+        "/strings": {
+          get: {
+            responses: { "200": { description: "OK", content: textRange({ type: "string" }) } },
+          },
+        },
+      },
+    }),
+  )
+  expect(
+    await typecheck({
+      "api.ts": code,
+      "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const client = createClient(contract)
+async function check() {
+  const any = await client.result("GET /any")
+  if (any.error === undefined) {
+    // @ts-expect-error a text/json response is parsed
+    any.data.toUpperCase()
+    if (typeof any.data === "string") any.data.toUpperCase()
+  }
+  const strings = await client.result("GET /strings")
+  if (strings.error === undefined) strings.data.toUpperCase()
+  await client.result("POST /any", { body: "text" })
+  // @ts-expect-error text is sent as a string
+  await client.result("POST /any", { body: { a: 1 } })
+}
+`,
+    }),
+  ).toBe("")
 })

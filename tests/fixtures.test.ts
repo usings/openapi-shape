@@ -1,6 +1,7 @@
 import { readdirSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
+import type { GenerateResult } from "../src/index"
 import { generate } from "../src/index"
 import { typecheck } from "./helpers/tsc"
 
@@ -13,16 +14,23 @@ const fixtures = ["v3.0", "v3.1", "v3.2"].flatMap((dir) =>
 )
 
 describe("OpenAPI Initiative examples", () => {
+  let results: Record<string, GenerateResult>
+  beforeAll(async () => {
+    results = Object.fromEntries(
+      await Promise.all(
+        fixtures.map(async (fixture) => [fixture, await generate(join(ROOT, fixture))]),
+      ),
+    )
+  })
   it.each(fixtures)("%s", async (fixture) => {
-    const { code, diagnostics } = await generate(join(ROOT, fixture))
+    const { code, diagnostics } = results[fixture]
     expect(diagnostics).toStrictEqual([])
     await expect(code).toMatchFileSnapshot(`__snapshots__/oai/${fixture.replace(/\.yaml$/, ".ts")}`)
   })
 
   it("all compile together", async () => {
-    const results = await Promise.all(fixtures.map((fixture) => generate(join(ROOT, fixture))))
     const files = Object.fromEntries(
-      fixtures.map((fixture, i) => [`${fixture.replaceAll(/[/.]/g, "_")}.ts`, results[i].code]),
+      fixtures.map((fixture) => [`${fixture.replaceAll(/[/.]/g, "_")}.ts`, results[fixture].code]),
     )
     expect(await typecheck(files)).toBe("")
   })

@@ -167,7 +167,7 @@ export class SchemaBuilder {
     if (!isRecord(schema) || references.length !== 1) return undefined
     const [[keyword, ref]] = references
     if (Object.keys(schema).some((k) => k !== keyword && TYPE_KEYWORDS.has(k))) return undefined
-    const resolution = this.context.documents.resolve(ref, node)
+    const resolution = this.context.documents.resolveSchema(ref, node)
     if (resolution.kind !== "found") return undefined
     const id = identity(resolution.node)
     if (seen.has(id)) return undefined
@@ -422,7 +422,7 @@ export class SchemaBuilder {
     seen.add(identity(node))
     if (schema[keyword] === true) return true
     for (const [, ref] of referencesOf(schema)) {
-      const resolution = this.context.documents.resolve(ref, node)
+      const resolution = this.context.documents.resolveSchema(ref, node)
       if (resolution.kind === "found" && this.flag(resolution.node, keyword, seen)) return true
     }
     return (
@@ -434,7 +434,7 @@ export class SchemaBuilder {
   }
 
   private ref(node: DocumentNode, ref: string, keyword: string): Type {
-    const resolution = this.context.documents.resolve(ref, node)
+    const resolution = this.context.documents.resolveSchema(ref, node)
     if (resolution.kind === "pending") return UNKNOWN
     if (resolution.kind === "error") {
       this.context.error(
