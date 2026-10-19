@@ -1,5 +1,5 @@
-import type { EndpointContract } from "./contract"
-import { formFields } from "./parameters"
+import type { Encoding, EndpointContract } from "./contract"
+import { encodeContent, formFields, formPairs, normalize } from "./parameters"
 import type { BodyLike } from "./types"
 import {
   isInstance,
@@ -38,17 +38,17 @@ export function encodeBody(
     const declaredJson = contentType === undefined ? declared?.json : undefined
     return { body: toJson(body), contentType: label ?? declaredJson ?? "application/json" }
   }
+  const encodings = declared?.bodyEncodings
+  const encoding = encodings && Object.hasOwn(encodings, type) ? encodings[type] : undefined
   if (essence === "application/x-www-form-urlencoded") {
     // A string is already encoded.
     if (typeof body === "string") return { body, contentType: label }
     if (!isPlainObject(body)) throw new TypeError("A form body must be an object")
-    const encodings = declared?.bodyEncodings
-    const encoding = encodings && Object.hasOwn(encodings, type) ? encodings[type] : undefined
     return { body: formFields(body, encoding ?? {}), contentType: label }
   }
   if (essence === "multipart/form-data") {
     if (!isPlainObject(body)) throw new TypeError("A multipart/form-data body must be an object")
-    return { body: formData(body), contentType: undefined }
+    return { body: formData(body, encoding ?? {}), contentType: undefined }
   }
   if (typeof body === "string") return { body, contentType: label }
   throw new TypeError(`Cannot encode a ${typeof body} as ${type}; pass it encoded`)
@@ -56,20 +56,65 @@ export function encodeBody(
 
 /**
  * Blobs and buffers become files; other values text fields, objects as JSON; array properties
- * repeat.
+ * repeat. A field's declared `contentType` types its parts, and an explicit style serializes it as
+ * a URL-encoded field would, without percent-encoding.
  */
-function formData(body: Record<string, unknown>): FormData {
+function formData(
+  body: Record<string, unknown>,
+  encodings: Readonly<Record<string, Encoding>>,
+): FormData {
   const form = new FormData()
   for (const [name, value] of Object.entries(body)) {
+    const spec = Object.hasOwn(encodings, name) ? encodings[name] : undefined
+    // Any of these makes the field style-based, and its contentType no longer applies.
+    if (
+      spec?.style !== undefined ||
+      spec?.explode !== undefined ||
+      spec?.allowReserved !== undefined
+    ) {
+      // A styled field is text, which would corrupt files and buffers.
+      if (holdsBinary(value)) {
+        throw new TypeError(
+          `Multipart field "${name}" is declared with a style, which sends it as text; send its files in a ready FormData`,
+        )
+      }
+      const encoding = { ...normalize(spec, "form"), contentType: undefined }
+      for (const [key, text] of formPairs(name, value, encoding, true)) {
+        form.append(key, text)
+      }
+      continue
+    }
+    const type = spec?.contentType
+    const essence = type === undefined ? "" : mediaTypeEssence(type)
+    // JSON null is a value; other parts omit nullish values.
+    const json = isJsonEssence(essence) || isJsonWildcardEssence(essence)
     for (const item of Array.isArray(value) ? value : [value]) {
-      if (item == null) continue
+      if (item === undefined || (item === null && !json)) continue
       const raw = bytes(item)
-      if (isInstance(item, "Blob")) form.append(name, item as Blob)
-      else if (raw !== undefined) form.append(name, new Blob([raw]))
-      else form.append(name, scalar(item))
+      if (isInstance(item, "Blob")) {
+        const blob = item as Blob
+        // Retyping a File must retain its original filename.
+        const filename = isInstance(blob, "File") ? (blob as File).name : undefined
+        if (type === undefined) form.append(name, blob)
+        else form.append(name, blob.slice(0, blob.size, type), filename)
+      } else if (raw !== undefined) {
+        form.append(name, new Blob([raw], { type: type ?? "" }))
+      } else if (type === undefined || essence === "text/plain") {
+        form.append(name, scalar(item))
+      } else {
+        // Only a Blob carries a part's type, which makes the part a file (named "blob").
+        form.append(name, new Blob([encodeContent(item, type)], { type }))
+      }
     }
   }
   return form
+}
+
+/** Whether a value holds a Blob or bytes, at any depth of its arrays and plain objects. */
+function holdsBinary(value: unknown): boolean {
+  if (isInstance(value, "Blob") || bytes(value) !== undefined) return true
+  if (Array.isArray(value)) return value.some((item) => holdsBinary(item))
+  return isPlainObject(value) && Object.values(value).some((item) => holdsBinary(item))
 }
 
 /**

@@ -177,7 +177,7 @@ function contractEntry(operation: Operation): Record<string, unknown> | undefine
       fallback !== undefined && isApplicationJson(fallback) && fallback !== "application/json"
         ? fallback
         : undefined,
-    // Keep each URL-encoded form variant's encodings attached to its full media type.
+    // Keep each form variant's encodings attached to its full media type.
     bodyEncodings: content.some((media) => media.encoding)
       ? Object.fromEntries(
           content.flatMap((media) => (media.encoding ? [[media.mediaType, media.encoding]] : [])),

@@ -50,6 +50,11 @@ export function isApplicationJson(mediaType: string): boolean {
   return mediaTypeEssence(mediaType) === "application/json"
 }
 
+/** Whether a media type is `multipart/form-data`, whose parts are named form fields. */
+export function isFormData(mediaType: string): boolean {
+  return mediaTypeEssence(mediaType) === "multipart/form-data"
+}
+
 /** Whether a media type takes JSON: `application/json`, or a wildcard that admits it. */
 export function acceptsJson(mediaType: string): boolean {
   const essence = mediaTypeEssence(mediaType)

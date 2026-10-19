@@ -3,8 +3,8 @@ import { pathToFileURL } from "node:url"
 import type { Diagnostics } from "../shared/diagnostics"
 import { isRecord } from "../shared/object"
 import { appendPointer, parsePointer, readPointer } from "../shared/pointer"
-import type { FetchedDocument } from "./source"
-import { assertAcyclic, fetchDocument, withoutFragment } from "./source"
+import type { DocumentReader, FetchedDocument } from "./source"
+import { assertAcyclic, withoutFragment } from "./source"
 
 type OpenApiVersion = "3.0" | "3.1" | "3.2"
 
@@ -117,6 +117,7 @@ export class DocumentSet {
   constructor(
     entry: LoadedDocument,
     private readonly retrieval: boolean,
+    readonly reader: DocumentReader,
   ) {
     this.entry = entry
     this.register(entry)
@@ -131,13 +132,23 @@ export class DocumentSet {
     if (this.pending.size === 0 || ++this.rounds > MAX_LOAD_ROUNDS) return false
     const uris = [...this.pending]
     this.pending.clear()
-    const fetched = await Promise.all(
-      uris.map((uri) =>
-        fetchDocument(uri).then(
-          (document) => ({ document }),
-          (error: unknown) => ({ error }),
-        ),
-      ),
+    const fetched: Array<{ document: FetchedDocument } | { error: unknown }> = []
+    let cursor = 0
+    const worker = async (): Promise<void> => {
+      while (cursor < uris.length) {
+        const index = cursor++
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- each worker loads one document at a time
+          fetched[index] = { document: await this.reader.read(uris[index]) }
+        } catch (error) {
+          // Cancellation stops every worker; any other failure belongs to its document.
+          this.reader.throwIfAborted()
+          fetched[index] = { error }
+        }
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(this.reader.concurrency, uris.length) }, worker),
     )
     // Registered in the order they were asked for, not as they arrive: when
     // two documents claim one URI, the same one wins every time.
@@ -330,6 +341,7 @@ export async function loadDocuments(
   input: string | URL | object,
   base: string | URL | undefined,
   diagnostics: Diagnostics,
+  reader: DocumentReader,
 ): Promise<DocumentSet | undefined> {
   let uri: string
   let root: unknown
@@ -337,11 +349,12 @@ export async function loadDocuments(
   if (typeof input === "string" || input instanceof URL) {
     uri = sourceUri(input)
     try {
-      const fetched = await fetchDocument(uri)
+      const fetched = await reader.read(uri)
       uri = fetched.uri
       root = fetched.root
       remote = !isFileUri(uri)
     } catch (error) {
+      reader.throwIfAborted()
       diagnostics.error("read-failed", `Cannot read ${uri}: ${errorMessage(error)}`, "#")
       return undefined
     }
@@ -383,6 +396,7 @@ export async function loadDocuments(
   return new DocumentSet(
     createDocument(uri, root, version, remote),
     !inMemory || base !== undefined,
+    reader,
   )
 }
 

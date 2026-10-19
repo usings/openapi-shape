@@ -76,9 +76,16 @@ The media type determines which body values the client accepts and how it sends 
 
 A `Blob`, `FormData`, `URLSearchParams`, buffer, or stream passes through for any media type. `FormData` and `URLSearchParams` supply their own content type. Other ready-made bodies use the explicitly selected media type, or the operation's non-JSON default. Without a label, a `Blob`'s own type applies, including under a wildcard such as `image/*`. Web and Node.js streams use half duplex.
 
-For `application/x-www-form-urlencoded`, field encodings follow the selected media type, including its parameters. Different variants can declare different field encodings.
+For URL-encoded and multipart forms, field encodings follow the selected media type, including its parameters. Different variants can declare different field encodings.
 
-To set a multipart part's content type, such as `application/json`, append a `Blob` with that type or supply your own `FormData`.
+### Multipart parts
+
+For `multipart/form-data`, a field's Encoding Object can change how its parts are sent. Array properties repeat the field and apply it to each item.
+
+- **`contentType`:** one concrete media type other than `text/plain` types each part: values are sent as JSON for a JSON type and as text otherwise, and a `Blob` or buffer takes that type, keeping a `File`'s name. Such a part is a `Blob`, the only `FormData` value with its own type, so it carries a filename (`blob` unless a `File` supplies one), and some servers treat it as an upload. Without a declared type, or with `text/plain`, values other than files remain text fields.
+- **`style`, `explode`, or `allowReserved`:** any of these, even at its default value, serializes the field as a URL-encoded field would, without percent-encoding, and `contentType` no longer applies. Supported styles are `form`, `spaceDelimited`, `pipeDelimited`, and `deepObject`. Such a field is text, so it rejects a `Blob` or buffer at any depth of its arrays and plain objects; send files for it in a ready `FormData`. As OpenAPI 3.0 specifies, 3.0 descriptions apply these fields to URL-encoded forms only.
+
+The generator warns about part headers other than `Content-Type`, nested or positional encodings, unsupported styles, and a `contentType` that is not one concrete media type, such as a list or wildcard, none of which are applied. For a choice of part types, supply a `Blob` of the chosen type or a ready `FormData`. For anything `FormData` cannot express, supply an encoded body with its complete content type, including the boundary.
 
 ### Serialization
 
@@ -88,11 +95,11 @@ Value handling follows these rules:
 
 - `Date` values become ISO strings.
 - Missing, `null`, or `undefined` path parameters reject.
-- Style-based query and form encoding omits `null` and `undefined` fields and array elements. Headers and multipart parts omit nullish values too.
+- Style-based query and form encoding omits `null` and `undefined` fields and array elements. Headers and other multipart parts omit nullish values too.
 - Path and header arrays serialize nullish elements as the text `null` or `undefined`.
-- JSON query parameters and JSON-encoded form fields preserve `null` as the text `null`; `undefined` fields are omitted. JSON content follows JSON serialization rules. A `Blob` is rejected anywhere the client writes text or JSON: inside JSON bodies, form fields, object parts, parameters, and headers.
+- JSON query parameters, JSON-encoded form fields, and JSON-typed multipart parts preserve `null` as the text `null`; `undefined` fields are omitted. JSON content follows JSON serialization rules. A `Blob` is rejected anywhere the client writes text or JSON: inside JSON bodies, form fields, object parts, parameters, and headers.
 
-Values are percent-encoded. Commas used as list delimiters remain literal; space and pipe delimiters are encoded. With `allowReserved`, existing percent-encodings are preserved, and reserved characters remain literal except for:
+Path, query, and URL-encoded form values are percent-encoded. Commas used as list delimiters remain literal; space and pipe delimiters are encoded. With `allowReserved`, existing percent-encodings are preserved, and reserved characters remain literal except for:
 
 - Paths: `?`, `#`, `[`, and `]`.
 - Query parameters and form fields: the same characters, plus `&`, `=`, and `+`.

@@ -44,7 +44,7 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 
 export function isInstance(
   value: unknown,
-  name: "Blob" | "FormData" | "URLSearchParams" | "ReadableStream" | "SharedArrayBuffer",
+  name: "Blob" | "File" | "FormData" | "URLSearchParams" | "ReadableStream" | "SharedArrayBuffer",
 ): boolean {
   const ctor = (globalThis as Record<string, unknown>)[name]
   return typeof ctor === "function" && value instanceof ctor

@@ -2,8 +2,8 @@
 export const CONTRACT_VERSION = 1
 
 /**
- * The runtime details a generated module exports as `contract`. Encodings are listed only where
- * they differ from OpenAPI's defaults.
+ * The runtime details a generated module exports as `contract`. Encodings record deviations from
+ * defaults and explicit multipart serialization styles.
  */
 export interface Contract<Endpoints = unknown> {
   /**
@@ -39,6 +39,9 @@ export interface EndpointContract {
    * `application/json`: the declared one, parameters and all.
    */
   readonly json?: string
-  /** URL-encoded form encodings, by full media type (including parameters), then field. */
+  /**
+   * URL-encoded and multipart form encodings, by full media type (including parameters), then
+   * field.
+   */
   readonly bodyEncodings?: Readonly<Record<string, Readonly<Record<string, Encoding>>>>
 }

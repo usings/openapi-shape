@@ -176,6 +176,30 @@ describe("openapi-shape <source>", () => {
     })
   })
 
+  it("limits document size with --max-document-size, in MiB", async () => {
+    const large = oas("3.1", { info: { title: "x".repeat(1024 * 1024), version: "1" } })
+    await withFiles({ "openapi.json": large }, async (dir) => {
+      const limited = await run(["openapi.json", "--max-document-size", "1"], dir)
+      expect(limited.code).toBe(1)
+      expect(limited.stderr).toContain(
+        "Document is larger than 1048576 bytes; raise the limit with --max-document-size",
+      )
+      const raised = await run(["openapi.json", "--max-document-size=2"], dir)
+      expect(raised).toMatchObject({ code: 0, stderr: "" })
+    })
+  })
+
+  it.each(["0", "-1", "1.5", "1e3", "10MB", "", "9000000000"])(
+    "rejects --max-document-size %j",
+    async (size) => {
+      const result = await run(["a", "--max-document-size", size], ".")
+      expect(result).toMatchObject({
+        code: 1,
+        stderr: `error: --max-document-size must be a positive whole number of MiB, got "${size}"; see openapi-shape --help\n`,
+      })
+    },
+  )
+
   it("requires a source", async () => {
     await expect(runCommand(cli, { rawArgs: [] })).rejects.toThrow(
       "Missing required positional argument: SOURCE",
@@ -196,5 +220,6 @@ describe("openapi-shape <source>", () => {
       "Generate a TypeScript module (types and the client contract) from an OpenAPI 3.0, 3.1, or 3.2 description.",
     )
     expect(usage).toContain("--check")
+    expect(usage).toContain("--max-document-size")
   })
 })

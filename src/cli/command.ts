@@ -16,20 +16,25 @@ export const cli = defineCommand({
       "Generate a TypeScript module (types and the client contract) from an OpenAPI 3.0, 3.1, or 3.2 description.",
   },
   args: {
-    source: {
+    "source": {
       type: "positional",
       description: "File path or URL of a JSON or YAML document",
       required: true,
     },
-    output: {
+    "output": {
       type: "string",
       alias: "o",
       description: "Write to this file, a .ts or .mts module, instead of stdout",
       valueHint: "file",
     },
-    check: {
+    "check": {
       type: "boolean",
       description: "Exit with 1 if --output is not up to date; write nothing",
+    },
+    "max-document-size": {
+      type: "string",
+      description: "Largest document to load, in MiB (1 MiB = 1,048,576 bytes; default 10)",
+      valueHint: "MiB",
     },
   },
   async run({ args }) {
@@ -38,12 +43,21 @@ export const cli = defineCommand({
       return usageError(`--output must be a .ts or .mts module, got ${args.output}`)
     }
 
+    const size = args["max-document-size"]
+    const maxDocumentBytes = size === undefined ? undefined : Number(size) * 1024 * 1024
+    if (
+      size !== undefined &&
+      !(/^[1-9]\d*$/.test(size) && Number.isSafeInteger(maxDocumentBytes))
+    ) {
+      return usageError(`--max-document-size must be a positive whole number of MiB, got "${size}"`)
+    }
+
     const cwd = process.cwd()
     const isUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(args.source)
     const source = isUrl ? args.source : relative(cwd, resolve(cwd, args.source))
     let result
     try {
-      result = await generate(isUrl ? args.source : resolve(cwd, args.source))
+      result = await generate(isUrl ? args.source : resolve(cwd, args.source), { maxDocumentBytes })
     } catch (error) {
       if (!(error instanceof GenerateError)) throw error
       report(error.diagnostics, source, cwd)

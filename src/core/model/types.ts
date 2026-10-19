@@ -68,7 +68,7 @@ export interface Body {
 export interface Media {
   mediaType: string
   type: Type
-  /** Request form bodies: Encoding Objects by property, where they differ from the default. */
+  /** Request form bodies: field encodings, including explicit multipart styles. */
   encoding?: Record<string, Encoding>
 }
 

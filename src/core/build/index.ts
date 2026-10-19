@@ -20,6 +20,8 @@ export async function buildModel(
   documents: DocumentSet,
 ): Promise<{ model: Model; diagnostics: Diagnostics }> {
   for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- abort between complete build rounds
+    await documents.reader.checkpoint()
     const diagnostics = new Diagnostics()
     const model = buildOnce(new BuildContext(documents, diagnostics))
     if (documents.hasPending) {

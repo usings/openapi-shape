@@ -123,11 +123,17 @@ export function formFields(
   return parts.join("&")
 }
 
-/** `[name, value]` pairs for a query parameter or form field, by style, percent-encoded. */
-function formPairs(name: string, value: unknown, encoding: Normalized): Pair[] {
+/** Style-based field pairs, percent-encoded except in multipart bodies. */
+export function formPairs(
+  name: string,
+  value: unknown,
+  encoding: Normalized,
+  multipart = false,
+): Pair[] {
   if (value === undefined) return []
   const { style, explode, contentType } = encoding
-  const enc = (s: string): string => encode(s, encoding.allowReserved ? QUERY_RESERVED : null)
+  const enc = (s: string): string =>
+    multipart ? s : encode(s, encoding.allowReserved ? QUERY_RESERVED : null)
   // JSON null is a value; style-based and other textual fields omit null.
   if (value === null) {
     const essence = contentType === undefined ? "" : mediaTypeEssence(contentType)
@@ -139,8 +145,9 @@ function formPairs(name: string, value: unknown, encoding: Normalized): Pair[] {
     brackets(name, value, pairs)
     return pairs.map(([k, v]) => [k, enc(v)])
   }
-  // Commas stay as they are; a space or pipe must be percent-encoded.
-  const separator = style === "spaceDelimited" ? "%20" : style === "pipeDelimited" ? "%7C" : ","
+  // Commas stay as they are; a space or pipe is encoded like the values.
+  const separator =
+    style === "spaceDelimited" ? enc(" ") : style === "pipeDelimited" ? enc("|") : ","
   if (Array.isArray(value)) {
     const items = value.filter((v) => v != null).map((v) => enc(scalar(v)))
     if (explode) return items.map((item) => [name, item])

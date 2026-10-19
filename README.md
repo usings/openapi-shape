@@ -7,9 +7,10 @@
 
 **OpenAPI-shaped fetch.** Generate a TypeScript module from an OpenAPI 3.0, 3.1, or 3.2 description. Call operations by `"METHOD /path"` with a typed `fetch` client built around standard `Request` and `Response` objects.
 
-- **Web standards.** Send JSON, `FormData`, `Blob`s, and streams. Add middleware for authentication, retries, and logging.
+- **Web standards.** Send JSON, multipart forms with per-part encoding, `Blob`s, and streams. Add middleware for authentication, retries, and logging.
 - **Types for real APIs.** Get named component schemas, typed request inputs, and responses that narrow by HTTP status. Documented compatibility rules handle common OpenAPI quirks.
 - **Small footprint.** One generated `.ts` file and a dependency-free client.
+- **Controlled generation.** Cancel work, bound document loading, and provide a custom loader for authenticated or cached sources.
 - **CI-ready.** Use `--check` to catch outdated generated files.
 
 ## Quick start

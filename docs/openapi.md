@@ -27,6 +27,8 @@ Retrieval follows these boundaries:
 
 ### Processing limits
 
+Loading each local or HTTP(S) document, including external references, has a 30-second deadline and a size limit, 10 MiB by default, and loads run with bounded concurrency. [Loading and cancellation](./cli.md#loading-and-cancellation) describes the limits, how to change them, and how to cancel generation or supply a custom loader.
+
 Parsed objects may share subobjects. Cycle detection checks each distinct object once per traversal and rejects cycles in the in-memory object graph, including those created by recursive YAML aliases. Recursive schemas expressed through `$ref` are supported.
 
 Each `patternProperties` match, including compiling its pattern, has a 100 ms execution limit. A timeout stops generation with an `invalid-document` error that identifies the pattern and property name. No module is returned. The limit applies to each match, not total document loading or generation time.

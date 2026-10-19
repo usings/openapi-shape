@@ -1,13 +1,16 @@
 import { buildModel } from "./core/build"
 import { loadDocuments } from "./core/load/documents"
+import type { LoadingOptions } from "./core/load/source"
+import { DocumentReader } from "./core/load/source"
 import { renderModule } from "./core/render/module"
 import type { Diagnostic } from "./core/shared/diagnostics"
 import { Diagnostics } from "./core/shared/diagnostics"
 import { PatternTimeoutError } from "./core/shared/patterns"
 
+export type { DocumentLoader } from "./core/load/source"
 export type { Diagnostic, DiagnosticCode } from "./core/shared/diagnostics"
 
-export interface GenerateOptions {
+export interface GenerateOptions extends LoadingOptions {
   /**
    * Where an in-memory document lives (file path or URL), so its relative `$ref`s can be resolved.
    * Ignored when `input` is a path or URL.
@@ -42,15 +45,19 @@ export class GenerateError extends Error {
  *
  * `input` is a file path, a `file:`/`http(s):` URL, or an already parsed document. Referenced
  * documents are loaded as needed. Throws {@link GenerateError} when the description cannot be turned
- * into correct types.
+ * into correct types. Cancellation rejects with `signal.reason`; invalid loading limits throw
+ * TypeError.
  */
 export async function generate(
   input: string | URL | object,
   options: GenerateOptions = {},
 ): Promise<GenerateResult> {
+  options.signal?.throwIfAborted()
+  const reader = new DocumentReader(options)
   try {
-    return await run(input, options)
+    return await run(input, options, reader)
   } catch (error) {
+    options.signal?.throwIfAborted()
     // Deeply nested documents can exhaust the stack at any stage.
     if (!(error instanceof RangeError) && !(error instanceof PatternTimeoutError)) throw error
     throw new GenerateError([
@@ -71,12 +78,15 @@ export async function generate(
 async function run(
   input: string | URL | object,
   options: GenerateOptions,
+  reader: DocumentReader,
 ): Promise<GenerateResult> {
   const loading = new Diagnostics()
-  const documents = await loadDocuments(input, options.base, loading)
+  const documents = await loadDocuments(input, options.base, loading, reader)
   if (documents === undefined) throw new GenerateError(loading.list)
   const { model, diagnostics } = await buildModel(documents)
   if (diagnostics.hasErrors) throw new GenerateError(diagnostics.list)
+  await reader.checkpoint()
   const code = renderModule(model)
+  await reader.checkpoint()
   return { code, diagnostics: diagnostics.list }
 }

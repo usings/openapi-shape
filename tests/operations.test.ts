@@ -845,6 +845,9 @@ describe("runtime contract", () => {
         },
       },
       // Two media types and neither takes JSON: the call names one.
+      "POST /items/{id}": {
+        bodyEncodings: { "multipart/form-data": { meta: { contentType: "application/json" } } },
+      },
     })
     // The client sends every request to its baseUrl; the document's servers are documentation.
     expect(result.code).toContain("// Server: https://api.test/v1\n")

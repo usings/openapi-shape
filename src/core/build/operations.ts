@@ -12,7 +12,7 @@ import type {
   Type,
 } from "../model/types"
 import { UNKNOWN } from "../model/types"
-import { classifyMediaType } from "../shared/media"
+import { classifyMediaType, isFormData } from "../shared/media"
 import { isRecord } from "../shared/object"
 import { mergeAnnotations, objectAnnotations, schemaAnnotations } from "./annotations"
 import { typeOfContent } from "./content"
@@ -39,6 +39,8 @@ const DEFAULT_STYLE: Record<Sent, string> = {
 }
 // `deepObject` is defined for explode: true only.
 const EXPLODED_BY_DEFAULT = new Set(["form", "cookie", "deepObject"])
+// The styles a form field serializes in, which the client applies to multipart fields too.
+const FIELD_STYLES = new Set(["form", "spaceDelimited", "pipeDelimited", "deepObject"])
 
 export interface Operations {
   endpoints: Operation[]
@@ -314,7 +316,7 @@ class OperationBuilder {
             this.context,
             this.context.documents.child(at.node, "content", mediaType),
           )
-          const encoding = media && formEncoding(media.node)
+          const encoding = media && this.formEncoding(media.node)
           if (encoding) out.querystring.encoding = encoding
         }
       } else {
@@ -442,7 +444,7 @@ class OperationBuilder {
   private body(node: DocumentNode): Body | undefined {
     const resolved = resolveObject(this.context, node)
     if (resolved === undefined || !isRecord(resolved.node.value)) return undefined
-    const content = this.content(this.context.documents.child(resolved.node, "content"))
+    const content = this.content(this.context.documents.child(resolved.node, "content"), true)
     if (content.length === 0) return undefined
     const body: Body = { required: resolved.node.value.required === true, content }
     const annotations = objectAnnotations({
@@ -453,16 +455,90 @@ class OperationBuilder {
   }
 
   /** Media types and their types, with the Encoding Objects of form content. */
-  private content(node: DocumentNode): Media[] {
+  private content(node: DocumentNode, request = false): Media[] {
     if (!isRecord(node.value)) return []
     return Object.keys(node.value).flatMap((mediaType) => {
       const media = resolveObject(this.context, this.context.documents.child(node, mediaType))
       if (media === undefined) return []
       const out: Media = { mediaType, type: typeOfContent(this.schemas, media.node, mediaType) }
-      const encoding = classifyMediaType(mediaType) === "form" && formEncoding(media.node)
+      // The client encodes multipart fields only for requests, and only named ones (form-data).
+      const multipart = request && isFormData(mediaType)
+      const encoding =
+        multipart || classifyMediaType(mediaType) === "form"
+          ? this.formEncoding(media.node, multipart)
+          : undefined
       if (encoding) out.encoding = encoding
       return [out]
     })
+  }
+
+  /** The Encoding Objects of form content, by property, where they differ from the default. */
+  private formEncoding(
+    media: DocumentNode,
+    multipart = false,
+  ): Record<string, Encoding> | undefined {
+    if (multipart) this.unapplied(media, ["prefixEncoding", "itemEncoding"])
+    const node = this.context.documents.child(media, "encoding")
+    if (!isRecord(node.value)) return undefined
+    const entries: Array<[string, Encoding]> = []
+    for (const [property, value] of Object.entries(node.value)) {
+      if (!isRecord(value)) continue
+      const spec = multipart
+        ? this.partEncoding(this.context.documents.child(node, property), value)
+        : encodingOf(value, "form", true)
+      if (spec) entries.push([property, spec])
+    }
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined
+  }
+
+  /**
+   * A multipart field's encoding, without what FormData cannot send. An explicit style is kept even
+   * at its default, since it overrides `contentType`.
+   */
+  private partEncoding(at: DocumentNode, value: Record<string, unknown>): Encoding | undefined {
+    const nested = ["encoding", "prefixEncoding", "itemEncoding"]
+    // A Content-Type header "SHALL be ignored" here; the field's contentType sets it.
+    const headers =
+      isRecord(value.headers) &&
+      Object.keys(value.headers).some((name) => name.toLowerCase() !== "content-type")
+    this.unapplied(at, headers ? ["headers", ...nested] : nested)
+    // OpenAPI 3.0 applies style, explode, and allowReserved to URL-encoded forms only.
+    const styled = at.document.version !== "3.0"
+    if (styled && typeof value.style === "string" && !FIELD_STYLES.has(value.style)) {
+      this.context.warn(
+        "ignored-field",
+        `Multipart style "${value.style}" is not supported; supply an already encoded body`,
+        at,
+        "style",
+      )
+      return undefined
+    }
+    const spec = encodingOf(styled ? value : { contentType: value.contentType }, "form", true, true)
+    if (spec?.contentType !== undefined && !isConcreteMediaType(spec.contentType)) {
+      this.context.warn(
+        "ignored-field",
+        "Multipart contentType must name one concrete media type for automatic encoding; use a Blob with the selected type or FormData",
+        at,
+        "contentType",
+      )
+      delete spec.contentType
+    }
+    return spec && Object.keys(spec).length > 0 ? spec : undefined
+  }
+
+  /** Report the fields of `node` among `keys`, which FormData cannot send. */
+  private unapplied(node: DocumentNode, keys: string[]): void {
+    if (!isRecord(node.value)) return
+    for (const key of keys) {
+      if (key in node.value) {
+        this.context.warn(
+          "ignored-field",
+          `Multipart ${key} is not applied; supply an already encoded body for this configuration`,
+          node,
+          key,
+        )
+      }
+    }
   }
 
   private responses(node: DocumentNode): Response[] {
@@ -534,15 +610,14 @@ class OperationBuilder {
   }
 }
 
-/** The Encoding Objects of form content, by property, where they differ from the default. */
-function formEncoding(media: DocumentNode): Record<string, Encoding> | undefined {
-  const encoding = isRecord(media.value) ? media.value.encoding : undefined
-  if (!isRecord(encoding)) return undefined
-  const parsed = Object.entries(encoding).flatMap(([property, value]) => {
-    const spec = isRecord(value) ? encodingOf(value, "form", true) : undefined
-    return spec ? [[property, spec]] : []
-  })
-  return parsed.length > 0 ? Object.fromEntries(parsed) : undefined
+/** One media type without wildcards, not a list (a comma inside a quoted parameter aside). */
+function isConcreteMediaType(mediaType: string): boolean {
+  const essence = mediaType.split(";", 1)[0]
+  return (
+    essence.includes("/") &&
+    !essence.includes("*") &&
+    !mediaType.replaceAll(/"(?:[^"\\]|\\.)*"/g, "").includes(",")
+  )
 }
 
 /**
@@ -554,6 +629,7 @@ function encodingOf(
   defaultStyle: string,
   /** For an Encoding Object of a form body. */
   field = false,
+  multipart = false,
 ): Encoding | undefined {
   // A parameter with `content` is serialized as that media type; style does not apply.
   if (!field && isRecord(value.content)) {
@@ -566,6 +642,7 @@ function encodingOf(
     typeof value.explode === "boolean" ? value.explode : EXPLODED_BY_DEFAULT.has(style)
   const allowReserved = value.allowReserved === true
   if (
+    (multipart && ("style" in value || "explode" in value || "allowReserved" in value)) ||
     style !== defaultStyle ||
     explode !== EXPLODED_BY_DEFAULT.has(defaultStyle) ||
     allowReserved
