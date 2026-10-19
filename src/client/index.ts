@@ -70,7 +70,11 @@ export function createClient<Endpoints>(
   contract: Contract<Endpoints>,
   options: ClientOptions = {},
 ): Client<Endpoints> {
-  if (contract?.version !== CONTRACT_VERSION || typeof contract.endpoints !== "object") {
+  if (
+    contract?.version !== CONTRACT_VERSION ||
+    contract.endpoints === null ||
+    typeof contract.endpoints !== "object"
+  ) {
     throw new TypeError(
       `createClient takes a generated contract of format ${CONTRACT_VERSION} as its first argument; regenerate the module with this version of openapi-shape`,
     )

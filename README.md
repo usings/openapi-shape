@@ -44,7 +44,7 @@ The generated module has no imports or runtime dependencies. Its `Endpoints` and
 - **Generator:** Node.js 22 or later.
 - **Client:** a runtime with `fetch` support.
 
-The generated module and client use ES modules. CommonJS is not supported.
+The generated module and client use ES modules. CommonJS is not supported. When updating, see [contract compatibility](./docs/output.md#format-compatibility) for regeneration requirements.
 
 ## Documentation
 

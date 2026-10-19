@@ -412,7 +412,9 @@ describe("request bodies", () => {
       endpoints: {
         "POST /m": {
           query: { j: { contentType: "application/json" } },
-          encoding: { j: { contentType: "application/json" } },
+          bodyEncodings: {
+            "application/x-www-form-urlencoded": { j: { contentType: "application/json" } },
+          },
         },
       },
     })

@@ -42,7 +42,9 @@ export function encodeBody(
     // A string is already encoded.
     if (typeof body === "string") return { body, contentType: label }
     if (!isPlainObject(body)) throw new TypeError("A form body must be an object")
-    return { body: formFields(body, declared?.encoding ?? {}), contentType: label }
+    const encodings = declared?.bodyEncodings
+    const encoding = encodings && Object.hasOwn(encodings, type) ? encodings[type] : undefined
+    return { body: formFields(body, encoding ?? {}), contentType: label }
   }
   if (essence === "multipart/form-data") {
     if (!isPlainObject(body)) throw new TypeError("A multipart/form-data body must be an object")

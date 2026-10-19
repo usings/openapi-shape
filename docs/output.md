@@ -182,9 +182,9 @@ This is OpenAPI 3.0's rule, applied in 3.1+ too ([Following the real API](./open
 - `querystring`: the media type of an OpenAPI 3.2 querystring parameter. Form querystrings instead store their field encodings under `query`.
 - `contentType`: the non-JSON default request media type, when it is the only declared type.
 - `json`: the default `application/json` media type when it has parameters, such as `application/json; charset=utf-8`, used to label encoded JSON when the call omits `contentType`. See [call inputs](./client.md#what-a-call-takes).
-- `encoding`: the Encoding Objects of an `application/x-www-form-urlencoded` body, by field.
+- `bodyEncodings`: the Encoding Objects of `application/x-www-form-urlencoded` bodies, keyed by the full media type (including parameters), then by field. A media type without an entry uses the default field encodings.
 
-`GET` and `HEAD` endpoints have no `contentType`, `json`, or `encoding`: the client sends them without a body.
+`GET` and `HEAD` endpoints have no `contentType`, `json`, or `bodyEncodings`: the client sends them without a body.
 
 The client uses its configured `baseUrl`, rather than the description's [servers](./openapi.md#operations). Credentials come from headers or middleware, cookies are managed by the runtime, and multipart part types come from `FormData`. See the [client guide](./client.md) for request encoding.
 
@@ -192,4 +192,6 @@ The client uses its configured `baseUrl`, rather than the description's [servers
 
 The generated module has no imports. Its contract type carries `Endpoints` through the optional `types` field for inference; that field is absent at runtime. The `version` field identifies the contract format.
 
-Format changes use a new version. A client accepts only formats it supports. A mismatch fails to compile at `createClient`; JavaScript callers receive a runtime error.
+The contract currently uses format 1. Form metadata uses `bodyEncodings`; the previous `encoding` field is no longer read. Regenerate modules that use the previous field when updating the client. `--check` detects affected modules that need regenerating.
+
+A client accepts only format versions it supports. A mismatch fails to compile at `createClient`; JavaScript callers receive a runtime error.

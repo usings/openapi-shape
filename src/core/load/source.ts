@@ -48,12 +48,15 @@ function parseText(text: string, format: TextFormat): unknown {
 /** YAML aliases (and in-memory objects) can form cycles, which no JSON document has. */
 export function assertAcyclic(value: unknown): unknown {
   const stack = new Set<object>()
+  const checked = new Set<object>()
   const visit = (node: unknown): void => {
     if (typeof node !== "object" || node === null) return
     if (stack.has(node)) throw new Error("the document refers to itself (a recursive YAML alias?)")
+    if (checked.has(node)) return
     stack.add(node)
     for (const child of Object.values(node)) visit(child)
     stack.delete(node)
+    checked.add(node)
   }
   visit(value)
   return value

@@ -505,7 +505,8 @@ void async function responseEdgeChecks(): Promise<void> {
   const downloaded = await edge.fetch("GET /download")
   if (downloaded.ok) expectTypeOf(await downloaded.json()).toEqualTypeOf<unknown>()
   const report = await edge.result("GET /report")
-  if (report.error === undefined) expectTypeOf(report.data).toEqualTypeOf<{ rows: number }>()
+  if (report.error === undefined)
+    expectTypeOf(report.data).toEqualTypeOf<{ rows: number } | string | Blob>()
   const bytes = await edge.result("GET /bytes")
   if (bytes.error === undefined) expectTypeOf(bytes.data).toEqualTypeOf<unknown>()
   // HEAD and 204 responses carry nothing, whatever is declared.

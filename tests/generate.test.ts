@@ -16,6 +16,36 @@ async function failureCodes(input: string | object): Promise<string[]> {
 }
 
 describe("generate", () => {
+  it("checks shared objects once and still rejects cycles on later calls", async () => {
+    const visits = { reads: 0 }
+    let shared: Record<string, unknown> = { leaf: "value" }
+    for (let i = 0; i < 30; i++) {
+      const child = shared
+      shared = {
+        a: child,
+        get b() {
+          if (++visits.reads > 100) throw new Error("Repeated traversal of a shared example")
+          return child
+        },
+      }
+    }
+    const document = oas("3.1", {
+      components: {
+        schemas: {
+          S: { type: "string", example: shared },
+        },
+      },
+    })
+    const result = await generate(document)
+    expect(result.code).toContain("export type S = string")
+    expect(result.diagnostics).toStrictEqual([])
+    expect(visits.reads).toBe(30)
+    shared.cycle = shared
+    await expect(generate(document)).rejects.toThrow("the document refers to itself")
+    delete shared.cycle
+    await expect(generate(document)).resolves.toMatchObject({ code: result.code })
+  })
+
   it("stops a pathological pattern match and can generate again after the timeout", async () => {
     const hostile = oas("3.1", {
       components: {

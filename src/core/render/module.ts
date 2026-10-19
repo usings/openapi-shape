@@ -129,10 +129,7 @@ function declare(name: string, declaration: Declaration, context: TypeContext): 
   return `${annotations}export type ${name} = ${renderType(type, context)}`
 }
 
-/**
- * The format of the contract written here, which openapi-shape/client's `Contract` must accept: a
- * change to the format is a new version, in both.
- */
+/** The format version written here must agree with openapi-shape/client's `Contract`. */
 const CONTRACT_VERSION = 1
 
 /**
@@ -180,8 +177,12 @@ function contractEntry(operation: Operation): Record<string, unknown> | undefine
       fallback !== undefined && isApplicationJson(fallback) && fallback !== "application/json"
         ? fallback
         : undefined,
-    // Form fields, as their Encoding Objects say.
-    encoding: content.find((media) => media.encoding)?.encoding,
+    // Keep each URL-encoded form variant's encodings attached to its full media type.
+    bodyEncodings: content.some((media) => media.encoding)
+      ? Object.fromEntries(
+          content.flatMap((media) => (media.encoding ? [[media.mediaType, media.encoding]] : [])),
+        )
+      : undefined,
   }
   for (const key of Object.keys(entry)) if (entry[key] === undefined) delete entry[key]
   return Object.keys(entry).length > 0 ? entry : undefined

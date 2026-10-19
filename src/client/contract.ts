@@ -39,6 +39,6 @@ export interface EndpointContract {
    * `application/json`: the declared one, parameters and all.
    */
   readonly json?: string
-  /** Encoding Objects of a form body, by field. */
-  readonly encoding?: Readonly<Record<string, Encoding>>
+  /** URL-encoded form encodings, by full media type (including parameters), then field. */
+  readonly bodyEncodings?: Readonly<Record<string, Readonly<Record<string, Encoding>>>>
 }

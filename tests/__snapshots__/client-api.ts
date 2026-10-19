@@ -136,10 +136,12 @@ const endpoints = {
   },
   "POST /charges": {
     contentType: "application/x-www-form-urlencoded",
-    encoding: {
-      metadata: { style: "deepObject", explode: true },
-      tags: { style: "deepObject", explode: true },
-      filter: { contentType: "application/json" },
+    bodyEncodings: {
+      "application/x-www-form-urlencoded": {
+        metadata: { style: "deepObject", explode: true },
+        tags: { style: "deepObject", explode: true },
+        filter: { contentType: "application/json" },
+      },
     },
   },
   "GET /files/{names}": {

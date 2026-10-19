@@ -655,7 +655,7 @@ const ENTRY_FIELDS = [
   "headers",
   "contentType",
   "json",
-  "encoding",
+  "bodyEncodings",
 ] as const satisfies ReadonlyArray<keyof EndpointContract>
 const ENCODING_FIELDS = [
   "style",
@@ -679,7 +679,10 @@ function unknownFields(contract: object): string[] {
     for (const [field, value] of Object.entries(fields)) {
       if (!(ENTRY_FIELDS as readonly string[]).includes(field)) out.push(`${endpoint} ${field}`)
       if (typeof value !== "object" || value === null) continue
-      for (const [name, encoding] of Object.entries(value as Record<string, object>)) {
+      const maps = field === "bodyEncodings" ? Object.values(value) : [value]
+      for (const [name, encoding] of maps.flatMap((map) =>
+        Object.entries(map as Record<string, object>),
+      )) {
         for (const key of Object.keys(encoding)) {
           if (!(ENCODING_FIELDS as readonly string[]).includes(key)) {
             out.push(`${endpoint} ${field}.${name}.${key}`)
@@ -833,10 +836,12 @@ describe("runtime contract", () => {
       },
       "PUT /items/{id}": {
         contentType: "application/x-www-form-urlencoded",
-        encoding: {
-          metadata: { style: "deepObject", explode: true },
-          plain: { contentType: "text/plain" },
-          styled: { style: "form", explode: false },
+        bodyEncodings: {
+          "application/x-www-form-urlencoded": {
+            metadata: { style: "deepObject", explode: true },
+            plain: { contentType: "text/plain" },
+            styled: { style: "form", explode: false },
+          },
         },
       },
       // Two media types and neither takes JSON: the call names one.
@@ -866,7 +871,9 @@ describe("runtime contract", () => {
     expect(endpoints).toStrictEqual({
       "POST /r": {
         contentType: "application/x-www-form-urlencoded",
-        encoding: { a: { style: "deepObject", explode: true } },
+        bodyEncodings: {
+          "application/x-www-form-urlencoded": { a: { style: "deepObject", explode: true } },
+        },
       },
     })
     // The types still describe what the API declares.
@@ -902,7 +909,7 @@ describe("runtime contract", () => {
     const code = await gen(doc)
     const { endpoints } = await contractOf(code)
     const post = endpoints["POST /a"]
-    for (const map of [post?.query, post?.encoding]) {
+    for (const map of [post?.query, post?.bodyEncodings?.["application/x-www-form-urlencoded"]]) {
       expect(Object.hasOwn(map ?? {}, "__proto__")).toBe(true)
     }
     await expectPassesTsc(code)

@@ -384,7 +384,15 @@ type Decoded<Shape> = Shape extends { content: infer Content }
   : undefined
 
 type DecodedAs<M extends string, T> =
-  IsJson<M> extends true ? JsonValue<M, T> : Essence<M> extends `text/${string}` ? TextOf<T> : Blob
+  Essence<M> extends "*/*"
+    ? JsonValue<M, T> | string | Blob
+    : Essence<M> extends "application/*"
+      ? JsonValue<M, T> | Blob
+      : IsJson<M> extends true
+        ? JsonValue<M, T>
+        : Essence<M> extends `text/${string}`
+          ? TextOf<T>
+          : Blob
 
 /**
  * JSON is parsed, never a Blob, whatever the schema says; under a wildcard, raw bytes may come
