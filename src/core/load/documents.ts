@@ -19,6 +19,8 @@ interface LoadedDocument {
   version: OpenApiVersion
   /** Retrieved over HTTP(S); such documents may not reference local files. */
   remote: boolean
+  /** The base URI each `$id` resource in it sets, by pointer (3.1+). */
+  bases: Map<string, string>
 }
 
 /** A value inside a document together with the base URI in effect there. */
@@ -58,11 +60,12 @@ const NAME_MAPS = new Set([
   "webhooks",
   "content",
   "encoding",
-  "links",
   "securitySchemes",
 ])
-// Keywords whose values are instance data, never schemas.
-const LITERAL_KEYWORDS = new Set(["example", "examples", "const", "enum", "default"])
+// Name maps whose names (paths, status codes) never start with `x-`: such a key is an extension.
+const EXTENSIBLE_MAPS = new Set(["paths", "responses"])
+// Fields whose values are never schemas: instance data, and Links. Extensions (`x-`) are not either.
+const NO_SCHEMAS = new Set(["example", "examples", "const", "enum", "default", "links"])
 
 const MAX_LOAD_ROUNDS = 64
 
@@ -170,26 +173,22 @@ export class DocumentSet {
     // A schema document's own `$id` sets its base; an OpenAPI document's root has none.
     const root = document.root
     if (document.version !== "3.0" && isRecord(root) && !("openapi" in root)) {
-      if (typeof root.$id === "string") base = withoutFragment(resolveUri(root.$id, base) ?? base)
+      base = resourceBase(document, root, base) ?? base
     }
     return { document, pointer: "", value: root, base }
   }
 
-  /** Child node, tracking `$id` base changes for 3.1+ schemas. */
+  /** Child node, with the base URI of the `$id` resources it is in (3.1+). */
   child(node: DocumentNode, ...segments: Array<string | number>): DocumentNode {
-    let { value, base } = node
+    let { value, pointer, base } = node
     for (const segment of segments) {
       value = readPointer(value, [String(segment)])
-      if (node.document.version !== "3.0" && isRecord(value) && typeof value.$id === "string") {
-        base = withoutFragment(resolveUri(value.$id, base) ?? base)
-      }
+      pointer = appendPointer(pointer, segment)
+      // The index decides which `$id`s start a resource, so that references
+      // never resolve against a base it did not register.
+      base = node.document.bases.get(pointer) ?? base
     }
-    return {
-      document: node.document,
-      pointer: appendPointer(node.pointer, ...segments),
-      value,
-      base,
-    }
+    return { document: node.document, pointer, value, base }
   }
 
   /** Resolve a `$ref` (or `$dynamicRef`, statically) relative to the node it appears in. */
@@ -248,7 +247,7 @@ export class DocumentSet {
       const tokens = parsePointer(pointer)
       const target = tokens && this.child(this.root(resource.document), ...tokens)
       if (target?.value === undefined) return { kind: "error", message: `"${ref}" does not exist` }
-      return { kind: "found", node: { ...target, pointer } }
+      return { kind: "found", node: target }
     }
     const anchored = this.anchors.get(`${docUri}#${fragment}`)
     if (anchored === undefined) return { kind: "error", message: `anchor "${ref}" does not exist` }
@@ -277,55 +276,73 @@ export class DocumentSet {
     const root = this.root(document)
     this.claim(this.resources, document.uri, root)
     this.claim(this.resources, document.base, root)
-    if (document.version !== "3.0") this.indexResources(document, document.root, "", document.base)
+    if (document.version === "3.0") return
+    const owned = this.owns(document.base, document, "")
+    this.indexResources(document, document.root, "", document.base, owned)
   }
 
   /**
-   * Index `$id` resources and `$anchor`/`$dynamicAnchor` names (JSON Schema 2020-12 Core, "Base
-   * URI, Anchors, and Dereferencing").
+   * Index the `$id` resources and `$anchor`/`$dynamicAnchor` names at `value` and below (JSON
+   * Schema 2020-12 Core, "Base URI, Anchors, and Dereferencing"). An anchor belongs to its
+   * resource: one whose URI another claimed first registers none.
    */
   private indexResources(
     document: LoadedDocument,
     value: unknown,
     pointer: string,
     base: string,
-    parentKey?: string,
+    owned: boolean,
   ): void {
-    if (Array.isArray(value)) {
-      value.forEach((item, i) =>
-        this.indexResources(document, item, appendPointer(pointer, i), base),
-      )
-      return
-    }
-    if (!isRecord(value)) return
-    const isNameMap = parentKey !== undefined && NAME_MAPS.has(parentKey)
     let here = base
-    if (!isNameMap) {
-      if (typeof value.$id === "string") {
-        const id = resolveUri(value.$id, base)
-        // A remote document cannot pose as a local file.
-        if (id !== undefined && !(document.remote && isFileUri(id))) {
-          here = withoutFragment(id)
-          this.claim(this.resources, here, { document, pointer, value, base: here })
-        }
+    let ours = owned
+    if (isRecord(value)) {
+      const id = resourceBase(document, value, base)
+      if (id !== undefined) {
+        here = id
+        document.bases.set(pointer, here)
+        this.claim(this.resources, here, { document, pointer, value, base: here })
+        ours = this.owns(here, document, pointer)
       }
       for (const key of ["$anchor", "$dynamicAnchor"]) {
         const anchor = value[key]
-        if (typeof anchor === "string") {
+        if (ours && typeof anchor === "string") {
           this.claim(this.anchors, `${here}#${anchor}`, { document, pointer, value, base: here })
         }
       }
     }
-    for (const [key, child] of Object.entries(value)) {
-      if (!isNameMap && LITERAL_KEYWORDS.has(key)) continue
-      this.indexResources(
-        document,
-        child,
-        appendPointer(pointer, key),
-        here,
-        isNameMap ? undefined : key,
+    this.indexChildren(document, value, pointer, here, ours)
+  }
+
+  /** Index what an array or object holds, but extensions and instance data; `map` names a name map. */
+  private indexChildren(
+    document: LoadedDocument,
+    value: unknown,
+    pointer: string,
+    base: string,
+    owned: boolean,
+    map?: string,
+  ): void {
+    if (Array.isArray(value)) {
+      value.forEach((item, i) =>
+        this.indexResources(document, item, appendPointer(pointer, i), base, owned),
       )
+      return
     }
+    if (!isRecord(value)) return
+    for (const [key, child] of Object.entries(value)) {
+      const at = appendPointer(pointer, key)
+      const extension = key.startsWith("x-") && (map === undefined || EXTENSIBLE_MAPS.has(map))
+      if (extension || (map === undefined && NO_SCHEMAS.has(key))) continue
+      if (map === undefined && NAME_MAPS.has(key)) {
+        this.indexChildren(document, child, at, base, owned, key)
+      } else this.indexResources(document, child, at, base, owned)
+    }
+  }
+
+  /** Whether the resource at `uri` is the one at `pointer` in `document`. */
+  private owns(uri: string, document: LoadedDocument, pointer: string): boolean {
+    const owner = this.resources.get(uri)
+    return owner?.document === document && owner.pointer === pointer
   }
 
   private claim(map: Map<string, DocumentNode>, uri: string, node: DocumentNode): void {
@@ -412,7 +429,23 @@ function createDocument(
     // A remote document cannot pose as a local file.
     if (!(remote && isFileUri(self))) base = self
   }
-  return { uri, base, root, version, remote }
+  return { uri, base, root, version, remote, bases: new Map() }
+}
+
+/**
+ * The base URI the `$id` of `value` sets, where it starts a resource: not where a remote document
+ * would pose as a local file, nor where it names the resource it is in (a bare fragment).
+ */
+function resourceBase(
+  document: LoadedDocument,
+  value: Record<string, unknown>,
+  base: string,
+): string | undefined {
+  if (typeof value.$id !== "string") return undefined
+  const id = resolveUri(value.$id, base)
+  if (id === undefined || (document.remote && isFileUri(id))) return undefined
+  const uri = withoutFragment(id)
+  return uri === base ? undefined : uri
 }
 
 function isFileUri(uri: string): boolean {

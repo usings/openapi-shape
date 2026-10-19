@@ -40,6 +40,9 @@ async function errorsOf(promise: Promise<unknown>): Promise<string[]> {
   return codes(failure.diagnostics.filter((d) => d.severity === "error"))
 }
 
+/** A schema claiming `https://spec.test/<n>.json`, typed apart from the document there. */
+const claims = (n: number) => ({ $id: `https://spec.test/${n}.json`, type: "number" })
+
 describe("references across documents", () => {
   it("loads relative files, naming their definitions", async () => {
     await withFiles(
@@ -154,6 +157,158 @@ describe("references across documents", () => {
         )
       },
     )
+  })
+
+  it("ignores $id and anchors in extensions, instance data, and links", async () => {
+    const calls: string[] = []
+    const api = "https://spec.test/api.json"
+    const doc = oas("3.1", {
+      "x-metadata": claims(0),
+      "paths": {
+        "x-internal": { schema: claims(1) },
+        "/pets": {
+          get: {
+            responses: {
+              "200": { description: "OK", links: { self: { requestBody: claims(2) } } },
+              "x-ext": { content: { "application/json": { schema: claims(3) } } },
+            },
+          },
+        },
+      },
+      "x-defs": {
+        Pet: {
+          $id: "https://other.test/pet.json",
+          type: "object",
+          properties: { tag: { $ref: "#/components/schemas/Tag" } },
+        },
+      },
+      "components": {
+        schemas: {
+          ...Object.fromEntries(
+            [0, 1, 2, 3, 4].map((n) => [`S${n}`, { $ref: `https://spec.test/${n}.json` }]),
+          ),
+          Holder: { "type": "object", "x-shape": claims(4), "default": { $anchor: "held" } },
+          // References inside an extension resolve against the document.
+          Pet: { $ref: "#/x-defs/Pet" },
+          Tag: { type: "integer" },
+        },
+      },
+    })
+    const result = await generate(api, {
+      load: (url) => {
+        calls.push(url)
+        return Response.json(url === api ? doc : { type: "string" })
+      },
+    })
+    expect(calls).toStrictEqual([api, ...[0, 1, 2, 3, 4].map((n) => `https://spec.test/${n}.json`)])
+    for (const n of [0, 1, 2, 3, 4]) expect(declaration(result.code, `S${n}`)).toBe("string")
+    expect(declaration(result.code, "Pet")).toBe("{\n  tag?: Tag\n}")
+  })
+
+  it("moves a document's base only by its own $ids", async () => {
+    const api = "https://spec.test/api.json"
+    const nested = { $id: "lib/", $ref: "#/$defs/S", $defs: { S: { type: "null" } } }
+    const result = await generate(
+      oas("3.1", {
+        paths: { "/a": { get: { responses: { "200": { $ref: "alias.json#/R" } } } } },
+        components: {
+          schemas: {
+            Pet: {
+              type: "object",
+              properties: { t: { $ref: "defs.json#/$defs/T" } },
+              $defs: { "a~b": { type: "object", properties: { p: nested } } },
+            },
+            // A pointer `parsePointer` reads leniently, as the key "a~b".
+            Lib: { $ref: "#/components/schemas/Pet/$defs/a~b" },
+          },
+        },
+      }),
+      {
+        base: api,
+        load: (url) => {
+          if (url !== "https://spec.test/alias.json") {
+            const type = url.startsWith("https://evil.test/") ? "boolean" : "string"
+            return Response.json({ $defs: { T: { type } } })
+          }
+          // Another document at the entry's address, as a redirect leaves it.
+          const response = Response.json({
+            R: { description: "OK" },
+            components: { schemas: { Pet: { $id: "https://evil.test/pet.json" } } },
+          })
+          Object.defineProperty(response, "url", { value: api })
+          return response
+        },
+      },
+    )
+    expect(declaration(result.code, "T")).toBe("string")
+    expect(declaration(result.code, "Lib")).toBe("{\n  p?: S\n}")
+    expect(declaration(result.code, "S")).toBe("null")
+  })
+
+  it("lets an OpenAPI root's $id claim its URI", async () => {
+    const code = await gen(
+      oas("3.1", {
+        $id: "https://root.test/api",
+        components: {
+          schemas: {
+            A: { $ref: "https://root.test/api#/components/schemas/B" },
+            C: { $ref: "https://root.test/api#bee" },
+            B: { $anchor: "bee", type: "string" },
+          },
+        },
+      }),
+    )
+    expect([declaration(code, "A"), declaration(code, "C")]).toStrictEqual(["B", "B"])
+  })
+
+  it("indexes the schemas of documents without an openapi field", async () => {
+    const api = "https://spec.test/api.json"
+    const documents: Record<string, object> = {
+      [api]: oas("3.1", {
+        paths: { "/pets": { $ref: "paths/pets.json" } },
+        components: {
+          schemas: { Pet: { $ref: "common.json#/Pet" } },
+        },
+      }),
+      // A Path Item file, and a file that lists schemas at its top level.
+      "https://spec.test/paths/pets.json": {
+        get: {
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { n: { $ref: "#count" } },
+                    $defs: { N: { $anchor: "count", type: "integer" } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "https://spec.test/common.json": {
+        Pet: {
+          $id: "https://other.test/pet",
+          type: "object",
+          properties: { tag: { $ref: "#/$defs/Tag" } },
+          $defs: { Tag: { type: "integer" } },
+        },
+      },
+    }
+    const calls: string[] = []
+    const result = await generate(api, {
+      load: (url) => {
+        calls.push(url)
+        return Response.json(documents[url])
+      },
+    })
+    expect(calls).not.toContain("https://other.test/pet")
+    expect(declaration(result.code, "Pet")).toBe("{\n  tag?: Tag\n}")
+    expect(entry(result.code, "GET /pets")).toContain("n?: Schemas.N")
+    expect(result.diagnostics).toStrictEqual([])
   })
 })
 
@@ -437,6 +592,36 @@ describe("what a document may reach", () => {
       ),
     )
     expect(results[0]).toBe(results[1])
+  })
+
+  it("keeps a URI's anchors with the document that keeps the URI", async () => {
+    const api = "https://spec.test/api.json"
+    const documents: Record<string, object> = {
+      [api]: oas("3.1", {
+        components: {
+          schemas: {
+            A: { $ref: "a.json" },
+            B: { $ref: "b.json" },
+            Good: { $ref: "https://shared.test/s#good" },
+            Evil: { $ref: "https://shared.test/s#evil" },
+          },
+        },
+      }),
+      "https://spec.test/a.json": {
+        $id: "https://shared.test/s",
+        type: "string",
+        $defs: { g: { $anchor: "good", const: "g" } },
+      },
+      "https://spec.test/b.json": { $id: "https://shared.test/s", $anchor: "evil", type: "number" },
+    }
+    const options = { load: (url: string) => Response.json(documents[url]) }
+    expect(await errorsOf(generate(api, options))).toStrictEqual([
+      "unresolved-ref #/components/schemas/Evil/$ref",
+    ])
+    delete (documents[api] as { components: { schemas: { Evil?: unknown } } }).components.schemas
+      .Evil
+    const { code } = await generate(api, options)
+    expect(declaration(code, "Good")).toBe('"g"')
   })
 
   it("reads sources and schema files however their names are written", async () => {

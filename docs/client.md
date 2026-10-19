@@ -151,7 +151,7 @@ if (error === undefined) {
 
 `data` is the union of decoded bodies for successful statuses; `error` covers the others. Without a declared `default`, undeclared error statuses keep `error` as broad as `{} | null` until a status check narrows it.
 
-The server chooses the response media type. A response declared as both JSON and XML therefore produces `Schemas.Pet | Blob`. For a schema `T`, `application/*` produces `T | Blob`, and `*/*` produces `T | string | Blob`. Narrow these unions before accessing schema properties. Raw bytes declared under these wildcards produce `unknown`, since the actual content type determines decoding. Use `api.fetch()` and `blob()` for downloads.
+The server chooses the response media type. A response declared as both JSON and XML therefore produces `Schemas.Pet | Blob`. For a schema `T`, `application/*` produces `T | Blob`, and `*/*` produces `T | string | Blob`. `text/*` also covers JSON such as `text/json`, so it produces `unknown` unless its schema says which strings. Narrow these unions before accessing schema properties. Raw bytes declared under these wildcards produce `unknown`, since the actual content type determines decoding. Use `api.fetch()` and `blob()` for downloads.
 
 ### Typed responses
 

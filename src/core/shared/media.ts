@@ -55,6 +55,11 @@ export function isFormData(mediaType: string): boolean {
   return mediaTypeEssence(mediaType) === "multipart/form-data"
 }
 
+/** Whether a media type is the range `text/*`, which takes JSON (`text/json`) as well as text. */
+export function isTextRange(mediaType: string): boolean {
+  return mediaTypeEssence(mediaType) === "text/*"
+}
+
 /** Whether a media type takes JSON: `application/json`, or a wildcard that admits it. */
 export function acceptsJson(mediaType: string): boolean {
   const essence = mediaTypeEssence(mediaType)

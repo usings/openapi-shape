@@ -13,7 +13,9 @@ The generator supports OpenAPI 3.0, 3.1, and 3.2. This page describes how descri
 
 ### References
 
-References resolve against the document location, OpenAPI 3.2's `$self`, or the nearest schema `$id` in 3.1+. Targets may use JSON Pointers or `$anchor` names in any document. If multiple documents claim the same URI, the first referenced document keeps it.
+References resolve against the document location, OpenAPI 3.2's `$self`, or the nearest schema `$id` in 3.1+. Targets may use JSON Pointers or `$anchor` names in any document. If multiple documents claim the same URI, the first referenced document keeps it, along with the anchors under that URI.
+
+An `$id` or anchor inside an extension (`x-…`), instance data (`example`, `examples`, `default`, `const`, `enum`), or a Link is ignored: it claims no URI, and references inside it resolve against the base outside it.
 
 Non-schema Reference Objects are supported wherever components can be referenced, including 3.2 media types. In 3.1+, sibling `summary` and `description` fields override the target's annotations.
 
@@ -53,11 +55,12 @@ The generator uses the media type to determine request and response content type
 | Sequences with `itemSchema`: `text/event-stream` and JSON sequences                               | An array of its items                                           |
 | JSON sequences: `application/jsonl`, `application/x-ndjson`, `application/json-seq`, `…+json-seq` | An array of `itemSchema` items, or of `schema` read as the item |
 | Other `text/*`, including `text/event-stream` without `itemSchema`                                | `string`, or the schema's type when it says which strings       |
+| The range `text/*`, which also covers JSON such as `text/json`                                    | The schema's type when it says which strings, else `unknown`    |
 | Anything else: binary, XML, YAML, vendor types                                                    | `Blob`                                                          |
 
 ### Binary content
 
-Raw byte strings become `Blob`: `format: binary`, a binary `contentMediaType` without `contentEncoding`, or Swagger's `type: file`. In multipart content, these values represent file parts. Under `text/*`, they remain strings.
+Raw byte strings become `Blob`: `format: binary`, a binary `contentMediaType` without `contentEncoding`, or Swagger's `type: file`. In multipart content, these values represent file parts. Under a text media type, they remain strings, and under the range `text/*`, `unknown`.
 
 Encoding Objects do not change generated types. See [request bodies](./client.md#request-bodies) for how the client encodes them.
 
@@ -87,6 +90,7 @@ Validation-only keywords such as `minimum`, `pattern`, `uniqueItems`, `contains`
 Discriminators narrow alternatives that the schema leaves open:
 
 - In `oneOf` or `anyOf`, each referenced alternative is intersected with its mapped values, or its component name when no mapping applies. For example: `(Cat & { petType: "cat" }) | (Dog & { petType: "Dog" })`.
+- A mapping value is a URI reference when it contains `/` or `#` or starts with a scheme, such as `urn:cat`; otherwise it is a component name.
 - A component that extends a discriminated schema through `allOf` receives its own values and those of its descendants.
 - Existing string literals on the discriminator property are preserved. Contradictory mappings and non-object alternatives produce a `discriminator-mismatch` warning.
 - Inline alternatives and OpenAPI 3.2's `defaultMapping` target are not narrowed.

@@ -36,6 +36,23 @@ describe("discriminated oneOf/anyOf", () => {
     await expectPassesTsc(code)
   })
 
+  it("maps to absolute URIs such as URNs, and narrows $dynamicRef branches", async () => {
+    const result = await genResult(
+      withSchemas("3.1", {
+        Cat: { $id: "urn:cat", ...object({ kind: { type: "string" } }, ["kind"]) },
+        Dog: object({ kind: { type: "string" } }, ["kind"]),
+        Pet: {
+          oneOf: [{ $ref: "urn:cat" }, { $dynamicRef: "#/components/schemas/Dog" }],
+          discriminator: { propertyName: "kind", mapping: { cat: "urn:cat" } },
+        },
+      }),
+    )
+    expect(declaration(result.code, "Pet")).toBe(
+      '(Cat & { kind: "cat" }) | (Dog & { kind: "Dog" })',
+    )
+    expect(result.diagnostics).toStrictEqual([])
+  })
+
   it("lets the schema's own literals win", async () => {
     const result = await genResult(
       withSchemas("3.1", {

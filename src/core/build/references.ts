@@ -10,6 +10,17 @@ export interface Resolved {
   description?: string
 }
 
+/** A schema's references, `$ref` first; `$dynamicRef` is resolved statically, as if it were `$ref`. */
+export function referencesOf(schema: unknown): Array<["$ref" | "$dynamicRef", string]> {
+  const out: Array<["$ref" | "$dynamicRef", string]> = []
+  if (!isRecord(schema)) return out
+  for (const keyword of ["$ref", "$dynamicRef"] as const) {
+    const ref = schema[keyword]
+    if (typeof ref === "string") out.push([keyword, ref])
+  }
+  return out
+}
+
 /**
  * Follow Reference Objects (`$ref` in a non-schema position) to their target. The target is read as
  * the object type of the referencing position. Returns `undefined` when the reference cannot be

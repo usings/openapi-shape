@@ -11,6 +11,7 @@ import { parsePointer } from "../shared/pointer"
 import { schemaAnnotations } from "./annotations"
 import type { BuildContext } from "./context"
 import { narrowDiscriminated, parentDiscriminators } from "./discriminators"
+import { referencesOf } from "./references"
 
 /** Keywords that change a schema's type. */
 const TYPE_KEYWORDS = new Set([
@@ -147,12 +148,7 @@ export class SchemaBuilder {
       return UNKNOWN
     }
 
-    const parts: Type[] = []
-    if (typeof schema.$ref === "string") parts.push(this.ref(node, schema.$ref, "$ref"))
-    // Resolved statically, as if it were $ref.
-    if (typeof schema.$dynamicRef === "string") {
-      parts.push(this.ref(node, schema.$dynamicRef, "$dynamicRef"))
-    }
+    const parts = referencesOf(schema).map(([keyword, ref]) => this.ref(node, ref, keyword))
     parts.push(this.structure(node, schema))
     const type = intersect(parts)
     // `nullable: true` admits null wherever it appears, as documents mean it.
@@ -164,12 +160,14 @@ export class SchemaBuilder {
     return this.states.get(declaration)
   }
 
-  /** Follow `$ref`s that carry no other type keywords; `undefined` when `node` is not one. */
+  /** Follow references that carry no other type keywords; `undefined` when `node` is not one. */
   aliasTarget(node: DocumentNode, seen = new Set<string>()): DocumentNode | undefined {
     const schema = node.value
-    if (!isRecord(schema) || typeof schema.$ref !== "string") return undefined
-    if (Object.keys(schema).some((k) => k !== "$ref" && TYPE_KEYWORDS.has(k))) return undefined
-    const resolution = this.context.documents.resolve(schema.$ref, node)
+    const references = referencesOf(schema)
+    if (!isRecord(schema) || references.length !== 1) return undefined
+    const [[keyword, ref]] = references
+    if (Object.keys(schema).some((k) => k !== keyword && TYPE_KEYWORDS.has(k))) return undefined
+    const resolution = this.context.documents.resolve(ref, node)
     if (resolution.kind !== "found") return undefined
     const id = identity(resolution.node)
     if (seen.has(id)) return undefined
@@ -423,8 +421,8 @@ export class SchemaBuilder {
     if (!isRecord(schema) || seen.has(identity(node))) return false
     seen.add(identity(node))
     if (schema[keyword] === true) return true
-    if (typeof schema.$ref === "string") {
-      const resolution = this.context.documents.resolve(schema.$ref, node)
+    for (const [, ref] of referencesOf(schema)) {
+      const resolution = this.context.documents.resolve(ref, node)
       if (resolution.kind === "found" && this.flag(resolution.node, keyword, seen)) return true
     }
     return (

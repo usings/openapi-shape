@@ -36,6 +36,8 @@ describe("media types without a schema", () => {
     ["application/problem+json", { schema: {} }, "unknown"],
     ["*/*", {}, "unknown"],
     ["text/plain", {}, "string"],
+    // A `text/*` response may be JSON, such as `text/json`.
+    ["text/*", {}, "unknown"],
     ["image/png", {}, "Blob"],
     ["application/octet-stream", { schema: { description: "annotation only" } }, "Blob"],
     ["application/xml", {}, "Blob"],
@@ -59,6 +61,9 @@ describe("media types with a schema", () => {
     ["text/plain", { oneOf: [{ type: "integer" }, { type: "boolean" }] }, "string"],
     ["text/plain", { enum: ["ok", "no"] }, '"ok" | "no"'],
     ["text/event-stream", { type: "string" }, "string"],
+    // …under `text/*` too, whose JSON the schema types: unknown, where it does not say strings…
+    ["text/*", { enum: ["ok", "no"] }, '"ok" | "no"'],
+    ["text/*", object, "unknown"],
     // …and anything else is raw bytes.
     ["application/xml", object, "Blob"],
     ["application/vnd.github.diff", { type: "string" }, "Blob"],

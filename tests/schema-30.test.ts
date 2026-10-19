@@ -277,4 +277,30 @@ describe("readOnly and writeOnly across schemas", () => {
     expect(declaration(result.code, "UserInput2")).toContain("id?: number")
     expect(codes(result.diagnostics)).toStrictEqual(["renamed-schema #/components/schemas/User"])
   })
+
+  it("follows $dynamicRef to readOnly properties as it follows $ref", async () => {
+    const [dynamic, plain] = await Promise.all(
+      ["$dynamicRef", "$ref"].map((keyword) =>
+        gen(
+          oas("3.1", {
+            paths: post(ref("Pet")),
+            components: {
+              schemas: {
+                Id: { type: "integer", readOnly: true },
+                Base: { type: "object", properties: { tag: { type: "string", readOnly: true } } },
+                Pet: {
+                  type: "object",
+                  required: ["id", "tag"],
+                  properties: { id: { [keyword]: "#/components/schemas/Id" } },
+                  allOf: [{ [keyword]: "#/components/schemas/Base" }],
+                },
+              },
+            },
+          }),
+        ),
+      ),
+    )
+    expect(declaration(dynamic, "PetInput")).toBe("{ id?: Id; tag?: unknown } & Base")
+    expect(dynamic).toBe(plain)
+  })
 })

@@ -1,7 +1,7 @@
 import type { DocumentNode } from "../load/documents"
 import type { Type } from "../model/types"
 import { UNKNOWN } from "../model/types"
-import { classifyMediaType } from "../shared/media"
+import { classifyMediaType, isTextRange } from "../shared/media"
 import { isRecord } from "../shared/object"
 import type { SchemaBuilder } from "./schemas"
 import { describesRawBytes } from "./schemas"
@@ -13,8 +13,9 @@ const STRING: Type = { kind: "string" }
  * The type of one Media Type Object's content, by the class of its media type
  * (`classifyMediaType`): JSON, form, and multipart content is typed by its schema; a sequence
  * (`itemSchema`, or a JSON sequence's `schema`) is an array of its items; other text is a string,
- * or the schema's type when it says which strings; anything else is raw bytes, a `Blob`. A
- * parameter's content is typed by its schema when it is JSON, and as a string otherwise.
+ * or the schema's type when it says which strings (`unknown` under `text/*`, which may be JSON);
+ * anything else is raw bytes, a `Blob`. A parameter's content is typed by its schema when it is
+ * JSON, and as a string otherwise.
  */
 export function typeOfContent(
   schemas: SchemaBuilder,
@@ -55,11 +56,14 @@ export function typeOfContent(
       return { kind: "array", items: schema() }
     case "events":
     case "text":
-      // Text is a string; a schema that says which strings keeps them.
+      // Text is a string; a schema that says which strings keeps them, and
+      // types the JSON that `text/*` may also be (`text/json`) the same.
       return "schema" in media &&
         describesStrings(schemas, schemas.context.documents.child(node, "schema"))
         ? schema()
-        : STRING
+        : isTextRange(mediaType)
+          ? UNKNOWN
+          : STRING
     case "binary":
       return BLOB
   }

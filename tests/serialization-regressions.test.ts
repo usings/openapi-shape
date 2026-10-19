@@ -169,3 +169,47 @@ async function check() {
     }),
   ).toBe("")
 })
+
+/** `text/*` content, with `schema` if given. */
+const textRange = (schema?: object) => ({ "text/*": schema ? { schema } : {} })
+
+it("types a text/* response as JSON or text, and its request body as text", async () => {
+  const { code } = await generate(
+    oas("3.1", {
+      paths: {
+        "/any": {
+          get: { responses: { "200": { description: "OK", content: textRange() } } },
+          post: { requestBody: { content: textRange() }, responses: { "204": {} } },
+        },
+        "/strings": {
+          get: {
+            responses: { "200": { description: "OK", content: textRange({ type: "string" }) } },
+          },
+        },
+      },
+    }),
+  )
+  expect(
+    await typecheck({
+      "api.ts": code,
+      "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const client = createClient(contract)
+async function check() {
+  const any = await client.result("GET /any")
+  if (any.error === undefined) {
+    // @ts-expect-error a text/json response is parsed
+    any.data.toUpperCase()
+    if (typeof any.data === "string") any.data.toUpperCase()
+  }
+  const strings = await client.result("GET /strings")
+  if (strings.error === undefined) strings.data.toUpperCase()
+  await client.result("POST /any", { body: "text" })
+  // @ts-expect-error text is sent as a string
+  await client.result("POST /any", { body: { a: 1 } })
+}
+`,
+    }),
+  ).toBe("")
+})

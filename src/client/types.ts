@@ -231,11 +231,14 @@ type BodyVariant<Content, Default> = {
     : { contentType: M; body: BodyValue<Content, M> }
 }[keyof Content & string]
 
-/** What the client encodes for a media type; others take ready-made bodies. */
+/**
+ * What the client encodes for a media type; others take ready-made bodies. Text is sent as given, a
+ * string, though `text/*` content may also be JSON.
+ */
 type BodyValue<Content, M extends keyof Content & string> =
   IsEncodable<M> extends true
     ?
-        | Content[M]
+        | (Essence<M> extends "text/*" ? TextOf<Content[M]> : Content[M])
         | BodyLike
         | (Essence<M> extends "application/x-www-form-urlencoded" ? string : never)
     : BodyLike | string
@@ -378,7 +381,10 @@ type JsonContent<Content> = {
   [M in keyof Content & string]: IsJson<M> extends true ? Exclude<Content[M], Blob> : never
 }[keyof Content & string]
 
-/** Each media type's content as decoded: JSON as declared, `text/*` as a string, others as a Blob. */
+/**
+ * Each media type's content as decoded: JSON as declared, other text as a string, others as a Blob;
+ * a range as any media type in it.
+ */
 type Decoded<Shape> = Shape extends { content: infer Content }
   ? { [M in keyof Content & string]: DecodedAs<M, Content[M]> }[keyof Content & string]
   : undefined
@@ -390,9 +396,11 @@ type DecodedAs<M extends string, T> =
       ? JsonValue<M, T> | Blob
       : IsJson<M> extends true
         ? JsonValue<M, T>
-        : Essence<M> extends `text/${string}`
-          ? TextOf<T>
-          : Blob
+        : Essence<M> extends "text/*"
+          ? JsonValue<M, T> | TextOf<T>
+          : Essence<M> extends `text/${string}`
+            ? TextOf<T>
+            : Blob
 
 /**
  * JSON is parsed, never a Blob, whatever the schema says; under a wildcard, raw bytes may come

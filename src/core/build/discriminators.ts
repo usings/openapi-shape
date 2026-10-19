@@ -3,6 +3,7 @@ import { componentNameOf, identity } from "../load/nodes"
 import { intersect, literal, union } from "../model/algebra"
 import type { Type } from "../model/types"
 import { isRecord } from "../shared/object"
+import { referencesOf } from "./references"
 import type { SchemaBuilder } from "./schemas"
 
 /**
@@ -25,7 +26,7 @@ export function narrowDiscriminated(
   }
   return types.map((type, i) => {
     const branch = schemas.context.documents.child(node, keyword, i)
-    if (!isRecord(branch.value) || typeof branch.value.$ref !== "string") return type
+    if (referencesOf(branch.value).length === 0) return type
     const chain = refChain(schemas, branch)
     if (chain.length === 0) return type
     const member = {
@@ -98,14 +99,17 @@ function readDiscriminator(schemas: SchemaBuilder, node: DocumentNode): Discrimi
   return out
 }
 
-/** Resolve a mapping value: a component name, or a URI reference when it contains `/` or `#`. */
+/**
+ * Resolve a mapping value: a URI reference when it has a scheme, `/`, or `#`, else a component
+ * name.
+ */
 function mappingTarget(
   schemas: SchemaBuilder,
   at: DocumentNode,
   target: string,
 ): Set<string> | undefined {
   let node: DocumentNode | undefined
-  if (!target.includes("/") && !target.includes("#")) {
+  if (!/^[a-z][a-z\d+.-]*:|[/#]/i.test(target)) {
     const annotations = schemas.context.documents
     for (const document of [at.document, annotations.entry]) {
       const candidate = annotations.child(
@@ -323,19 +327,21 @@ function join(results: Literals[]): Literals {
   return sets.length > 0 ? unionOf(sets) : "not-string"
 }
 
-/** Targets of a chain of `$ref`s starting at `node` (excluding `node`). */
+/** Targets of a chain of references starting at `node` (excluding `node`). */
 function refChain(schemas: SchemaBuilder, node: DocumentNode): DocumentNode[] {
   const out: DocumentNode[] = []
   const seen = new Set<string>()
   let current = node
-  while (isRecord(current.value) && typeof current.value.$ref === "string") {
-    const resolution = schemas.context.documents.resolve(current.value.$ref, current)
+  let reference = referencesOf(current.value)[0]
+  while (reference !== undefined) {
+    const resolution = schemas.context.documents.resolve(reference[1], current)
     if (resolution.kind !== "found") break
     const id = identity(resolution.node)
     if (seen.has(id)) break
     seen.add(id)
     out.push(resolution.node)
     current = resolution.node
+    reference = referencesOf(current.value)[0]
   }
   return out
 }
