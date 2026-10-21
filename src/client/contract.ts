@@ -1,9 +1,9 @@
-/** The format version of the contracts this client reads. */
-export const CONTRACT_VERSION = 1
+/** The only contract format version this client reads. */
+export const CONTRACT_VERSION = 2
 
 /**
  * The runtime details a generated module exports as `contract`. Encodings record deviations from
- * defaults and explicit multipart serialization styles.
+ * defaults, schema-derived form content types, and explicit form serialization styles.
  */
 export interface Contract<Endpoints = unknown> {
   /**
@@ -16,16 +16,18 @@ export interface Contract<Endpoints = unknown> {
   readonly endpoints: { readonly [K in keyof Endpoints]?: EndpointContract }
 }
 
-/** How a value is serialized; absent fields take OpenAPI's defaults. */
+/** How a value is serialized; generated form content types include schema-derived defaults. */
 export interface Encoding {
   readonly style?: string
   readonly explode?: boolean
   readonly allowReserved?: boolean
   /** The media type of a parameter's `content`, or a form field's Encoding Object `contentType`. */
   readonly contentType?: string
+  /** Encode each array item as contentType in a named form field. */
+  readonly repeat?: boolean
 }
 
-/** One endpoint's serialization, where it differs from OpenAPI's defaults. */
+/** One endpoint's parameter encodings, media selection, and form serialization. */
 export interface EndpointContract {
   readonly params?: Readonly<Record<string, Encoding>>
   readonly query?: Readonly<Record<string, Encoding>>

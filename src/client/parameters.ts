@@ -13,6 +13,7 @@ interface Normalized {
   explode: boolean
   allowReserved: boolean
   contentType: string | undefined
+  repeat: boolean
 }
 
 type Pair = [name: string, value: string]
@@ -27,6 +28,7 @@ export function normalize(spec: Encoding | undefined, defaultStyle: string): Nor
     explode: spec?.explode ?? EXPLODED.has(style),
     allowReserved: spec?.allowReserved ?? false,
     contentType: spec?.contentType,
+    repeat: spec?.repeat === true,
   }
 }
 
@@ -108,14 +110,14 @@ export function serializeQuery(query: unknown, declared: EndpointContract | unde
   return formFields(query, declared?.query ?? {})
 }
 
-/** Fields as `name=value&…`, each serialized as its encoding says (OpenAPI default: form, exploded). */
+/** Fields as `name=value&…`, without a content encoding, use the form style, exploded by default. */
 export function formFields(
   fields: Record<string, unknown>,
   encodings: Readonly<Record<string, Encoding>>,
 ): string {
   const parts: string[] = []
   for (const [name, value] of Object.entries(fields)) {
-    const encoding = normalize(encodings[name], "form")
+    const encoding = normalize(Object.hasOwn(encodings, name) ? encodings[name] : undefined, "form")
     for (const [key, encoded] of formPairs(name, value, encoding)) {
       parts.push(`${encodeKey(key)}=${encoded}`)
     }
@@ -139,7 +141,16 @@ export function formPairs(
     const essence = contentType === undefined ? "" : mediaTypeEssence(contentType)
     if (!isJsonEssence(essence) && !isJsonWildcardEssence(essence)) return []
   }
-  if (contentType) return [[name, enc(encodeContent(value, contentType))]]
+  if (contentType) {
+    const values = encoding.repeat && Array.isArray(value) ? value : [value]
+    return values
+      .filter((item) => item !== undefined)
+      .flatMap((item) => {
+        const essence = mediaTypeEssence(contentType)
+        if (item === null && !isJsonEssence(essence) && !isJsonWildcardEssence(essence)) return []
+        return [[name, enc(encodeContent(item, contentType))]]
+      })
+  }
   if (style === "deepObject") {
     const pairs: Pair[] = []
     brackets(name, value, pairs)

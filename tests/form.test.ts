@@ -110,5 +110,5 @@ it("selects form encodings by the full media type and keeps unconfigured variant
     expanded,
     form,
   ])
-  expect(contract.version).toBe(1)
+  expect(contract.version).toBe(2)
 })

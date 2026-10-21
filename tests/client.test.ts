@@ -39,7 +39,7 @@ async function decoded(body: BodyInit | null, type?: string, status = 200): Prom
   const headers = type === undefined ? undefined : { "content-type": type }
   const { client } = recorder<{
     "GET /x": { responses: object }
-  }>({ version: 1, endpoints: {} }, {}, () => new Response(body, { status, headers }))
+  }>({ version: 2, endpoints: {} }, {}, () => new Response(body, { status, headers }))
   const { data, error } = await client.result("GET /x")
   return status < 300 ? data : error
 }
@@ -71,10 +71,17 @@ describe("createClient", () => {
     )
   })
 
-  it("requires a contract of the supported format", () => {
-    for (const given of [undefined, { endpoints: {} }, { version: 2, endpoints: {} }]) {
+  it("requires the current contract format and directs mismatches to regeneration", () => {
+    for (const given of [
+      undefined,
+      null,
+      { endpoints: {} },
+      { version: 1, endpoints: {} },
+      { version: 3, endpoints: {} },
+      { version: "2", endpoints: {} },
+    ]) {
       expect(() => createClient(given as never)).toThrow(
-        "createClient takes a generated contract of format 1 as its first argument",
+        "createClient takes a generated contract of format 2 as its first argument; regenerate the module with this version of openapi-shape",
       )
     }
   })
@@ -90,7 +97,7 @@ describe("building requests", () => {
   it("encodes path parameter values, arrays, and objects", async () => {
     const { client, sent } = recorder<{
       "GET /a/{x}/{y}/{z}": { params: { x: string; y: string[]; z: object }; responses: object }
-    }>({ version: 1, endpoints: {} })
+    }>({ version: 2, endpoints: {} })
     await client.fetch("GET /a/{x}/{y}/{z}", {
       params: { x: "雪/a b", y: ["1", "2"], z: { k: "v w" } },
     })
@@ -112,7 +119,7 @@ describe("building requests", () => {
     async (name) => {
       const { client, sent, requests } = recorder<
         Record<string, { params: Record<string, string>; responses: object }>
-      >({ version: 1, endpoints: {} })
+      >({ version: 2, endpoints: {} })
       const endpoint = `GET /x/{${name}}`
       const inherited = Object.create({ [name]: "inherited" }) as Record<string, string>
       await expect(client.fetch(endpoint, { params: {} })).rejects.toThrow(
@@ -136,7 +143,7 @@ describe("building requests", () => {
   it("serializes the query with form style, exploding arrays and objects", async () => {
     const { client, sent } = recorder<{
       "GET /q?fixed=1": { query: Record<string, unknown>; responses: object }
-    }>({ version: 1, endpoints: { "GET /q?fixed=1": { query: { compact: { explode: false } } } } })
+    }>({ version: 2, endpoints: { "GET /q?fixed=1": { query: { compact: { explode: false } } } } })
     const query = {
       a: [1, null, 2, undefined, 0, false, ""],
       b: null,
@@ -155,7 +162,7 @@ describe("building requests", () => {
   it("serializes sparse deep fields without invoking methods on the input array", async () => {
     const { client, sent } = recorder<{
       "GET /q": { query: Record<string, unknown>; responses: object }
-    }>({ version: 1, endpoints: { "GET /q": { query: { filter: { style: "deepObject" } } } } })
+    }>({ version: 2, endpoints: { "GET /q": { query: { filter: { style: "deepObject" } } } } })
     const items = Object.assign(Array<string | undefined>(4), {
       forEach: () => {
         throw new Error("Do not call a method on the input")
@@ -176,7 +183,7 @@ describe("building requests", () => {
     const { client, sent } = recorder<{
       "GET /q": { query: Record<string, unknown>; responses: object }
     }>({
-      version: 1,
+      version: 2,
       endpoints: {
         "GET /q": {
           query: {
@@ -268,7 +275,7 @@ describe("request bodies", () => {
   it("distinguishes an omitted body from empty text", async () => {
     const { client, sent } = recorder<{
       "POST /text": { body?: { "text/plain": string }; responses: object }
-    }>({ version: 1, endpoints: { "POST /text": { contentType: "text/plain" } } })
+    }>({ version: 2, endpoints: { "POST /text": { contentType: "text/plain" } } })
     await client.fetch("POST /text")
     expect(sent().body).toBeNull()
     expect(sent().headers.has("content-type")).toBe(false)
@@ -302,7 +309,7 @@ describe("request bodies", () => {
   it("encodes multipart bodies as FormData", async () => {
     const { client, sent } = recorder<{
       "POST /m": { body: { "multipart/form-data": Record<string, unknown> }; responses: object }
-    }>({ version: 1, endpoints: { "POST /m": { contentType: "multipart/form-data" } } })
+    }>({ version: 2, endpoints: { "POST /m": { contentType: "multipart/form-data" } } })
     const body = {
       photo: new File(["PNG"], "photo.png", { type: "image/png" }),
       raw: new Blob(["x"]),
@@ -373,7 +380,7 @@ describe("request bodies", () => {
       "POST /x": { body: { "application/xml": { a: string } }; responses: object }
       "POST /t": { body: { "text/plain": string }; responses: object }
     }>({
-      version: 1,
+      version: 2,
       endpoints: {
         "POST /x": { contentType: "application/xml" },
         "POST /t": { contentType: "text/plain" },
@@ -408,7 +415,7 @@ describe("request bodies", () => {
         responses: object
       }
     }>({
-      version: 1,
+      version: 2,
       endpoints: {
         "POST /m": {
           query: { j: { contentType: "application/json" } },
@@ -444,7 +451,7 @@ describe("reserved characters, delimiters, and path segments", () => {
     "GET /files/{path}": { params: { path: string }; responses: object }
     "GET /q": { query: Record<string, unknown>; responses: object }
   }>({
-    version: 1,
+    version: 2,
     endpoints: {
       "GET /files/{path}": {
         params: { path: { style: "simple", explode: false, allowReserved: true } },
@@ -530,7 +537,7 @@ describe("responses", () => {
     expect(await decoded(null, "application/json", 304)).toBeNull()
     // A body where none can be is still consumed, so that the connection is free.
     const { client } = recorder<{ "HEAD /x": { responses: object } }>(
-      { version: 1, endpoints: {} },
+      { version: 2, endpoints: {} },
       {},
       () => new Response("x", { status: 200, headers: { "content-type": "application/json" } }),
     )

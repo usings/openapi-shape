@@ -88,7 +88,7 @@ it("types declared parts and keeps undeclared or text/plain values as text field
   expect(parts.get("plain")).toBe("x")
   expect(parts.getAll("defaults")).toStrictEqual(['{"id":2}', "[1,2]"])
   expect(parts.has("skipped")).toBe(false)
-  expect(contract.version).toBe(1)
+  expect(contract.version).toBe(2)
 })
 
 it("applies explicit styles without percent encoding or contentType, even at default style values", async () => {
@@ -272,7 +272,7 @@ it.each([
 it("treats any style field of a hand-written contract as style-based, ignoring contentType", async () => {
   const requests: Request[] = []
   const contract = {
-    version: 1,
+    version: 2,
     endpoints: {
       "POST /upload": {
         bodyEncodings: {

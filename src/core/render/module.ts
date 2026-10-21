@@ -130,7 +130,7 @@ function declare(name: string, declaration: Declaration, context: TypeContext): 
 }
 
 /** The format version written here must agree with openapi-shape/client's `Contract`. */
-const CONTRACT_VERSION = 1
+const CONTRACT_VERSION = 2
 
 /**
  * How requests go over the wire, for `openapi-shape/client`: each endpoint's serialization and
@@ -146,7 +146,7 @@ function contract(endpoints: Operation[]): string {
   // Typed here, not by openapi-shape/client, so that the module imports nothing:
   // createClient checks it, `version` above all, and infers `Endpoints` from `types`.
   return [
-    "/** Where each endpoint's serialization differs from OpenAPI's defaults. */",
+    "/** Request serialization settings, including schema-derived form defaults. */",
     `const endpoints = ${literal(entries, "", 0, true)} as const`,
     "",
     "/** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */",

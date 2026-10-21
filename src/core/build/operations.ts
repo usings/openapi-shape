@@ -17,6 +17,7 @@ import { isRecord } from "../shared/object"
 import { mergeAnnotations, objectAnnotations, schemaAnnotations } from "./annotations"
 import { typeOfContent } from "./content"
 import type { BuildContext } from "./context"
+import { formContentTypes } from "./form-encoding"
 import type { Resolved } from "./references"
 import { resolveObject } from "./references"
 import type { SchemaBuilder } from "./schemas"
@@ -316,7 +317,7 @@ class OperationBuilder {
             this.context,
             this.context.documents.child(at.node, "content", mediaType),
           )
-          const encoding = media && this.formEncoding(media.node)
+          const encoding = media && this.formEncoding(media.node, false)
           if (encoding) out.querystring.encoding = encoding
         }
       } else {
@@ -468,32 +469,56 @@ class OperationBuilder {
       }
       // The client encodes multipart fields only for requests, and only named ones (form-data).
       const multipart = request && isFormData(mediaType)
-      const encoding =
-        multipart || classifyMediaType(mediaType) === "form"
-          ? this.formEncoding(media.node, multipart)
-          : undefined
-      if (encoding) out.encoding = encoding
+      if (multipart || (request && classifyMediaType(mediaType) === "form")) {
+        const encoding = this.formEncoding(media.node, multipart)
+        if (encoding) out.encoding = encoding
+      }
       return [out]
     })
   }
 
-  /** The Encoding Objects of form content, by property, where they differ from the default. */
+  /** Explicit encodings and schema-derived defaults for each named form property. */
   private formEncoding(
     media: DocumentNode,
-    multipart = false,
+    multipart: boolean,
   ): Record<string, Encoding> | undefined {
     if (multipart) this.unapplied(media, ["prefixEncoding", "itemEncoding"])
     const node = this.context.documents.child(media, "encoding")
-    if (!isRecord(node.value)) return undefined
-    const entries: Array<[string, Encoding]> = []
-    for (const [property, value] of Object.entries(node.value)) {
+    const configured = isRecord(node.value) ? node.value : {}
+    const entries = new Map<string, Encoding>()
+    const styled = new Set<string>()
+    for (const [property, value] of Object.entries(configured)) {
       if (!isRecord(value)) continue
+      if (
+        (!multipart || media.document.version !== "3.0") &&
+        ("style" in value || "explode" in value || "allowReserved" in value)
+      )
+        styled.add(property)
       const spec = multipart
         ? this.partEncoding(this.context.documents.child(node, property), value)
         : encodingOf(value, "form", true)
-      if (spec) entries.push([property, spec])
+      if (spec) entries.set(property, spec)
     }
-    return entries.length > 0 ? Object.fromEntries(entries) : undefined
+    for (const [name, contentType] of formContentTypes(
+      this.context,
+      this.context.documents.child(media, "schema"),
+    )) {
+      if (styled.has(name) || entries.get(name)?.contentType !== undefined) continue
+      if (contentType === undefined) {
+        this.context.warn(
+          "ignored-field",
+          `Cannot determine one default contentType for form field "${name}"; specify encoding.contentType or an explicit style`,
+          media,
+          "schema",
+        )
+        continue
+      }
+      entries.set(name, { contentType })
+    }
+    if (!multipart) {
+      for (const spec of entries.values()) if (spec.contentType !== undefined) spec.repeat = true
+    }
+    return entries.size > 0 ? Object.fromEntries(entries) : undefined
   }
 
   /**

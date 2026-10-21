@@ -651,6 +651,7 @@ const ENCODING_FIELDS = [
   "explode",
   "allowReserved",
   "contentType",
+  "repeat",
 ] as const satisfies ReadonlyArray<keyof Encoding>
 type Lists<T, L extends readonly unknown[]> = [Exclude<keyof T, L[number]>] extends [never]
   ? true
@@ -825,7 +826,7 @@ describe("runtime contract", () => {
         bodyEncodings: {
           "application/x-www-form-urlencoded": {
             metadata: { style: "deepObject", explode: true },
-            plain: { contentType: "text/plain" },
+            plain: { contentType: "text/plain", repeat: true },
             styled: { style: "form", explode: false },
           },
         },

@@ -115,16 +115,25 @@ export namespace Schemas {
   }
 }
 
-/** Where each endpoint's serialization differs from OpenAPI's defaults. */
+/** Request serialization settings, including schema-derived form defaults. */
 const endpoints = {
-  "POST /{dataset}/{version}/records": { contentType: "application/x-www-form-urlencoded" },
+  "POST /{dataset}/{version}/records": {
+    contentType: "application/x-www-form-urlencoded",
+    bodyEncodings: {
+      "application/x-www-form-urlencoded": {
+        criteria: { contentType: "text/plain", repeat: true },
+        start: { contentType: "text/plain", repeat: true },
+        rows: { contentType: "text/plain", repeat: true },
+      },
+    },
+  },
 } as const
 
 /** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */
 export const contract: {
   /** The contract's format; `createClient` refuses one it does not read. */
-  readonly version: 1
+  readonly version: 2
   /** Carries `Endpoints` for `createClient` to infer; never set. */
   readonly types?: Endpoints
   readonly endpoints: typeof endpoints
-} = { version: 1, endpoints }
+} = { version: 2, endpoints }

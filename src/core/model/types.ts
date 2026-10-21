@@ -13,6 +13,8 @@ export interface Model {
 
 /** How a value is serialized, where it differs from OpenAPI's default for its location. */
 export interface Encoding {
+  /** Apply contentType separately to array items in a named form field (contract version 2). */
+  repeat?: boolean
   style?: string
   explode?: boolean
   allowReserved?: boolean

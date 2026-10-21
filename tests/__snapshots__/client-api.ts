@@ -123,10 +123,25 @@ export namespace Schemas {
   }
 }
 
-/** Where each endpoint's serialization differs from OpenAPI's defaults. */
+/** Request serialization settings, including schema-derived form defaults. */
 const endpoints = {
   "PATCH /pets/{id}": { contentType: "application/merge-patch+json" },
-  "POST /token": { contentType: "application/x-www-form-urlencoded" },
+  "POST /upload": {
+    bodyEncodings: {
+      "multipart/form-data": {
+        file: { contentType: "application/octet-stream" },
+        name: { contentType: "text/plain" },
+      },
+    },
+  },
+  "POST /token": {
+    contentType: "application/x-www-form-urlencoded",
+    bodyEncodings: {
+      "application/x-www-form-urlencoded": {
+        grant_type: { contentType: "text/plain", repeat: true },
+      },
+    },
+  },
   "GET /charges": {
     query: {
       created: { style: "deepObject", explode: true },
@@ -140,7 +155,8 @@ const endpoints = {
       "application/x-www-form-urlencoded": {
         metadata: { style: "deepObject", explode: true },
         tags: { style: "deepObject", explode: true },
-        filter: { contentType: "application/json" },
+        filter: { contentType: "application/json", repeat: true },
+        amount: { contentType: "text/plain", repeat: true },
       },
     },
   },
@@ -153,8 +169,8 @@ const endpoints = {
 /** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */
 export const contract: {
   /** The contract's format; `createClient` refuses one it does not read. */
-  readonly version: 1
+  readonly version: 2
   /** Carries `Endpoints` for `createClient` to infer; never set. */
   readonly types?: Endpoints
   readonly endpoints: typeof endpoints
-} = { version: 1, endpoints }
+} = { version: 2, endpoints }

@@ -381,7 +381,7 @@ void function endpointChecks(client: Client<Endpoints>): void {
     "GET /search": { body: { "application/json": { q: string } }; responses: object }
     "TRACE /debug": { responses: object }
     "connect /tunnel": { responses: object }
-  }>({ version: 1, endpoints: {} })
+  }>({ version: 2, endpoints: {} })
   // @ts-expect-error fetch cannot send a body with GET
   void unusual.result("GET /search", { body: { q: "x" } })
   void unusual.result("GET /search")
@@ -399,7 +399,7 @@ void function endpointChecks(client: Client<Endpoints>): void {
         responses: { "200": { content: { "application/json": number } } }
       }
     >
-  >({ version: 1, endpoints: {} })
+  >({ version: 2, endpoints: {} })
   void loose.result("GET /anything")
   void loose.fetch("POST /x")
   const anyEndpoint: string = "POST /x"
@@ -429,7 +429,7 @@ void function endpointChecks(client: Client<Endpoints>): void {
     [endpoint: `${string} /files/${string}`]: Json<{ size: number }>
     [endpoint: string]: Json<unknown>
     "GET /a": Json<{ a: number }>
-  }>({ version: 1, endpoints: {} })
+  }>({ version: 2, endpoints: {} })
   // A template's HEAD has no content, as HEAD has.
   void patterned.result("HEAD /files/x").then(({ data }) => {
     expectTypeOf(data).toEqualTypeOf<undefined>()
@@ -462,9 +462,11 @@ void function clientOptionChecks(): void {
   // @ts-expect-error one signal would cancel every request; a call or the fetch option takes it
   void createClient(contract, { signal: AbortSignal.timeout(10_000) })
   // @ts-expect-error contract entries name declared endpoints
-  void createClient<Endpoints>({ version: 1, endpoints: { "GET /nope": {} } })
-  // @ts-expect-error a contract of another format, from another version of openapi-shape
-  void createClient({ ...contract, version: 2 })
+  void createClient<Endpoints>({ version: 2, endpoints: { "GET /nope": {} } })
+  // @ts-expect-error an older contract must be regenerated
+  void createClient({ ...contract, version: 1 })
+  // @ts-expect-error a newer contract must be regenerated with the installed package
+  void createClient({ ...contract, version: 3 })
 }
 
 void async function fetchTypeChecks(client: Client<Endpoints>): Promise<void> {
@@ -548,7 +550,7 @@ void async function responseEdgeChecks(): Promise<void> {
       responses: { default: { content: { "application/json": Schemas.Error } } }
     }
     "head /x": { responses: { "200": { content: { "application/json": Schemas.Pet } } } }
-  }>({ version: 1, endpoints: {} })
+  }>({ version: 2, endpoints: {} })
   // A wildcard's raw bytes may come labelled as anything; JSON is parsed, never a Blob.
   const download = await edge.result("GET /download")
   if (download.error === undefined) expectTypeOf(download.data).toEqualTypeOf<unknown>()
