@@ -79,8 +79,10 @@ A split task is still one pass over the combined delta. No two agents edit the s
 
 Only what scanning the repo would miss.
 
-- Verify runs `pnpm test --run`, `pnpm typecheck`, `pnpm lint`, and `pnpm format --check`, all of them: they take seconds, and no CI runs them. A pushed `v*` tag (`pnpm release` makes one) publishes to npm, so release only when asked.
-- The generated module is a published format: consumers commit it, and `--check` fails on any byte change. A change to the runtime `contract`'s format bumps `version` in the renderer and in `src/client/contract.ts`, and the client keeps reading older versions. Changing the module is High, and a `!` commit when old output stops compiling or an old contract stops working. `README.md` and `docs/` are its spec and change in the same delta.
-- Update `tests/__snapshots__/` (`-u`) only for an intended output change, and report it as before/after.
-- `src` imports omit extensions, so node cannot run it: to see output, `pnpm build`, then `node dist/cli.mjs <doc> -o <tmp>/out.ts`.
-- oxlint runs without `--type-aware`, so the type-aware rules in `.oxlintrc.json` never fire: follow them by hand.
+- Run `pnpm verify` for tests, type checking, lint, and formatting.
+- Release only when asked: pushing a `v*` tag publishes to npm; `pnpm release` creates one.
+- Generated output is a public format; `--check` compares bytes. Changes are High and update `README.md` and `docs/` together. Use a `!` commit if old output stops compiling or an old contract stops working.
+- Contract format changes bump `version` in the renderer and `src/client/contract.ts`. Accept only that version; mismatches require regeneration with the installed package. Keep no historical readers or compatibility fixtures.
+- Update `tests/__snapshots__/` (`-u`) only for intended output changes; report before/after.
+- Extensionless `src` imports cannot run directly in Node. Use `pnpm build`, then `node dist/cli.mjs <doc> -o <tmp>/out.ts`.
+- oxlint omits `--type-aware`; check those rules in `.oxlintrc.json` manually.
