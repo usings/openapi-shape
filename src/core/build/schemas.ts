@@ -150,9 +150,24 @@ export class SchemaBuilder {
 
     const parts = referencesOf(schema).map(([keyword, ref]) => this.ref(node, ref, keyword))
     parts.push(this.structure(node, schema))
-    const type = intersect(parts)
+    const type = this.intersect(parts, node)
     // `nullable: true` admits null wherever it appears, as documents mean it.
     return schema.nullable === true ? union([type, NULL]) : type
+  }
+
+  /** Normalize an intersection, retaining its source for analysis after references are built. */
+  intersect(members: Type[], at?: DocumentNode | string): Type {
+    const location =
+      typeof at === "string" ? at : at && this.context.documents.locate(at.document, at.pointer)
+    return intersect(members, {
+      location,
+      onWiden: (source) =>
+        this.context.diagnostics.warn(
+          "schema-precision-loss",
+          "The intersection exceeds 10,000 union combinations; its largest unions are widened to keep TypeScript compilable. Split the schema into smaller alternatives to retain precision",
+          source ?? "#",
+        ),
+    })
   }
 
   /** The declaration's source, for diagnostics and discriminators. */
@@ -198,7 +213,10 @@ export class SchemaBuilder {
     // A property one allOf member declares readOnly or writeOnly, and another
     // requires, is required on one side only.
     const sides = Array.isArray(schema.allOf) ? this.memberSides(node) : new Map<string, Side>()
-    return intersect(sides.size === 0 ? parts : parts.map((part) => this.withSides(part, sides)))
+    return this.intersect(
+      sides.size === 0 ? parts : parts.map((part) => this.withSides(part, sides)),
+      node,
+    )
   }
 
   /** The side readOnly/writeOnly properties of the allOf members apply to, by name. */
@@ -245,7 +263,7 @@ export class SchemaBuilder {
     const otherwise = this.type(this.context.documents.child(node, "else"))
     if (!("then" in schema)) return union([condition, otherwise])
     return union([
-      intersect([condition, this.type(this.context.documents.child(node, "then"))]),
+      this.intersect([condition, this.type(this.context.documents.child(node, "then"))], node),
       otherwise,
     ])
   }
@@ -395,7 +413,10 @@ export class SchemaBuilder {
       // A pattern JavaScript cannot evaluate might match: stay wide.
       if (matches.includes(undefined)) type = UNKNOWN
       else if (matches.includes(true))
-        type = intersect(patterns.filter((_, i) => matches[i]).map((p) => p.type))
+        type = this.intersect(
+          patterns.filter((_, i) => matches[i]).map((p) => p.type),
+          node,
+        )
       else if (additional === false) type = NEVER
       else type = additionalType ?? UNKNOWN
       fields.push({ name, type, required: true })

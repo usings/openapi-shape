@@ -305,7 +305,7 @@ class OperationBuilder {
           )
           continue
         }
-        out.querystring = { type: field.type, required: field.required }
+        out.querystring = { type: field.type, required: field.required, location: field.location }
         if (field.annotations) out.querystring.annotations = field.annotations
         const [mediaType] = isRecord(value.content) ? Object.keys(value.content) : []
         if (mediaType !== undefined && classifyMediaType(mediaType) !== "form") {
@@ -344,6 +344,7 @@ class OperationBuilder {
       name: value.name as string,
       type: this.valueType(node, value, "parameter"),
       required: value.in === "path" || value.required === true,
+      location: this.context.documents.locate(node.document, node.pointer),
     }
     if (value.in === "path" && value.required !== true) {
       this.context.warn(
@@ -460,7 +461,11 @@ class OperationBuilder {
     return Object.keys(node.value).flatMap((mediaType) => {
       const media = resolveObject(this.context, this.context.documents.child(node, mediaType))
       if (media === undefined) return []
-      const out: Media = { mediaType, type: typeOfContent(this.schemas, media.node, mediaType) }
+      const out: Media = {
+        mediaType,
+        type: typeOfContent(this.schemas, media.node, mediaType),
+        location: this.context.documents.locate(media.node.document, media.node.pointer),
+      }
       // The client encodes multipart fields only for requests, and only named ones (form-data).
       const multipart = request && isFormData(mediaType)
       const encoding =

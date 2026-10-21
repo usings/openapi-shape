@@ -151,7 +151,7 @@ Where a schema cannot be expressed exactly, the generator generally produces a w
 - **Shape keywords imply a shape.** Without an explicit `type`, object keywords (`properties`, `required`, `additionalProperties`, `patternProperties`) imply an object; `items` and `prefixItems` imply an array. JSON Schema also permits other value types in these cases. In an `allOf` with a definite different type, such as `type: string`, the implied shape gives way. It also gives way to alternatives in a referenced union. Below the first such union, the generator widens to either side, such as `{ b: unknown } | S`, to avoid multiplying alternatives at every level.
 - **Unmentioned properties are assumed absent.** Without `additionalProperties`, objects have no index signature. TypeScript's excess-property and weak-type checks can therefore reject extra properties in object literals. With only `patternProperties`, all extra properties use the pattern schemas' types.
 - **Dynamic references are static.** `$dynamicRef` resolves as `$ref`.
-- **Raw bytes remain `Blob`.** Binary schema values are typed as `Blob` even inside JSON, form fields, and parameters. Those locations carry text, so the client rejects a `Blob` there. The types preserve the document's file declarations.
+- **Raw bytes remain `Blob`.** Binary schema values are typed as `Blob` even inside JSON, form fields, and parameters. Those locations carry text, so the client rejects a `Blob` there. The types preserve the document's file declarations. Generation reports `unsupported-request-encoding` when an endpoint's declared binary values cannot be encoded in their request location; use a textual representation in the description or supply an already encoded body where supported. A top-level ready `Blob` and ordinary multipart file parts remain supported.
 - **Directional requiredness has reference limits.** A property required by a referenced `allOf` member remains required in requests even if another member marks it `readOnly`; the same limit applies to `writeOnly` in responses. A referenced schema's type is not changed for an individual use.
 
 Two additional narrowings come from outside JSON Schema:
@@ -169,7 +169,7 @@ The following constraints are omitted or widened:
 - Key restrictions from `patternProperties` regular expressions.
 - Object closure from `additionalProperties: false`.
 
-To keep output within TypeScript's complexity limits, intersections whose unions would expand beyond 10,000 alternatives widen their largest unions until the expansion fits. This includes unions reached through references or nested intersections. Object unions widen to any object; other unions widen to `unknown`.
+To keep output within TypeScript's complexity limits, intersections whose unions would expand beyond 10,000 alternatives widen their largest unions until the expansion fits. This includes unions reached through references or nested intersections. Object unions widen to any object; other unions widen to `unknown`. A `schema-precision-loss` warning identifies the affected schema so this loss of constraints is visible to callers.
 
 `integer` is represented as `number`.
 

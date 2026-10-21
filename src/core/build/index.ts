@@ -1,10 +1,11 @@
 import type { DocumentSet } from "../load/documents"
-import { intersect, seal, union } from "../model/algebra"
+import { seal, union } from "../model/algebra"
 import type { Declaration, Field, Info, Model, Operation, Type } from "../model/types"
-import { UNKNOWN, childTypes } from "../model/types"
+import { UNKNOWN, TYPE_LOCATION, childTypes } from "../model/types"
 import { Diagnostics } from "../shared/diagnostics"
 import { uniqueName } from "../shared/naming"
 import { isRecord } from "../shared/object"
+import { diagnoseRequestEncodings } from "./content"
 import { BuildContext } from "./context"
 import { applyNarrowing } from "./discriminators"
 import type { Operations } from "./operations"
@@ -47,6 +48,7 @@ function buildOnce(context: BuildContext): Model {
   applyDiscriminators(context, schemas, operations)
   breakDirectCycles(context, schemas)
   normalizeTypes(schemas, operations)
+  diagnoseRequestEncodings(context, operations.endpoints)
   assignInputVariants(context, schemas, operations)
   return { info: readInfo(entry), ...operations, declarations: schemas.declarations }
 }
@@ -63,7 +65,7 @@ function applyDiscriminators(
 ): void {
   const report = (message: string, location: string): void =>
     context.diagnostics.warn("discriminator-mismatch", message, location)
-  transformAll(schemas.declarations, allOperations(operations), (type) =>
+  transformAll(schemas, allOperations(operations), (type) =>
     type.kind === "narrow" ? applyNarrowing(type, report) : type,
   )
 }
@@ -71,7 +73,7 @@ function applyDiscriminators(
 /** With references final, simplify every type again: shapes behind references are known now. */
 function normalizeTypes(schemas: SchemaBuilder, operations: Operations): void {
   seal(schemas.declarations)
-  transformAll(schemas.declarations, allOperations(operations), (type) => type)
+  transformAll(schemas, allOperations(operations), (type) => type)
 }
 
 /**
@@ -120,31 +122,47 @@ function readInfo(entry: Record<string, unknown>): Info {
  * each node through `finish`.
  */
 function transformAll(
-  declarations: Declaration[],
+  schemas: SchemaBuilder,
   operations: Operation[],
   finish: (type: Type) => Type,
 ): void {
   const fields = (list: Field[]): Field[] =>
-    list.map((f) => ({ ...f, type: rebuild(f.type, finish) }))
-  for (const declaration of declarations) declaration.type = rebuild(declaration.type, finish)
+    list.map((f) => ({ ...f, type: rebuild(f.type, finish, schemas, f.location) }))
+  for (const declaration of schemas.declarations) {
+    const source = schemas.stateOf(declaration)?.node
+    const location = source && schemas.context.documents.locate(source.document, source.pointer)
+    declaration.type = rebuild(declaration.type, finish, schemas, location)
+  }
   for (const operation of operations) {
     operation.params = fields(operation.params)
     operation.query = fields(operation.query)
     operation.headers = fields(operation.headers)
     operation.cookies = fields(operation.cookies)
     if (operation.querystring) {
-      operation.querystring.type = rebuild(operation.querystring.type, finish)
+      operation.querystring.type = rebuild(
+        operation.querystring.type,
+        finish,
+        schemas,
+        operation.querystring.location,
+      )
     }
-    for (const media of operation.body?.content ?? []) media.type = rebuild(media.type, finish)
+    for (const media of operation.body?.content ?? [])
+      media.type = rebuild(media.type, finish, schemas, media.location)
     for (const response of operation.responses) {
-      for (const media of response.content) media.type = rebuild(media.type, finish)
+      for (const media of response.content)
+        media.type = rebuild(media.type, finish, schemas, media.location)
       response.headers = fields(response.headers)
     }
   }
 }
 
-function rebuild(type: Type, finish: (type: Type) => Type): Type {
-  const again = (t: Type): Type => rebuild(t, finish)
+function rebuild(
+  type: Type,
+  finish: (type: Type) => Type,
+  schemas: SchemaBuilder,
+  location?: string,
+): Type {
+  const again = (t: Type): Type => rebuild(t, finish, schemas, location)
   switch (type.kind) {
     case "object": {
       const out: Type = {
@@ -165,7 +183,7 @@ function rebuild(type: Type, finish: (type: Type) => Type): Type {
     case "union":
       return finish(union(type.members.map(again)))
     case "intersection":
-      return finish(intersect(type.members.map(again)))
+      return finish(schemas.intersect(type.members.map(again), type[TYPE_LOCATION] ?? location))
     case "narrow":
       return finish({ ...type, type: again(type.type) })
     default:
@@ -208,7 +226,10 @@ function breakDirectCycles(context: BuildContext, schemas: SchemaBuilder): void 
       case "union":
         return union(type.members.map((m) => rewrite(m, owner)))
       case "intersection":
-        return intersect(type.members.map((m) => rewrite(m, owner)))
+        return schemas.intersect(
+          type.members.map((m) => rewrite(m, owner)),
+          type[TYPE_LOCATION],
+        )
       default:
         return type
     }
@@ -220,7 +241,7 @@ function breakDirectCycles(context: BuildContext, schemas: SchemaBuilder): void 
       case "union":
         return union(type.members.map(withoutActive))
       case "intersection":
-        return intersect(type.members.map(withoutActive))
+        return schemas.intersect(type.members.map(withoutActive), type[TYPE_LOCATION])
       default:
         return type
     }

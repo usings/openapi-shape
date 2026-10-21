@@ -18,6 +18,8 @@ export type DiagnosticCode =
   | "circular-schema"
   | "discriminator-mismatch"
   | "renamed-schema"
+  | "schema-precision-loss"
+  | "unsupported-request-encoding"
   // warnings: something not valid
   | "invalid-schema"
   | "invalid-parameter"

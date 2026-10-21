@@ -1,6 +1,6 @@
 import { matchesPattern } from "../shared/patterns"
 import type { Declaration, Field, Literal, Type } from "./types"
-import { NEVER, UNKNOWN } from "./types"
+import { NEVER, UNKNOWN, TYPE_LOCATION } from "./types"
 
 /** Normalized union: flattened, deduplicated, with absorbed members removed. */
 export function union(members: Type[]): Type {
@@ -30,8 +30,13 @@ export function union(members: Type[]): Type {
   return { kind: "union", members: out }
 }
 
+interface IntersectionContext {
+  location?: string
+  onWiden?: (location: string | undefined) => void
+}
+
 /** Normalized intersection: flattened, scalar conflicts resolved, plain objects merged. */
-export function intersect(members: Type[]): Type {
+export function intersect(members: Type[], context?: IntersectionContext): Type {
   const flat: Type[] = []
   for (const member of members) {
     if (member.kind === "intersection") flat.push(...member.members)
@@ -46,6 +51,7 @@ export function intersect(members: Type[]): Type {
   for (;;) {
     const sizes = out.map((t) => expansions(t))
     if (sizes.reduce((n, size) => n * size, 1) <= MAX_COMBINATIONS) break
+    context?.onWiden?.(context.location)
     const largest = sizes.indexOf(Math.max(...sizes))
     // A union of objects widens to any object, which keeps its properties allowed.
     out = out.flatMap((t, i) =>
@@ -70,7 +76,13 @@ export function intersect(members: Type[]): Type {
       )
     })
     if (opaque.length > 0)
-      return union([intersect(out.filter((t) => !opaque.includes(t))), ...opaque])
+      return union([
+        intersect(
+          out.filter((t) => !opaque.includes(t)),
+          context,
+        ),
+        ...opaque,
+      ])
   }
   let lookedThrough = false
   if (implied && !lookingThrough) {
@@ -81,10 +93,10 @@ export function intersect(members: Type[]): Type {
       return behind
     })
   }
-  if (!lookedThrough) return simplify(out, implied)
+  if (!lookedThrough) return simplify(out, implied, context)
   lookingThrough = true
   try {
-    return simplify(out, implied)
+    return simplify(out, implied, context)
   } finally {
     lookingThrough = false
   }
@@ -93,7 +105,7 @@ export function intersect(members: Type[]): Type {
 /** Whether an enclosing `intersect` is distributing a union it looked through a reference for. */
 let lookingThrough = false
 
-function simplify(members: Type[], implied: boolean): Type {
+function simplify(members: Type[], implied: boolean, context?: IntersectionContext): Type {
   let out = members
 
   // `{ a?, b? } & ({ a } | { b })` reads better as `{ a, b? } | { a?, b }`, as long
@@ -111,7 +123,7 @@ function simplify(members: Type[], implied: boolean): Type {
   ) {
     const first = alternatives[0] as Extract<Type, { kind: "union" }>
     const rest = out.filter((t) => t !== first)
-    return union(first.members.map((member) => intersect([...rest, member])))
+    return union(first.members.map((member) => intersect([...rest, member], context)))
   }
 
   // Type-specific keywords without `type` constrain only their own type.
@@ -139,11 +151,15 @@ function simplify(members: Type[], implied: boolean): Type {
     out = out.filter((t) => !isBareObject(t))
 
   const objects = out.filter((t) => t.kind === "object")
-  if (objects.length > 1) out = replaceAll(out, (t) => t.kind === "object", [mergeObjects(objects)])
+  if (objects.length > 1)
+    out = replaceAll(out, (t) => t.kind === "object", [mergeObjects(objects, context)])
 
   const arrays = out.filter((t) => t.kind === "array")
   if (arrays.length > 1) {
-    const items = intersect(arrays.map((t) => (t.kind === "array" ? t.items : UNKNOWN)))
+    const items = intersect(
+      arrays.map((t) => (t.kind === "array" ? t.items : UNKNOWN)),
+      context,
+    )
     const inferred = arrays.every((t) => t.kind === "array" && t.inferred)
     out = replaceAll(out, (t) => t.kind === "array", [
       inferred ? { kind: "array", items, inferred } : { kind: "array", items },
@@ -152,7 +168,11 @@ function simplify(members: Type[], implied: boolean): Type {
 
   if (out.length === 0) return UNKNOWN
   if (out.length === 1) return out[0]
-  return { kind: "intersection", members: out }
+  return {
+    kind: "intersection",
+    members: out,
+    ...(context?.location ? { [TYPE_LOCATION]: context.location } : {}),
+  }
 }
 
 export function literal(value: unknown): Type {
@@ -432,7 +452,7 @@ function intersectTwoScalars(a: Type, b: Type): Type {
   return a
 }
 
-function mergeObjects(objects: Type[]): Type {
+function mergeObjects(objects: Type[], context?: IntersectionContext): Type {
   const members = objects.filter((t): t is Extract<Type, { kind: "object" }> => t.kind === "object")
   const merged = new Map<string, { types: Type[]; field: Field; sides: Field[] }>()
   for (const object of members) {
@@ -456,11 +476,15 @@ function mergeObjects(objects: Type[]): Type {
       if (matches.length > 0) entry.types.push(...matches.map((p) => p.type))
       else if (object.additional) entry.types.push(object.additional)
     }
-    fields.push({ ...entry.field, type: intersect(entry.types), ...requiredness(entry.sides) })
+    fields.push({
+      ...entry.field,
+      type: intersect(entry.types, context),
+      ...requiredness(entry.sides),
+    })
   }
   const out: Type = { kind: "object", fields }
   const additional = members.flatMap((t) => (t.additional ? [t.additional] : []))
-  if (additional.length > 0) out.additional = intersect(additional)
+  if (additional.length > 0) out.additional = intersect(additional, context)
   const patterns = members.flatMap((t) => t.patterns ?? [])
   if (patterns.length > 0) out.patterns = patterns
   if (members.every((t) => t.inferred)) out.inferred = true

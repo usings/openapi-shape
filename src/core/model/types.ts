@@ -44,6 +44,8 @@ export interface Operation {
   query: Field[]
   /** The `in: querystring` parameter (3.2), which describes the whole query string. */
   querystring?: {
+    /** Source location for generation diagnostics; never rendered. */
+    location?: string
     type: Type
     required: boolean
     annotations?: Annotations
@@ -66,6 +68,8 @@ export interface Body {
 }
 
 export interface Media {
+  /** Source location for generation diagnostics; never rendered. */
+  location?: string
   mediaType: string
   type: Type
   /** Request form bodies: field encodings, including explicit multipart styles. */
@@ -82,6 +86,8 @@ export interface Response {
 }
 
 export interface Field {
+  /** Source location for generation diagnostics; never rendered. */
+  location?: string
   name: string
   type: Type
   required: boolean
@@ -111,6 +117,9 @@ export interface Annotations {
 }
 
 export type Literal = string | number | boolean | null | Literal[] | { [key: string]: Literal }
+
+/** Diagnostic provenance is excluded from structural identity and emitted output. */
+export const TYPE_LOCATION: unique symbol = Symbol("schema location")
 
 export type Type =
   | { kind: "unknown" }
@@ -145,7 +154,7 @@ export type Type =
       inferred?: true
     }
   | { kind: "union"; members: Type[] }
-  | { kind: "intersection"; members: Type[] }
+  | { kind: "intersection"; members: Type[]; [TYPE_LOCATION]?: string }
   /**
    * A discriminator's values for `property`, applied to `type` once every declaration is built (the
    * schema's own literals win). Never rendered.
