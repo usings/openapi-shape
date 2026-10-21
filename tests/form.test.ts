@@ -29,7 +29,7 @@ async function generatedClient(document: object) {
       return Promise.resolve(new Response(null, { status: 204 }))
     },
   })
-  return { client, requests, contract }
+  return { client, requests }
 }
 
 it("sends JSON null in query parameters and form fields while omitting absent values", async () => {
@@ -78,7 +78,7 @@ it("selects form encodings by the full media type and keeps unconfigured variant
     type: "object",
     properties: { tags: { type: "array", items: { type: "string" } } },
   }
-  const { client, requests, contract } = await generatedClient(
+  const { client, requests } = await generatedClient(
     oas("3.1", {
       paths: {
         "/form": {
@@ -110,5 +110,4 @@ it("selects form encodings by the full media type and keeps unconfigured variant
     expanded,
     form,
   ])
-  expect(contract.version).toBe(2)
 })

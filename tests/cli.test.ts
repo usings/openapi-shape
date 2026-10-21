@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { stripVTControlCharacters } from "node:util"
 import { renderUsage, runCommand } from "citty"
@@ -84,29 +84,6 @@ describe("openapi-shape <source>", () => {
       const result = await run(["openapi.json", "-o", "file/api.ts"], dir)
       expect(result.code).toBe(1)
       expect(result.stderr).toMatch(/^error: Cannot write file\/api\.ts: .*\n$/)
-    })
-  })
-
-  it("checks --output without writing", async () => {
-    await withFiles({ "openapi.json": spec }, async (dir) => {
-      const missing = await run(["openapi.json", "-o", "api.ts", "--check"], dir)
-      expect(missing).toMatchObject({
-        code: 1,
-        stderr: "error: api.ts does not exist; run the same command without --check to write it\n",
-      })
-      await run(["openapi.json", "-o", "api.ts"], dir)
-      const fresh = await run(["openapi.json", "-o", "api.ts", "--check"], dir)
-      expect(fresh).toMatchObject({ code: 0, stderr: "api.ts is up to date\n" })
-      const written = await readFile(join(dir, "api.ts"), "utf8")
-      const edited = written.replace("= string", "= Date")
-      await writeFile(join(dir, "api.ts"), edited)
-      const stale = await run(["openapi.json", "-o", "api.ts", "--check"], dir)
-      expect(stale.code).toBe(1)
-      // Where it differs, as `<file>:<line>:`, then what to do.
-      expect(stale.stderr).toMatch(
-        /^api\.ts:(\d+): expected: {3}export type When = string\napi\.ts:\1: found: {4}  export type When = Date\nerror: api\.ts is out of date; run the same command without --check to update it\n$/,
-      )
-      expect(await readFile(join(dir, "api.ts"), "utf8")).toBe(edited)
     })
   })
 

@@ -37,11 +37,11 @@ async function generatedClient(content: object) {
       return Promise.resolve(new Response(null, { status: 204 }))
     },
   })
-  return { client, requests, contract }
+  return { client, requests }
 }
 
 it("types declared parts and keeps undeclared or text/plain values as text fields", async () => {
-  const { client, requests, contract } = await generatedClient({
+  const { client, requests } = await generatedClient({
     [multipart]: {
       schema: { type: "object" },
       encoding: {
@@ -88,7 +88,6 @@ it("types declared parts and keeps undeclared or text/plain values as text field
   expect(parts.get("plain")).toBe("x")
   expect(parts.getAll("defaults")).toStrictEqual(['{"id":2}', "[1,2]"])
   expect(parts.has("skipped")).toBe(false)
-  expect(contract.version).toBe(2)
 })
 
 it("applies explicit styles without percent encoding or contentType, even at default style values", async () => {

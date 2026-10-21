@@ -45,12 +45,12 @@ The generated module has no imports or runtime dependencies. Its `Endpoints` and
 - **Generator:** Node.js 22 or later.
 - **Client:** a runtime with `fetch` support.
 
-The generated module and client use ES modules. CommonJS is not supported. The generated contract version must match the client. If they differ, regenerate the module with the installed version of openapi-shape. See [contract compatibility](./docs/output.md#format-compatibility).
+The generated module and client use ES modules. CommonJS is not supported. After upgrading the package, [regenerate the module](./docs/output.md#format-compatibility) with the installed version.
 
 ## Documentation
 
 - [The generated module](./docs/output.md): `Endpoints`, `Webhooks`, `Callbacks`, `Schemas`, and the runtime `contract`.
-- [Client](./docs/client.md): requests, responses, serialization, middleware, and typed wrappers.
+- [Client](./docs/client.md): requests, responses, serialization, and middleware.
 - [OpenAPI support](./docs/openapi.md): supported versions, references, schemas, media types, compatibility rules, and approximations.
 - [CLI and programmatic API](./docs/cli.md): options, `--check`, `generate()`, and diagnostics.
 

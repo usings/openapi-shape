@@ -54,13 +54,13 @@ The second argument combines request options such as `signal`, `cache`, and `kee
 
 This argument is required only when the operation has required inputs. Unknown endpoints produce a compile error on the endpoint argument, whether or not options are supplied.
 
-| Field         | Rule                                                                                                                                                                                                                       |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `params`      | Required when the path has parameters; values must be own properties of `params`, not inherited.                                                                                                                           |
-| `query`       | Required when any query parameter is required.                                                                                                                                                                             |
-| `headers`     | Optional. Object values use the declared parameter types and styles; additional headers are allowed. A `Headers` instance or entries are passed through. Call headers override defaults and the encoded body's media type. |
-| `body`        | Required when the request body is required. Not taken with `GET` or `HEAD`, which `fetch` cannot send a body with.                                                                                                         |
-| `contentType` | The declared media type of `body`. Optional when there is a default: the sole `application/json` entry, including media type parameters, or otherwise the sole declared media type.                                        |
+| Field         | Rule                                                                                                                                                                                                                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `params`      | Required when the path has parameters; values must be own properties of `params`, not inherited.                                                                                                                                                                |
+| `query`       | Required when any query parameter is required.                                                                                                                                                                                                                  |
+| `headers`     | Optional. Object values use the declared parameter types and styles; additional headers are allowed. A `Headers` instance or entries are passed through. Call headers override defaults. `FormData` and `URLSearchParams` always supply their own content type. |
+| `body`        | Required when the request body is required. Not taken with `GET` or `HEAD`, which `fetch` cannot send a body with.                                                                                                                                              |
+| `contentType` | The declared media type of `body`. Optional when there is a default: the sole `application/json` entry, including media type parameters, or otherwise the sole declared media type.                                                                             |
 
 Cookie parameters appear in `Endpoints`, but client calls have no cookie input. Browsers manage cookies; other runtimes can send a `cookie` header.
 
@@ -82,7 +82,7 @@ For URL-encoded and multipart forms, field encodings follow the selected media t
 
 For named schema properties without an explicit style, the generator records their default content types: objects use JSON, primitive values use text, and raw bytes use `application/octet-stream`. Array fields apply the encoding to each item. For example, a URL-encoded object field `meta: { id: 1 }` is sent as `meta=%7B%22id%22%3A1%7D`; an array of objects repeats that field with one JSON value per item. Form `querystring` parameters follow the same rule; ordinary query parameters keep their declared parameter styles.
 
-Defaults follow referenced and composed schemas, retaining `contentEncoding` on array items. A schema without an explicit type defaults to `application/octet-stream`; a constant or inferred shape does not substitute for that declaration. When a named field is absent from another schema alternative, alternatives do not determine one content type, conditional schemas may change its encoding, or inference reaches its recursion or complexity limit, generation warns; specify the field's `encoding.contentType` or an explicit style. Fields not named by the schema retain the client's fallback encoding. Regenerate the module when its contract version differs from the client.
+Defaults follow referenced and composed schemas, retaining `contentEncoding` on array items. A schema without an explicit type defaults to `application/octet-stream`; a constant or inferred shape does not substitute for that declaration. When a named field is absent from another schema alternative, alternatives do not determine one content type, conditional schemas may change its encoding, or inference reaches its recursion or complexity limit, generation warns; specify the field's `encoding.contentType` or an explicit style. Fields not named by the schema retain the client's fallback encoding.
 
 ### Multipart parts
 
@@ -126,7 +126,7 @@ Both calls derive their response types from the operation's declared statuses:
 
 ### Results
 
-`api.result()` reads the response body for every status, allowing the connection to be reused. It decodes the body by `Content-Type`:
+`api.result()` consumes the response body, or cancels it for `HEAD` and bodyless statuses, allowing the connection to be reused. It decodes the body by `Content-Type`:
 
 - JSON (`…/json`, `…+json`): parsed; an empty body, or one of only JSON whitespace (spaces, tabs, line breaks), is no content. A body that does not parse rejects, with the status in the message.
 - Other `text/*`: a string.

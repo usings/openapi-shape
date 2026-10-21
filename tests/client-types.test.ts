@@ -25,7 +25,13 @@ describe("types", () => {
             join(import.meta.dirname, "__snapshots__/client-api.ts"),
             "utf8",
           ),
-          "data.ts": `
+          ...Object.fromEntries(
+            ["whole", "destructured"].map((style) => {
+              const binding = style === "whole" ? "response" : "{ data, error, status }"
+              const field = style === "whole" ? "response." : ""
+              return [
+                `${style}.ts`,
+                `
 import { createClient } from "openapi-shape/client"
 import type { Endpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
 import { contract, type Endpoints } from "./api"
@@ -33,18 +39,26 @@ const { result } = createClient(contract)
 export async function data<K extends Endpoint<Endpoints>>(
   endpoint: K, ...args: EndpointArgs<Endpoints, K>
 ): Promise<EndpointData<Endpoints, K>> {
-  const { data, error, status } = await result(endpoint, ...args)
+  const ${binding} = await result(endpoint, ...args)
   // @ts-expect-error an unchecked result may be a failure
-  const unchecked: EndpointData<Endpoints, K> = data
-  if (error !== undefined) throw new Error(String(status), { cause: error })
-  return data
+  const unchecked: EndpointData<Endpoints, K> = ${field}data
+  // @ts-expect-error an error body is not successful data
+  const wrong: EndpointData<Endpoints, K> = ${field}error
+  if (${field}error !== undefined) throw new Error(String(${field}status), { cause: ${field}error })
+  return ${field}data
 }
 `,
+              ]
+            }),
+          ),
           "use.ts": `
-import { data } from "./data"
+import { data } from "./destructured"
+import { data as whole } from "./whole"
 async function run() {
   const pet = await data("GET /pets/{id}", { params: { id: 1 } })
   if (!(pet instanceof Blob)) pet.id satisfies number
+  const other = await whole("GET /pets/{id}", { params: { id: 1 } })
+  if (!(other instanceof Blob)) other.id satisfies number
   // @ts-expect-error the wrapper preserves required parameters
   await data("GET /pets/{id}")
   // @ts-expect-error another endpoint's inputs do not become legal through a wrapper
@@ -251,45 +265,6 @@ async function use() {
     expect(diagnostics.match(/error TS2345/g)).toHaveLength(4)
     expect(diagnostics).toContain(`Argument of type '"GET /nope"'`)
     expect(diagnostics).not.toContain("Expected 2 arguments")
-  })
-
-  it("checks both generic wrapper forms and rejects unchecked results", async () => {
-    const uses = ["destructured", "whole"].map((style) => {
-      const binding = style === "whole" ? "result" : "{ data, error }"
-      const field = style === "whole" ? "result." : ""
-      return [
-        `${style}.ts`,
-        [
-          'import type { Endpoint, EndpointArgs, EndpointData } from "openapi-shape/client"',
-          'import { createClient } from "openapi-shape/client"',
-          'import type { Endpoints } from "./api"',
-          'import { contract } from "./api"',
-          "const api = createClient(contract)",
-          "type Data<K extends Endpoint<Endpoints>> = Promise<EndpointData<Endpoints, K>>",
-          "type Args<K extends Endpoint<Endpoints>> = EndpointArgs<Endpoints, K>",
-          "export async function data<K extends Endpoint<Endpoints>>(e: K, ...a: Args<K>): Data<K> {",
-          `  const ${binding} = await api.result(e, ...a)`,
-          "  // @ts-expect-error data of a failure, which is undefined",
-          `  return ${field}data`,
-          "}",
-          "export async function error<K extends Endpoint<Endpoints>>(e: K, ...a: Args<K>): Data<K> {",
-          `  const ${binding} = await api.result(e, ...a)`,
-          "  // @ts-expect-error the error body",
-          `  return ${field}error`,
-          "}",
-          "export async function checked<K extends Endpoint<Endpoints>>(e: K, ...a: Args<K>): Data<K> {",
-          `  const ${binding} = await api.result(e, ...a)`,
-          `  if (${field}error !== undefined) throw new Error('request failed')`,
-          `  return ${field}data`,
-          "}",
-        ].join("\n"),
-      ]
-    })
-    const result = await typecheck({
-      "api.ts": await readFile(join(import.meta.dirname, "__snapshots__/client-api.ts"), "utf8"),
-      ...Object.fromEntries(uses),
-    })
-    expect(result).toBe("")
   })
 
   it.each(["dom", "node"] as const)(

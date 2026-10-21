@@ -81,7 +81,6 @@ it.each(["3.0", "3.1", "3.2"] as const)(
         ).toStrictEqual(['{"id":2}', '{"id":3}'])
         expect(await (parts.get("nested") as Blob).text()).toBe("[4,5]")
         expect(parts.getAll("tags")).toStrictEqual(["a", "b"])
-        expect(contract.version).toBe(2)
       }),
     )
   },
