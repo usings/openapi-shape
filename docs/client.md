@@ -46,6 +46,8 @@ Both calls accept the same arguments and resolve for any HTTP status, including 
 
 Use `result` for decoded data, or `fetch` to [read the response yourself](#typed-responses).
 
+For typed wrappers, `openapi-shape/client` exports `Endpoint<Endpoints>` for callable endpoint keys, `EndpointArgs<Endpoints, K>` for arguments and their requiredness, and `EndpointData<Endpoints, K>` for decoded success data.
+
 ### What a call takes
 
 The second argument combines request options such as `signal`, `cache`, and `keepalive` with the operation's typed inputs below. The endpoint determines `method`; the client types `headers` and `body` from the operation.
@@ -242,44 +244,3 @@ A middleware may forward a different request, return a response without calling 
 Put static credentials in the client's `headers` defaults. Use middleware when credentials need to be refreshed for each request.
 
 Set timeouts in middleware or a call's `signal`. Client-wide options exclude `signal`: sharing one timeout signal across all requests would cancel every request after it expires.
-
-## Passing calls on
-
-Use `Endpoint`, `EndpointArgs`, and `EndpointData` to preserve types in wrappers:
-
-- `Endpoint<Endpoints>` selects a callable endpoint.
-- `EndpointArgs<Endpoints, K>` carries that endpoint's arguments and requiredness.
-- `EndpointData<Endpoints, K>` describes its decoded success data.
-
-The following wrapper builds query options for a consumer such as TanStack Query. It throws for HTTP errors so the consumer treats the query as failed:
-
-```ts
-import type { Endpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
-import { createClient } from "openapi-shape/client"
-import type { Endpoints } from "./api"
-import { contract } from "./api"
-
-const api = createClient(contract, { baseUrl: "https://api.example.com/v1" })
-
-export function query<K extends Endpoint<Endpoints>>(
-  endpoint: K,
-  ...args: EndpointArgs<Endpoints, K>
-) {
-  return {
-    queryKey: [endpoint, ...args] as const,
-    queryFn: async (): Promise<EndpointData<Endpoints, K>> => {
-      const result = await api.result(endpoint, ...args)
-      if (result.error !== undefined) {
-        throw new Error(`${endpoint} answered ${result.status}`, { cause: result.error })
-      }
-      return result.data
-    },
-  }
-}
-
-const pet = await query("GET /pets/{petId}", { params: { petId: 1 } }).queryFn() // Schemas.Pet
-```
-
-Checking `error` narrows `data` to `EndpointData<Endpoints, K>`, even when `K` is generic and the result is destructured. Returning unchecked data or an error body fails to compile when it could violate that return type. Each caller receives the data type for its selected endpoint.
-
-Each call must select a single endpoint. Handwritten `Endpoints` maps can also use string or template index signatures. A literal key such as `"HEAD /health"` supplies the method used to determine its body and response types.
