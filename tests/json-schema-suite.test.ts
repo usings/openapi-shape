@@ -22,16 +22,12 @@ interface Group {
   tests: Array<{ description: string; data: unknown; valid: boolean }>
 }
 
-/** Groups that need the suite's remote documents (served at localhost:1234 by suite runners). */
-const NEEDS_REMOTES = new Set([
-  "dynamicRef.json / strict-tree schema, guards against misspelled properties",
-  "dynamicRef.json / tests for implementation dynamic anchor and reference link",
-  "dynamicRef.json / $ref and $dynamicAnchor are independent of order - $defs first",
-  "dynamicRef.json / $ref and $dynamicAnchor are independent of order - $ref first",
-  "dynamicRef.json / $ref to $dynamicRef finds detached $dynamicAnchor",
-  // These reference the draft 2020-12 metaschema at json-schema.org.
-  "ref.json / remote ref, containing refs itself",
-])
+/** Offline resources retain their original retrieval URIs and reference bases. */
+const REMOTES = join(DIR, "remotes")
+const SOURCES = JSON.parse(readFileSync(join(REMOTES, "sources.json"), "utf8")) as Record<
+  string,
+  { file: string; source: string; sha256: string }
+>
 
 /**
  * Valid instances knowingly rejected, with the reason. Each is a documented approximation (see
@@ -90,6 +86,72 @@ const KNOWN: Record<string, string> = {
 }
 
 describe("JSON Schema Test Suite (draft 2020-12)", () => {
+  it("rejects invalid instances for constraints TypeScript can express", async () => {
+    // Explicit groups: integer precision, object exactness and validation-only constraints
+    // cannot be tested as if TypeScript were a JSON Schema validator.
+    const exact = new Set([
+      "type.json / number type matches numbers",
+      "type.json / string type matches strings",
+      "type.json / array type matches arrays",
+      "type.json / boolean type matches booleans",
+      "type.json / null type matches only the null object",
+      "type.json / type as array with one item",
+      "const.json / const validation",
+      "const.json / const with null",
+      "const.json / const with false does not match 0",
+      "const.json / const with true does not match 1",
+      "const.json / nul characters in strings",
+      "const.json / characters with the same visual representation but different codepoint",
+      "const.json / characters with the same visual representation, but different number of codepoints",
+      "enum.json / simple enum validation",
+      "enum.json / heterogeneous enum-with-null validation",
+      "enum.json / enum with escaped characters",
+      "enum.json / empty enum",
+      "required.json / required validation",
+      "required.json / required with escaped characters",
+      "items.json / items with boolean schema (false)",
+      "items.json / prefixItems with no additional items allowed",
+      "items.json / items with heterogeneous array",
+      "prefixItems.json / prefixItems with boolean schemas",
+      "boolean_schema.json / boolean schema 'false'",
+    ])
+    const schemas: Record<string, unknown> = {}
+    const checks: string[] = []
+    const found = new Set<string>()
+    for (const file of readdirSync(DIR)
+      .filter((name) => name.endsWith(".json"))
+      .toSorted()) {
+      const groups = JSON.parse(readFileSync(join(DIR, file), "utf8")) as Group[]
+      for (const group of groups) {
+        const id = `${file} / ${group.description}`
+        if (!exact.has(id)) continue
+        found.add(id)
+        const name = `S${found.size}`
+        schemas[name] = group.schema
+        for (const test of group.tests) {
+          if (test.valid) continue
+          checks.push(
+            `export const c${checks.length}: [${literalType(test.data)}] extends [Schemas.${name}] ? false : true = true // ${id} / ${test.description}`,
+          )
+        }
+      }
+    }
+    expect(found).toStrictEqual(exact)
+    expect(checks.length).toBeGreaterThan(50)
+    const { code, diagnostics } = await generate({
+      openapi: "3.1.0",
+      info: { title: "Representable constraints", version: "1" },
+      components: { schemas },
+    })
+    expect(diagnostics).toStrictEqual([])
+    expect(
+      await typecheck({
+        "api.ts": code,
+        "checks.ts": `import type { Schemas } from "./api"\n${checks.join("\n")}`,
+      }),
+    ).toBe("")
+  })
+
   it("accepts every valid instance", { timeout: 120_000 }, async () => {
     const files: Record<string, unknown> = {}
     const checks: Array<{ id: string; schema: number; type: string }> = []
@@ -101,7 +163,6 @@ describe("JSON Schema Test Suite (draft 2020-12)", () => {
           group,
         })),
       )
-      .filter(({ file, group }) => !NEEDS_REMOTES.has(`${file} / ${group.description}`))
 
     groups.forEach(({ file, group }, index) => {
       files[`s${index}.json`] = group.schema
@@ -122,7 +183,17 @@ describe("JSON Schema Test Suite (draft 2020-12)", () => {
       components: { schemas },
     }
     const code = await withFiles(files as Record<string, object>, async (dir) => {
-      const result = await generate(doc, { base: join(dir, "openapi.json") })
+      const result = await generate(doc, {
+        base: join(dir, "openapi.json"),
+        load: (uri) => {
+          if (uri.startsWith("file:")) return undefined
+          const source = SOURCES[uri]
+          if (!source) throw new Error(`Unmapped suite resource: ${uri}`)
+          return new Response(readFileSync(join(REMOTES, source.file), "utf8"), {
+            headers: { "content-type": "application/schema+json" },
+          })
+        },
+      })
       return result.code
     })
 

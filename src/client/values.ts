@@ -1,8 +1,8 @@
 /** Lowercased `type/subtype` without parameters. */
 export function mediaTypeEssence(mediaType: string): string {
   // Only spaces and tabs surround it (RFC 9110, OWS), as the client's types trim them.
-  return mediaType
-    .split(";", 1)[0]
+  const parameters = mediaType.indexOf(";")
+  return (parameters === -1 ? mediaType : mediaType.slice(0, parameters))
     .replaceAll(/^[ \t]+|[ \t]+$/g, "")
     .toLowerCase()
 }

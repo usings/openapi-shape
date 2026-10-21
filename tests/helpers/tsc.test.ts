@@ -22,6 +22,34 @@ vi.mock("node:child_process", () => ({
 }))
 
 describe("typecheck", () => {
+  it("reports compiler metrics without hiding type errors", async () => {
+    const metrics = vi.fn<(summary: string) => void>()
+    compiler.error = Object.assign(new Error("tsc failed"), { code: 2, cmd: "tsc" })
+    compiler.stdout =
+      "use.ts(1,1): error TS2322: incompatible type\nFiles: 9\nTypes: 42\nInstantiations: 7\nMemory used: 123K\nCheck time: 0.01s\n"
+    compiler.stderr = ""
+    expect(await typecheck({ "use.ts": "const value: string = 1" }, { metrics })).toBe(
+      "use.ts(1,1): error TS2322: incompatible type",
+    )
+    expect(metrics).toHaveBeenCalledWith(
+      "Files: 9\nTypes: 42\nInstantiations: 7\nMemory used: 123K\nCheck time: 0.01s",
+    )
+    compiler.stdout = "Files: 9\nTypes: 42\n"
+    await expect(typecheck({ "use.ts": "const value = 1" }, { metrics })).rejects.toThrow(
+      "tsc did not check the files",
+    )
+    compiler.stderr = "error TS9999: a compiler error on stderr\n"
+    expect(await typecheck({ "use.ts": "const value = 1" }, { metrics })).toBe(
+      "error TS9999: a compiler error on stderr",
+    )
+    compiler.error = null
+    compiler.stdout = ""
+    compiler.stderr = ""
+    await expect(typecheck({ "use.ts": "const value = 1" }, { metrics })).rejects.toThrow(
+      "tsc did not report extended diagnostics",
+    )
+  })
+
   it.each([0, 1, 2])("returns compiler diagnostics for exit code %i", async (code) => {
     compiler.error =
       code === 0 ? null : Object.assign(new Error("tsc failed"), { code, cmd: "tsc" })

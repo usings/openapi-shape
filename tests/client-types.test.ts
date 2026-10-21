@@ -17,6 +17,49 @@ import { contract } from "./__snapshots__/client-api"
 import { expectPassesTsc, typecheck } from "./helpers/tsc"
 
 describe("types", () => {
+  it("keeps endpoint correlations through cross-file wrappers under stricter optional and index checks", async () => {
+    expect(
+      await typecheck(
+        {
+          "api.ts": await readFile(
+            join(import.meta.dirname, "__snapshots__/client-api.ts"),
+            "utf8",
+          ),
+          "data.ts": `
+import { createClient } from "openapi-shape/client"
+import type { Endpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
+import { contract, type Endpoints } from "./api"
+const { result } = createClient(contract)
+export async function data<K extends Endpoint<Endpoints>>(
+  endpoint: K, ...args: EndpointArgs<Endpoints, K>
+): Promise<EndpointData<Endpoints, K>> {
+  const { data, error, status } = await result(endpoint, ...args)
+  // @ts-expect-error an unchecked result may be a failure
+  const unchecked: EndpointData<Endpoints, K> = data
+  if (error !== undefined) throw new Error(String(status), { cause: error })
+  return data
+}
+`,
+          "use.ts": `
+import { data } from "./data"
+async function run() {
+  const pet = await data("GET /pets/{id}", { params: { id: 1 } })
+  if (!(pet instanceof Blob)) pet.id satisfies number
+  // @ts-expect-error the wrapper preserves required parameters
+  await data("GET /pets/{id}")
+  // @ts-expect-error another endpoint's inputs do not become legal through a wrapper
+  await data("GET /pets/{id}", { query: { q: "pet" } })
+  const endpoint = Math.random() ? "GET /pets/{id}" : "GET /search"
+  // @ts-expect-error a union would lose the endpoint/input correlation
+  await data(endpoint, { params: { id: 1 } })
+}
+`,
+        },
+        { compilerOptions: { exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true } },
+      ),
+    ).toBe("")
+  })
+
   it("checks result calls on a generated API with 1000 endpoints", async () => {
     const { code, diagnostics } = await generate({
       openapi: "3.1.0",
@@ -47,9 +90,10 @@ describe("types", () => {
     })
     expect(diagnostics).toStrictEqual([])
     expect(
-      await typecheck({
-        "api.ts": code,
-        "use.ts": `
+      await typecheck(
+        {
+          "api.ts": code,
+          "use.ts": `
 import { createClient } from "openapi-shape/client"
 import { contract } from "./api"
 const api = createClient(contract)
@@ -66,7 +110,13 @@ async function use() {
   if (last.error === undefined) last.data.id satisfies 999
 }
 `,
-      }),
+        },
+        {
+          metrics: process.env.OPENAPI_SHAPE_TYPE_METRICS
+            ? (summary) => console.info(`1000 generated endpoints\n${summary}`)
+            : undefined,
+        },
+      ),
     ).toBe("")
   })
 
@@ -610,7 +660,10 @@ async function checked_${style}<K extends Endpoint<Endpoints>>(
 }
 `
   })
-  await expectPassesTsc(`
+  expect(
+    await typecheck(
+      {
+        "use.ts": `
 import type { Client, Endpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
 interface Endpoints { ${endpoints.join("\n")} }
 declare const client: Client<Endpoints>
@@ -622,5 +675,13 @@ async function wrappedCalls() {
   const last = await checked_destructured("GET /resource-299", { params: { id: 1 } })
   last satisfies Endpoints["GET /resource-299"]["responses"]["200"]["content"]["application/json"] | number[]
 }
-`)
+`,
+      },
+      {
+        metrics: process.env.OPENAPI_SHAPE_TYPE_METRICS
+          ? (summary) => console.info(`300 heterogeneous endpoints and wrappers\n${summary}`)
+          : undefined,
+      },
+    ),
+  ).toBe("")
 })

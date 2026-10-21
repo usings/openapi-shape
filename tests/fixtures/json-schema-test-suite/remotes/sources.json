@@ -1,0 +1,57 @@
+{
+  "http://localhost:1234/draft2020-12/tree.json": {
+    "file": "tree.json",
+    "source": "https://raw.githubusercontent.com/json-schema-org/JSON-Schema-Test-Suite/55719286c33ae0d1823bfb65fea10338a19bc37c/remotes/draft2020-12/tree.json",
+    "sha256": "e2fa53954b78121c6533e98ef7ca83689c9b990c5ca1c01f65e2cc7e7f426664"
+  },
+  "http://localhost:1234/draft2020-12/extendible-dynamic-ref.json": {
+    "file": "extendible-dynamic-ref.json",
+    "source": "https://raw.githubusercontent.com/json-schema-org/JSON-Schema-Test-Suite/55719286c33ae0d1823bfb65fea10338a19bc37c/remotes/draft2020-12/extendible-dynamic-ref.json",
+    "sha256": "876cfd13df8730880db32f8d1b4b95c850ec170929247787118b448347dd1ed4"
+  },
+  "http://localhost:1234/draft2020-12/detached-dynamicref.json": {
+    "file": "detached-dynamicref.json",
+    "source": "https://raw.githubusercontent.com/json-schema-org/JSON-Schema-Test-Suite/55719286c33ae0d1823bfb65fea10338a19bc37c/remotes/draft2020-12/detached-dynamicref.json",
+    "sha256": "179fa0d52df07a3c0c0509ec9a66aae3f5bbd8d150b64a8bdfa9e7342ccb6385"
+  },
+  "https://json-schema.org/draft/2020-12/schema": {
+    "file": "schema.json",
+    "source": "https://json-schema.org/draft/2020-12/schema",
+    "sha256": "41da76f5afb7ce062d248f762463a92f7ca47e4e0f905b224ba6afeef91ded0f"
+  },
+  "https://json-schema.org/draft/2020-12/meta/core": {
+    "file": "meta-core.json",
+    "source": "https://json-schema.org/draft/2020-12/meta/core",
+    "sha256": "21f79d143fab1f180245c331e5657057045b36794d41fe151e6e4fed65035299"
+  },
+  "https://json-schema.org/draft/2020-12/meta/applicator": {
+    "file": "meta-applicator.json",
+    "source": "https://json-schema.org/draft/2020-12/meta/applicator",
+    "sha256": "bf273b26f9f735b93ece78f2b61b36676e1d122ce78ab37ad5a2e45dfa1ca2b1"
+  },
+  "https://json-schema.org/draft/2020-12/meta/unevaluated": {
+    "file": "meta-unevaluated.json",
+    "source": "https://json-schema.org/draft/2020-12/meta/unevaluated",
+    "sha256": "fc99f32188da41689a9382af174dd42e8b255e4374965c157b8286556b4ab2bc"
+  },
+  "https://json-schema.org/draft/2020-12/meta/validation": {
+    "file": "meta-validation.json",
+    "source": "https://json-schema.org/draft/2020-12/meta/validation",
+    "sha256": "e921c5b79264d3689af01c1af1ffdf692e09f1c45df90a0f08eb7288c9acdeab"
+  },
+  "https://json-schema.org/draft/2020-12/meta/meta-data": {
+    "file": "meta-meta-data.json",
+    "source": "https://json-schema.org/draft/2020-12/meta/meta-data",
+    "sha256": "c664d438a84d58889c8edecd248ce2f945a4bc0e3b087323b11303dc136abfbe"
+  },
+  "https://json-schema.org/draft/2020-12/meta/format-annotation": {
+    "file": "meta-format-annotation.json",
+    "source": "https://json-schema.org/draft/2020-12/meta/format-annotation",
+    "sha256": "5c79404f831dd905c0f40fefac7c6f3e51bf3729b4a876a5c2020178d97f3bcc"
+  },
+  "https://json-schema.org/draft/2020-12/meta/content": {
+    "file": "meta-content.json",
+    "source": "https://json-schema.org/draft/2020-12/meta/content",
+    "sha256": "a10456605b2b5bb12a1b4dcfc0300f02f54d3e8bb3646bed7724583866627682"
+  }
+}
