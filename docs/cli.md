@@ -40,6 +40,8 @@ Wrote src/api.ts (1 warning)
 
 Locations contain the source file and a JSON Pointer. Failed runs end with `error:` and a description of the failure. When `--check` finds a difference, it prints the first differing line as `<file>:<line>:` before the failure message.
 
+For a missing or outdated output, rerun without `--check` and commit the generated file. A `Cannot read` or `Cannot write` error reports the filesystem failure; check the target path and access permissions before retrying.
+
 | Exit code | Meaning                                                                                                                |
 | --------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `0`       | Generation succeeded, or `--check` found matching output.                                                              |

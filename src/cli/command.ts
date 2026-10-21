@@ -72,7 +72,15 @@ export const cli = defineCommand({
     const target = resolve(cwd, args.output)
     const warnings = result.diagnostics.length === 0 ? "" : ` (${counts(result.diagnostics)})`
     if (args.check) {
-      const existing = await readFile(target, "utf8").catch(() => null)
+      let existing: string | null = null
+      try {
+        existing = await readFile(target, "utf8")
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+          const reason = error instanceof Error ? error.message : String(error)
+          return fail(`Cannot read ${args.output}: ${reason}`)
+        }
+      }
       if (existing === result.code) {
         process.stderr.write(`${args.output} is up to date${warnings}\n`)
         return

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { stripVTControlCharacters } from "node:util"
 import { renderUsage, runCommand } from "citty"
@@ -107,6 +107,16 @@ describe("openapi-shape <source>", () => {
         /^api\.ts:(\d+): expected: {3}export type When = string\napi\.ts:\1: found: {4}  export type When = Date\nerror: api\.ts is out of date; run the same command without --check to update it\n$/,
       )
       expect(await readFile(join(dir, "api.ts"), "utf8")).toBe(edited)
+    })
+  })
+
+  it("reports an unreadable check target instead of treating it as missing", async () => {
+    await withFiles({ "openapi.json": spec }, async (dir) => {
+      await mkdir(join(dir, "api.ts"))
+      const result = await run(["openapi.json", "-o", "api.ts", "--check"], dir)
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain("Cannot read api.ts:")
+      expect(result.stderr).not.toContain("does not exist")
     })
   })
 
