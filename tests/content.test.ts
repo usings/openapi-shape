@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { generate } from "../src/index"
+import { generate } from "../src/core/index"
 import type { Version } from "./helpers/generate"
 import { codes, entry, gen, oas } from "./helpers/generate"
 import { expectPassesTsc } from "./helpers/tsc"

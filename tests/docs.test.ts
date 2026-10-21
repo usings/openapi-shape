@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { dirname, join, relative } from "node:path"
 import { describe, expect, it } from "vitest"
-import { generate } from "../src/index"
+import { generate } from "../src/core/index"
 import { typecheck } from "./helpers/tsc"
 
 // The examples in README.md and docs/ describe tests/fixtures/readme.yaml.
@@ -73,7 +73,7 @@ describe("documentation", () => {
           skipLibCheck: true,
           allowImportingTsExtensions: true,
           paths: {
-            "openapi-shape": [join(ROOT, "src/index.ts")],
+            "openapi-shape": [join(ROOT, "src/core/index.ts")],
             "openapi-shape/client": [join(ROOT, "src/client/index.ts")],
           },
         },

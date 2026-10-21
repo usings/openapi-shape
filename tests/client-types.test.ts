@@ -11,7 +11,7 @@ import type {
 } from "../src/client"
 import { createClient, defineMiddleware } from "../src/client"
 import type { EndpointResult } from "../src/client/types"
-import { generate } from "../src/index"
+import { generate } from "../src/core/index"
 import type { Endpoints, Schemas } from "./__snapshots__/client-api"
 import { contract } from "./__snapshots__/client-api"
 import { expectPassesTsc, typecheck } from "./helpers/tsc"

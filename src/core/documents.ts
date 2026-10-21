@@ -1,10 +1,10 @@
 import { resolve as resolvePath } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { Diagnostics } from "../shared/diagnostics"
-import { isRecord } from "../shared/object"
-import { appendPointer, parsePointer, readPointer } from "../shared/pointer"
-import type { DocumentReader, FetchedDocument } from "./source"
-import { assertAcyclic, withoutFragment } from "./source"
+import type { Diagnostics } from "./diagnostics"
+import type { DocumentReader, FetchedDocument } from "./document-reader"
+import { assertAcyclic, withoutFragment } from "./document-reader"
+import { appendPointer, parsePointer, readPointer } from "./json-pointer"
+import { isRecord } from "./object"
 
 type OpenApiVersion = "3.0" | "3.1" | "3.2"
 

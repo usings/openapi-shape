@@ -1,5 +1,5 @@
-import type { Diagnostic, GenerateOptions } from "../../src/index"
-import { generate } from "../../src/index"
+import type { Diagnostic, GenerateOptions } from "../../src/core/index"
+import { generate } from "../../src/core/index"
 
 export type Version = "3.0" | "3.1" | "3.2"
 

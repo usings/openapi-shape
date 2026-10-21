@@ -1,6 +1,6 @@
 import { expect, it } from "vitest"
 import { createClient } from "../src/client"
-import { generate } from "../src/index"
+import { generate } from "../src/core/index"
 import { contractOf } from "./helpers/contract"
 import { oas } from "./helpers/generate"
 

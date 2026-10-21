@@ -1,8 +1,8 @@
 import { readdirSync } from "node:fs"
 import { join } from "node:path"
 import { beforeAll, describe, expect, it } from "vitest"
-import type { GenerateResult } from "../src/index"
-import { generate } from "../src/index"
+import type { GenerateResult } from "../src/core/index"
+import { generate } from "../src/core/index"
 import { typecheck } from "./helpers/tsc"
 
 // Official OpenAPI Initiative examples for every supported version.

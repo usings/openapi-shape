@@ -1,5 +1,5 @@
-import { parsePointer } from "../shared/pointer"
 import type { DocumentNode } from "./documents"
+import { parsePointer } from "./json-pointer"
 
 /** Canonical identity of a node: retrieval URI plus JSON Pointer. */
 export function identity(node: DocumentNode): string {

@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url"
 import { styleText } from "node:util"
 import { defineCommand } from "citty"
 import pkg from "../../package.json" with { type: "json" }
-import type { Diagnostic } from "../index"
-import { GenerateError, generate } from "../index"
+import type { Diagnostic } from "../core"
+import { GenerateError, generate } from "../core"
 
 /** The `openapi-shape` command, which the bin (`./index.ts`) runs. */
 export const cli = defineCommand({

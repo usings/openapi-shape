@@ -1,10 +1,10 @@
-import type { DocumentNode } from "../load/documents"
-import { componentNameOf, identity } from "../load/nodes"
-import { intersect, literal, union } from "../model/algebra"
-import type { Type } from "../model/types"
-import { isRecord } from "../shared/object"
+import { componentNameOf, identity } from "./document-nodes"
+import type { DocumentNode } from "./documents"
+import type { Type } from "./model"
+import { isRecord } from "./object"
 import { referencesOf } from "./references"
 import type { SchemaBuilder } from "./schemas"
+import { intersect, literal, union } from "./type-algebra"
 
 /**
  * Discriminator Objects are hints that "MUST NOT change the validation outcome". They narrow types

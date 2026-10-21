@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { generate } from "../src/index"
+import { generate } from "../src/core/index"
 import { withFiles } from "./helpers/tmp"
 import { typecheck } from "./helpers/tsc"
 

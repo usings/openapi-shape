@@ -1,6 +1,6 @@
-import type { DocumentNode, DocumentSet } from "../load/documents"
-import type { DiagnosticCode, Diagnostics } from "../shared/diagnostics"
-import { appendPointer } from "../shared/pointer"
+import type { DiagnosticCode, Diagnostics } from "./diagnostics"
+import type { DocumentNode, DocumentSet } from "./documents"
+import { appendPointer } from "./json-pointer"
 
 /**
  * What every build step reads from and reports to: the description's documents, and its

@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
-import { GenerateError, generate } from "../src/index"
+import { GenerateError, generate } from "../src/core/index"
 import { codes, declaration, gen, oas } from "./helpers/generate"
 import { withFiles } from "./helpers/tmp"
 

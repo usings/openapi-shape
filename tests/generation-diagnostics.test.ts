@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { generate } from "../src/index"
+import { generate } from "../src/core/index"
 import { declaration, oas, withSchemas } from "./helpers/generate"
 
 const binary = { type: "string", format: "binary" }

@@ -1,7 +1,7 @@
-import type { DocumentNode } from "../load/documents"
-import { identity } from "../load/nodes"
-import { isRecord } from "../shared/object"
-import type { BuildContext } from "./context"
+import type { BuildContext } from "./build-context"
+import { identity } from "./document-nodes"
+import type { DocumentNode } from "./documents"
+import { isRecord } from "./object"
 
 export interface Resolved {
   node: DocumentNode

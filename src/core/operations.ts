@@ -1,26 +1,17 @@
-import type { DocumentNode } from "../load/documents"
-import { identity } from "../load/nodes"
-import { union } from "../model/algebra"
-import type {
-  Body,
-  Annotations,
-  Encoding,
-  Field,
-  Media,
-  Operation,
-  Response,
-  Type,
-} from "../model/types"
-import { UNKNOWN } from "../model/types"
-import { classifyMediaType, isFormData } from "../shared/media"
-import { isRecord } from "../shared/object"
 import { mergeAnnotations, objectAnnotations, schemaAnnotations } from "./annotations"
+import type { BuildContext } from "./build-context"
 import { typeOfContent } from "./content"
-import type { BuildContext } from "./context"
+import { identity } from "./document-nodes"
+import type { DocumentNode } from "./documents"
 import { formContentTypes } from "./form-encoding"
+import { classifyMediaType, isFormData } from "./media-types"
+import type { Body, Annotations, Encoding, Field, Media, Operation, Response, Type } from "./model"
+import { UNKNOWN } from "./model"
+import { isRecord } from "./object"
 import type { Resolved } from "./references"
 import { resolveObject } from "./references"
 import type { SchemaBuilder } from "./schemas"
+import { union } from "./type-algebra"
 
 const METHODS_30 = ["get", "put", "post", "delete", "options", "head", "patch", "trace"]
 const METHODS_32 = [...METHODS_30, "query"]

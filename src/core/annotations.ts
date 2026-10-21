@@ -1,6 +1,6 @@
-import type { DocumentNode } from "../load/documents"
-import type { Annotations } from "../model/types"
-import { isRecord } from "../shared/object"
+import type { DocumentNode } from "./documents"
+import type { Annotations } from "./model"
+import { isRecord } from "./object"
 
 /**
  * Documentation for a schema: title, description, deprecation, and the constraints TypeScript

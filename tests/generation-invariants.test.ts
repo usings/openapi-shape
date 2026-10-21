@@ -1,6 +1,6 @@
 import { expect, it } from "vitest"
-import type { DocumentLoader } from "../src/index"
-import { generate } from "../src/index"
+import type { DocumentLoader } from "../src/core/index"
+import { generate } from "../src/core/index"
 import { oas } from "./helpers/generate"
 import { typecheck } from "./helpers/tsc"
 

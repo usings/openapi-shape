@@ -1,6 +1,6 @@
-import { matchesPattern } from "../shared/patterns"
-import type { Declaration, Field, Literal, Type } from "./types"
-import { NEVER, UNKNOWN, TYPE_LOCATION } from "./types"
+import type { Declaration, Field, Literal, Type } from "./model"
+import { NEVER, UNKNOWN, TYPE_LOCATION } from "./model"
+import { matchesPattern } from "./patterns"
 
 /** Normalized union: flattened, deduplicated, with absorbed members removed. */
 export function union(members: Type[]): Type {

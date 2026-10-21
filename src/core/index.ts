@@ -1,14 +1,14 @@
-import { buildModel } from "./core/build"
-import { loadDocuments } from "./core/load/documents"
-import type { LoadingOptions } from "./core/load/source"
-import { DocumentReader } from "./core/load/source"
-import { renderModule } from "./core/render/module"
-import type { Diagnostic } from "./core/shared/diagnostics"
-import { Diagnostics } from "./core/shared/diagnostics"
-import { PatternTimeoutError } from "./core/shared/patterns"
+import { buildModel } from "./build"
+import type { Diagnostic } from "./diagnostics"
+import { Diagnostics } from "./diagnostics"
+import type { LoadingOptions } from "./document-reader"
+import { DocumentReader } from "./document-reader"
+import { loadDocuments } from "./documents"
+import { PatternTimeoutError } from "./patterns"
+import { renderModule } from "./render-module"
 
-export type { DocumentLoader } from "./core/load/source"
-export type { Diagnostic, DiagnosticCode } from "./core/shared/diagnostics"
+export type { DocumentLoader } from "./document-reader"
+export type { Diagnostic, DiagnosticCode } from "./diagnostics"
 
 export interface GenerateOptions extends LoadingOptions {
   /**

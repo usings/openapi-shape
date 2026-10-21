@@ -7,9 +7,28 @@ import { expect, it } from "vitest"
 // → render, around the model; the client ships alone, so it imports nothing
 // outside itself, and nothing in the generator imports it.
 const SRC = join(import.meta.dirname, "..", "src")
+// Core modules are flat on disk; their responsibilities still define the boundaries.
+const CORE_PARTS: Record<string, string[]> = {
+  entry: ["index"],
+  load: ["documents", "document-reader", "document-nodes"],
+  model: ["model", "type-algebra"],
+  build: [
+    "build",
+    "build-context",
+    "references",
+    "discriminators",
+    "form-encoding",
+    "operations",
+    "content",
+    "schemas",
+    "annotations",
+  ],
+  render: ["render-types", "render-module", "jsdoc"],
+  shared: ["media-types", "patterns", "object", "naming", "diagnostics", "json-pointer"],
+}
 const MAY_IMPORT: Record<string, string[]> = {
-  "index": ["core/load", "core/build", "core/render", "core/shared"],
-  "cli": ["cli", "index"],
+  "core/entry": ["core/load", "core/build", "core/render", "core/shared"],
+  "cli": ["cli", "core/entry"],
   "client": ["client"],
   "core/shared": ["core/shared"],
   "core/load": ["core/load", "core/shared"],
@@ -30,11 +49,15 @@ function sources(dir: string): string[] {
   )
 }
 
-/** `client`, `core/build`, `index`, …: the part of src/ a file belongs to. */
+/** Classify by responsibility; new core modules must declare their part explicitly. */
 function partOf(file: string): string {
   const path = relative(SRC, file).replace(/\.ts$/, "")
-  const [top, stage] = path.split("/")
-  return top === "core" ? `core/${stage}` : top
+  const [top] = path.split("/")
+  if (top !== "core") return top
+  const name = path.slice("core/".length)
+  const part = Object.keys(CORE_PARTS).find((group) => CORE_PARTS[group].includes(name))
+  if (part === undefined) throw new Error(`Unclassified core module: ${path}`)
+  return `core/${part}`
 }
 
 function resolveSource(from: string, specifier: string): string | undefined {
@@ -90,7 +113,7 @@ it("imports flow one way between the parts of src/", () => {
       if (!specifier.startsWith(".")) {
         // Bounded pattern matching uses Node's execution deadline, without file or network I/O.
         const boundedPatterns =
-          relative(SRC, file) === "core/shared/patterns.ts" && specifier === "node:vm"
+          relative(SRC, file) === "core/patterns.ts" && specifier === "node:vm"
         if (!MAY_IMPORT_PACKAGES.has(part) && !boundedPatterns) violations.push(at)
         continue
       }

@@ -1,9 +1,9 @@
-import type { Declaration, Field, Info, Media, Model, Operation } from "../model/types"
-import { acceptsJson, defaultMediaType, isApplicationJson } from "../shared/media"
-import { propertyKey } from "../shared/naming"
 import { indentTail, jsdoc, text } from "./jsdoc"
-import type { TypeContext } from "./types"
-import { block, indexOf, renderFields, renderType } from "./types"
+import { acceptsJson, defaultMediaType, isApplicationJson } from "./media-types"
+import type { Declaration, Field, Info, Media, Model, Operation } from "./model"
+import { propertyKey } from "./naming"
+import type { TypeContext } from "./render-types"
+import { block, indexOf, renderFields, renderType } from "./render-types"
 
 /**
  * Render the model as a TypeScript module that imports nothing: its types, and the runtime

@@ -1,4 +1,4 @@
-import type { Annotations } from "../model/types"
+import type { Annotations } from "./model"
 
 /** A JSDoc block followed by a newline, or `""` when there is nothing to say. */
 export function jsdoc(annotations: Annotations | undefined): string {

@@ -1,8 +1,8 @@
-import { union } from "../model/algebra"
-import type { Field, Literal, Type, Side } from "../model/types"
-import { UNDEFINED, UNKNOWN } from "../model/types"
-import { propertyKey } from "../shared/naming"
 import { indentTail, jsdoc } from "./jsdoc"
+import type { Field, Literal, Type, Side } from "./model"
+import { UNDEFINED, UNKNOWN } from "./model"
+import { propertyKey } from "./naming"
+import { union } from "./type-algebra"
 
 export interface TypeContext {
   side: Side

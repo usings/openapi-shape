@@ -1,7 +1,7 @@
 import { expect, it } from "vitest"
 import type { Contract } from "../src/client"
 import { createClient } from "../src/client"
-import { generate } from "../src/index"
+import { generate } from "../src/core/index"
 import { contractOf } from "./helpers/contract"
 import type { Version } from "./helpers/generate"
 import { codes, oas } from "./helpers/generate"
