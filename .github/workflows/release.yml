@@ -45,6 +45,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify before publishing
+        run: pnpm verify
+
       - name: Publish to NPM
         run: npm publish --access=public --provenance --tag="${{ steps.release_meta.outputs.channel }}"
 
