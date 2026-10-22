@@ -5,7 +5,7 @@ import { componentNameOf, identity } from "./document-nodes"
 import type { DocumentNode } from "./documents"
 import { parsePointer } from "./json-pointer"
 import { classifyMediaType } from "./media-types"
-import type { Declaration, Field, Type, Side } from "./model"
+import type { Declaration, Field, Type } from "./model"
 import { NEVER, NULL, UNKNOWN } from "./model"
 import { toIdentifier, uniqueName } from "./naming"
 import { isRecord } from "./object"
@@ -161,10 +161,11 @@ export class SchemaBuilder {
       typeof at === "string" ? at : at && this.context.documents.locate(at.document, at.pointer)
     return intersect(members, {
       location,
-      onWiden: (source) =>
+      onWiden: (source, reason) =>
         this.context.diagnostics.warn(
           "schema-precision-loss",
-          "The intersection exceeds 10,000 union combinations; its largest unions are widened to keep TypeScript compilable. Split the schema into smaller alternatives to retain precision",
+          reason ??
+            "The intersection exceeds 10,000 union combinations; its largest unions are widened to keep TypeScript compilable. Split the schema into smaller alternatives to retain precision",
           source ?? "#",
         ),
     })
@@ -210,47 +211,7 @@ export class SchemaBuilder {
       else parts.push(union(narrowDiscriminated(this, node, keyword, types)))
     }
     parts.push(this.conditional(node, schema))
-    // A property one allOf member declares readOnly or writeOnly, and another
-    // requires, is required on one side only.
-    const sides = Array.isArray(schema.allOf) ? this.memberSides(node) : new Map<string, Side>()
-    return this.intersect(
-      sides.size === 0 ? parts : parts.map((part) => this.withSides(part, sides)),
-      node,
-    )
-  }
-
-  /** The side readOnly/writeOnly properties of the allOf members apply to, by name. */
-  private memberSides(node: DocumentNode): Map<string, Side> {
-    const sides = new Map<string, Side>()
-    const seen = new Set<string>()
-    const visit = (member: DocumentNode): void => {
-      const target = this.aliasTarget(member) ?? member
-      const schema = target.value
-      if (!isRecord(schema) || seen.has(identity(target))) return
-      seen.add(identity(target))
-      if (isRecord(schema.properties)) {
-        for (const name of Object.keys(schema.properties)) {
-          const property = this.context.documents.child(target, "properties", name)
-          if (this.flag(property, "readOnly")) sides.set(name, "response")
-          else if (this.flag(property, "writeOnly")) sides.set(name, "request")
-        }
-      }
-      if (Array.isArray(schema.allOf)) {
-        schema.allOf.forEach((_, i) => visit(this.context.documents.child(target, "allOf", i)))
-      }
-    }
-    visit(node)
-    return sides
-  }
-
-  private withSides(type: Type, sides: Map<string, Side>): Type {
-    if (type.kind !== "object") return type
-    const fields = type.fields.map((field) => {
-      const side = sides.get(field.name)
-      if (!field.required || field.requiredOnly !== undefined || side === undefined) return field
-      return { ...field, requiredOnly: side }
-    })
-    return { ...type, fields }
+    return this.intersect(parts, node)
   }
 
   /**
@@ -379,10 +340,9 @@ export class SchemaBuilder {
       const child = this.context.documents.child(node, "properties", name)
       const field: Field = { name, type: this.type(child), required: required.has(name) }
       // A required readOnly property is required in responses only, writeOnly in requests only.
-      if (field.required) {
-        if (this.flag(child, "readOnly")) field.requiredOnly = "response"
-        else if (this.flag(child, "writeOnly")) field.requiredOnly = "request"
-      }
+      if (this.flag(child, "readOnly")) field.direction = "response"
+      else if (this.flag(child, "writeOnly")) field.direction = "request"
+      if (field.required && field.direction !== "both") field.requiredOnly = field.direction
       const annotations = schemaAnnotations(child)
       if (annotations) field.annotations = annotations
       fields.push(field)

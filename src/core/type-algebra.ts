@@ -1,3 +1,4 @@
+import { directionScopes, hasDirections, retainDirections } from "./directions"
 import type { Declaration, Field, Literal, Type } from "./model"
 import { NEVER, UNKNOWN, TYPE_LOCATION } from "./model"
 import { matchesPattern } from "./patterns"
@@ -9,7 +10,12 @@ export function union(members: Type[]): Type {
     if (member.kind === "union") flat.push(...member.members)
     else flat.push(member)
   }
-  if (flat.some((t) => t.kind === "unknown")) return UNKNOWN
+  if (
+    flat.some((t) => t.kind === "unknown") &&
+    !flat.some((t) => hasDirections(t, (d) => sealed.has(d)))
+  ) {
+    return flat.some((t) => t.kind === "unknown" && t.widened) ? WIDENED_UNKNOWN : UNKNOWN
+  }
   let out = dedupe(flat.filter((t) => t.kind !== "never"))
 
   const has = (kind: "string" | "number" | "boolean"): boolean => out.some((t) => t.kind === kind)
@@ -32,18 +38,37 @@ export function union(members: Type[]): Type {
 
 interface IntersectionContext {
   location?: string
-  onWiden?: (location: string | undefined) => void
+  onWiden?: (location: string | undefined, reason?: string) => void
 }
 
 /** Normalized intersection: flattened, scalar conflicts resolved, plain objects merged. */
 export function intersect(members: Type[], context?: IntersectionContext): Type {
+  return intersectScoped(members, context, true)
+}
+
+function intersectScoped(
+  members: Type[],
+  context: IntersectionContext | undefined,
+  directions: boolean,
+): Type {
   const flat: Type[] = []
   for (const member of members) {
     if (member.kind === "intersection") flat.push(...member.members)
     else flat.push(member)
   }
   if (flat.some((t) => t.kind === "never")) return NEVER
-  let out = dedupe(flat.filter((t) => t.kind !== "unknown"))
+  let out = dedupe(flat.filter((t) => t.kind !== "unknown" || t.widened || t.directions))
+
+  if (directions) {
+    const scopes = directionScopes(
+      out,
+      (declaration) => sealed.has(declaration),
+      (reason) => context?.onWiden?.(context.location, reason),
+    )
+    if (scopes.length > 1)
+      return union(scopes.map((scope) => intersectScoped(scope, context, false)))
+    out = scopes[0]
+  }
 
   // TypeScript expands intersections of unions, also those behind references,
   // into every combination and gives up past a limit; widen the largest unions
@@ -54,15 +79,22 @@ export function intersect(members: Type[], context?: IntersectionContext): Type 
     context?.onWiden?.(context.location)
     const largest = sizes.indexOf(Math.max(...sizes))
     // A union of objects widens to any object, which keeps its properties allowed.
-    out = out.flatMap((t, i) =>
-      i !== largest ? [t] : shapeOf(t) === "object" ? [OPEN_OBJECT] : [],
+    // Retain widening through enclosing compositions until implied shapes have yielded to it.
+    out = out.map((t, i) =>
+      i !== largest
+        ? t
+        : retainDirections(
+            shapeOf(t) === "object" ? OPEN_OBJECT : WIDENED_UNKNOWN,
+            t,
+            (declaration) => sealed.has(declaration),
+          ),
     )
   }
 
   // An implied shape gives way to the alternatives a referenced union allows,
   // one level deep: below, alternatives would multiply level by level, and a
   // recursive union would never end.
-  const implied = out.some((t) => (t.kind === "object" || isArrayLike(t)) && t.inferred === true)
+  const implied = out.some((t) => isImplied(t))
   if (implied && lookingThrough) {
     // Deeper, where the union could be looked through and mixes objects with
     // other values, which the implied shape would shut out, the type widens
@@ -75,7 +107,11 @@ export function intersect(members: Type[], context?: IntersectionContext): Type 
         shapeOf(t) === undefined
       )
     })
-    if (opaque.length > 0)
+    if (opaque.length > 0) {
+      context?.onWiden?.(
+        context.location,
+        "Nested mixed references exceed the one-level distribution boundary; implied shape constraints are widened to retain other value types",
+      )
       return union([
         intersect(
           out.filter((t) => !opaque.includes(t)),
@@ -83,6 +119,7 @@ export function intersect(members: Type[], context?: IntersectionContext): Type 
         ),
         ...opaque,
       ])
+    }
   }
   let lookedThrough = false
   if (implied && !lookingThrough) {
@@ -128,13 +165,46 @@ function simplify(members: Type[], implied: boolean, context?: IntersectionConte
 
   // Type-specific keywords without `type` constrain only their own type.
   const shapes = out.map((t) => shapeOf(t))
-  const definiteNonObject = shapes.some((s) => s !== undefined && s !== "object")
-  const definiteNonArray = shapes.some((s) => s !== undefined && s !== "array")
-  out = out.filter(
-    (t) =>
-      !(definiteNonObject && t.kind === "object" && t.inferred) &&
-      !(definiteNonArray && isArrayLike(t) && t.inferred),
-  )
+  // Unexpanded constraints may admit other shapes, whether they are unions,
+  // intersections, or references to a widened type. Infer their rendered shape
+  // without requiring a particular composition structure. Defer unsealed refs.
+  const opaqueShapes =
+    implied && shapes.every((shape) => shape === undefined)
+      ? out
+          .filter(
+            (t) =>
+              !isImplied(t) &&
+              (t.kind !== "ref" || sealed.has(t.target)) &&
+              (t.kind !== "unknown" || t.widened),
+          )
+          .map((t) => shapeOf(t, new Map(), true))
+      : []
+  const definiteNonObject =
+    shapes.some((s) => s !== undefined && s !== "object") ||
+    opaqueShapes.some((s) => s !== "object")
+  const definiteNonArray =
+    shapes.some((s) => s !== undefined && s !== "array") || opaqueShapes.some((s) => s !== "array")
+  if (
+    shapes.every((shape) => shape === undefined) &&
+    out.some(
+      (t) =>
+        (definiteNonObject && t.kind === "object" && t.inferred) ||
+        (definiteNonArray && isArrayLike(t) && t.inferred),
+    )
+  ) {
+    context?.onWiden?.(
+      context.location,
+      "An unexpanded mixed constraint may accept other value types; implied object or array constraints are omitted at this intersection. Add an explicit type if the contract intends to restrict the shape",
+    )
+  }
+  out = out
+    .map((t) =>
+      (definiteNonObject && t.kind === "object" && t.inferred) ||
+      (definiteNonArray && isArrayLike(t) && t.inferred)
+        ? retainDirections(UNKNOWN, t, (declaration) => sealed.has(declaration))
+        : t,
+    )
+    .filter((t) => t.kind !== "unknown" || t.directions)
 
   // A JSON value has one type: different definite shapes cannot meet.
   const definite = new Set(out.map((t) => shapeOf(t)).filter((s) => s !== undefined))
@@ -166,7 +236,9 @@ function simplify(members: Type[], implied: boolean, context?: IntersectionConte
     ])
   }
 
-  if (out.length === 0) return UNKNOWN
+  if (out.length === 0) {
+    return members.some((t) => t.kind === "unknown" && t.widened) ? WIDENED_UNKNOWN : UNKNOWN
+  }
   if (out.length === 1) return out[0]
   return {
     kind: "intersection",
@@ -305,6 +377,7 @@ function isScalar(type: Type): boolean {
 
 /** Any object: what a union of objects widens to. */
 const OPEN_OBJECT: Type = { kind: "object", fields: [], additional: UNKNOWN }
+const WIDENED_UNKNOWN: Type = { kind: "unknown", widened: true }
 
 const MAX_DISTRIBUTION = 16
 const MAX_COMBINATIONS = 10_000
@@ -322,13 +395,17 @@ export function seal(declarations: Declaration[]): void {
 type Shape = "object" | "array" | ScalarKind
 
 /** The JSON type every value of `type` has, when there is exactly one. */
-function shapeOf(type: Type, known = new Map<Declaration, Shape | undefined>()): Shape | undefined {
+function shapeOf(
+  type: Type,
+  known = new Map<Declaration, Shape | undefined>(),
+  includeInferred = false,
+): Shape | undefined {
   switch (type.kind) {
     case "object":
-      return type.inferred ? undefined : "object"
+      return type.inferred && !includeInferred ? undefined : "object"
     case "array":
     case "tuple":
-      return type.inferred ? undefined : "array"
+      return type.inferred && !includeInferred ? undefined : "array"
     case "literal":
       if (Array.isArray(type.value)) return "array"
       if (typeof type.value === "object" && type.value !== null) return "object"
@@ -338,20 +415,30 @@ function shapeOf(type: Type, known = new Map<Declaration, Shape | undefined>()):
       // Each declaration once per call; one that leads back to itself is open.
       if (known.has(type.target)) return known.get(type.target)
       known.set(type.target, undefined)
-      const shape = shapeOf(type.target.type, known)
+      const shape = shapeOf(type.target.type, known, includeInferred)
       known.set(type.target, shape)
       return shape
     }
     case "narrow":
-      return shapeOf(type.type, known)
-    case "intersection":
+      return shapeOf(type.type, known, includeInferred)
+    case "intersection": {
+      if (includeInferred) {
+        const definite = shapeOf(type)
+        if (definite !== undefined) return definite
+        // An implied member must not mask a mixed constraint that will make it
+        // yield when its declaration is normalized later.
+        const shapes = new Set(type.members.map((m) => shapeOf(m, known, true)))
+        const [only] = shapes
+        return shapes.size === 1 ? only : undefined
+      }
       for (const member of type.members) {
-        const shape = shapeOf(member, known)
+        const shape = shapeOf(member, known, includeInferred)
         if (shape !== undefined) return shape
       }
       return undefined
+    }
     case "union": {
-      const shapes = new Set(type.members.map((m) => shapeOf(m, known)))
+      const shapes = new Set(type.members.map((m) => shapeOf(m, known, includeInferred)))
       const [only] = shapes
       return shapes.size === 1 ? only : undefined
     }
@@ -371,7 +458,7 @@ function isBareObject(type: Type): boolean {
 }
 
 /**
- * A union whose members an intersection can simplify with: objects, arrays, scalars; and
+ * A union whose members an intersection can simplify with: objects, arrays, literals, scalars; and
  * references, where an implied shape must give way to them.
  */
 function isDistributable(type: Type, references: boolean): boolean {
@@ -380,7 +467,11 @@ function isDistributable(type: Type, references: boolean): boolean {
     type.members.length <= MAX_DISTRIBUTION &&
     type.members.every(
       (m) =>
-        m.kind === "object" || isArrayLike(m) || isScalar(m) || (references && m.kind === "ref"),
+        m.kind === "object" ||
+        isArrayLike(m) ||
+        m.kind === "literal" ||
+        isScalar(m) ||
+        (references && m.kind === "ref"),
     )
   )
 }
@@ -422,6 +513,10 @@ function unionBehind(
 
 function isArrayLike(type: Type): type is Extract<Type, { kind: "array" | "tuple" }> {
   return type.kind === "array" || type.kind === "tuple"
+}
+
+function isImplied(type: Type): boolean {
+  return (type.kind === "object" || isArrayLike(type)) && type.inferred === true
 }
 
 function intersectScalars(scalars: Type[]): Type {
@@ -480,6 +575,7 @@ function mergeObjects(objects: Type[], context?: IntersectionContext): Type {
       ...entry.field,
       type: intersect(entry.types, context),
       ...requiredness(entry.sides),
+      direction: combinedDirection(entry.sides),
     })
   }
   const out: Type = { kind: "object", fields }
@@ -489,6 +585,11 @@ function mergeObjects(objects: Type[], context?: IntersectionContext): Type {
   if (patterns.length > 0) out.patterns = patterns
   if (members.every((t) => t.inferred)) out.inferred = true
   return out
+}
+
+function combinedDirection(fields: Field[]): Field["direction"] {
+  const directions = new Set(fields.flatMap((f) => (f.direction ? [f.direction] : [])))
+  return directions.size > 1 || directions.has("both") ? "both" : [...directions][0]
 }
 
 /** A property is required when any member requires it; one-sided only if every requirement is. */

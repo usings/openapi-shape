@@ -753,7 +753,118 @@ const object = (p: string) => ({
   properties: { [p]: { type: "string" } },
 })
 
+const mixed = (count: number) => ({
+  anyOf: [{ type: "string" }, ...Array.from({ length: count }, (_, i) => object(`p${i}`))],
+})
+
 describe("composition through references", () => {
+  it("keeps scalar alternatives through referenced intersections and widening", async () => {
+    const compound = {
+      allOf: [
+        { anyOf: [{ type: "string" }, object("a")] },
+        { anyOf: [{ type: "string" }, object("b")] },
+      ],
+    }
+    const { code, diagnostics } = await generate(
+      withSchemas("3.1", {
+        Early: { required: ["id"], allOf: [ref("Middle")] },
+        Middle: { required: ["other"], allOf: [ref("Compound")] },
+        Compound: compound,
+        T: { required: ["id"], allOf: [ref("Compound")] },
+        Inline: { required: ["id"], ...compound },
+        // Both declaration orders must remain sound after Large widens to unknown.
+        Before: { required: ["id"], allOf: [ref("Large")] },
+        Large: { enum: Array.from({ length: 10001 }, (_, i) => `v${i}`) },
+        After: { items: { type: "number" }, allOf: [ref("Large")] },
+        Direct: {
+          required: ["id"],
+          enum: Array.from({ length: 10001 }, (_, i) => `v${i}`),
+        },
+        InlineLarge: {
+          required: ["id"],
+          allOf: [{ enum: Array.from({ length: 10001 }, (_, i) => `v${i}`) }],
+        },
+        Definite: { type: "object", required: ["id"], allOf: [ref("Compound")] },
+      }),
+    )
+    expect(diagnostics.some((d) => d.code === "schema-precision-loss")).toBe(true)
+    await expectPassesTsc(
+      code,
+      [
+        'import type { Schemas } from "./file0"',
+        'const referenced: Schemas.T = "allowed"',
+        'const early: Schemas.Early = "allowed"',
+        'const inline: Schemas.Inline = "allowed"',
+        'const before: Schemas.Before = "v0"',
+        'const after: Schemas.After = "v0"',
+        'const direct: Schemas.Direct = "v0"',
+        'const inlineLarge: Schemas.InlineLarge = "v0"',
+        'const object: Schemas.Definite = { id: true, a: "a", b: "b" }',
+        "// @ts-expect-error The referenced constraints still exclude numbers.",
+        "const wrong: Schemas.T = 1",
+        "// @ts-expect-error An explicit shape still applies.",
+        'const scalar: Schemas.Definite = "wrong"',
+        "// @ts-expect-error Explicit objects keep their required properties.",
+        'const missing: Schemas.Definite = { a: "a", b: "b" }',
+      ].join("\n"),
+    )
+  })
+
+  it("preserves scalar alternatives beside implied shapes in literal unions", async () => {
+    const code = await gen(
+      withSchemas("3.1", {
+        Objects: { enum: ["x", { b: 1 }, { c: 2 }] },
+        T: { required: ["b"], allOf: [ref("Objects")] },
+        Arrays: { enum: ["x", [1], ["wrong"]] },
+        U: { items: { type: "number" }, allOf: [ref("Arrays")] },
+      }),
+    )
+    await expectPassesTsc(
+      code,
+      [
+        'import type { Schemas } from "./file0"',
+        'const objects: Schemas.T[] = ["x", { b: 1 }, { b: 3, c: 2 }]',
+        'const arrays: Schemas.U[] = ["x", [1]]',
+        "// @ts-expect-error The object alternative still requires b.",
+        "const missing: Schemas.T = { c: 2 }",
+        "// @ts-expect-error The array alternative still constrains its items.",
+        'const wrong: Schemas.U = ["wrong"]',
+        "// @ts-expect-error Unlisted scalar values remain excluded.",
+        'const scalar: Schemas.T = "other"',
+      ].join("\n"),
+    )
+  })
+
+  it("keeps referenced unions sound when implied-shape distribution exceeds its budget", async () => {
+    const { code, diagnostics } = await generate(
+      withSchemas("3.1", {
+        Large: mixed(16),
+        Small: mixed(4),
+        T: { required: ["b"], allOf: [ref("Large")] },
+        U: { required: ["b"], allOf: [ref("Small"), mixed(5)] },
+        Objects: { anyOf: Array.from({ length: 17 }, (_, i) => ({ required: [`p${i}`] })) },
+        V: { required: ["b"], allOf: [ref("Objects")] },
+      }),
+    )
+    expect(
+      diagnostics.map(({ code: diagnosticCode, location }) => ({ code: diagnosticCode, location })),
+    ).toStrictEqual([{ code: "schema-precision-loss", location: "#/components/schemas/T" }])
+    expect(code.length).toBeLessThan(5000)
+    await expectPassesTsc(
+      code,
+      [
+        'import type { Schemas } from "./file0"',
+        'const large: Schemas.T = "valid"',
+        'const product: Schemas.U = "valid"',
+        "// @ts-expect-error Widening must retain the original union constraints.",
+        "const wrong: Schemas.T = { b: 1 }",
+        "const object: Schemas.V = { b: 1, p0: true }",
+        "// @ts-expect-error Object-only unions still keep implied object requirements.",
+        "const missing: Schemas.V = { p0: true }",
+      ].join("\n"),
+    )
+  })
+
   it("lets an implied shape give way to a referenced union", async () => {
     const code = await gen(
       withSchemas("3.1", {

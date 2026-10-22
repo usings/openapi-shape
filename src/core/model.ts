@@ -95,6 +95,8 @@ export interface Field {
   required: boolean
   /** Set when `required` holds on one side only (readOnly/writeOnly). */
   requiredOnly?: Side
+  /** The property's annotation, including when no member currently requires it. */
+  direction?: Side | "both"
   annotations?: Annotations
   /** Parameters: serialization, where it differs from the location's default. */
   encoding?: Encoding
@@ -124,7 +126,13 @@ export type Literal = string | number | boolean | null | Literal[] | { [key: str
 export const TYPE_LOCATION: unique symbol = Symbol("schema location")
 
 export type Type =
-  | { kind: "unknown" }
+  /** Widening keeps its provenance so later implied shapes cannot narrow it again. */
+  | {
+      kind: "unknown"
+      widened?: true
+      /** Object-level annotations survive even when their value constraints are widened away. */
+      directions?: Array<{ name: string; direction: Side | "both" }>
+    }
   | { kind: "never" }
   /** Absent, such as an optional property's value in an index signature. */
   | { kind: "undefined" }

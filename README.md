@@ -13,6 +13,8 @@
 - **Controlled generation.** Cancel work, bound document loading, and provide a custom loader for authenticated or cached sources.
 - **CI-ready.** Use `--check` to catch outdated generated files.
 
+**Contract first. Types are a projection. Validation is a separate responsibility.** OpenAPI and JSON Schema define the contract. `openapi-shape` generates TypeScript types and HTTP serialization metadata; it does not validate runtime data. Types alone do not prove validity, conformance, or authenticity. See [support and limits](./docs/openapi.md#support-boundaries).
+
 ## Quick start
 
 Install the package and generate a module from your API description:

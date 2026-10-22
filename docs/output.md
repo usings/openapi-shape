@@ -159,7 +159,7 @@ Formats usually add documentation without changing the type. The exception is `b
 
 ### Input variants
 
-A required `readOnly` property is required only in responses; a required `writeOnly` property is required only in requests. When a schema needs both views, the main declaration describes responses and `<Name>Input` describes requests:
+A required `readOnly` property becomes optional in requests; a required `writeOnly` property becomes optional in responses. The properties remain in both types, and the client does not automatically remove them from values. When both views are needed, the main declaration describes responses and `<Name>Input` describes requests:
 
 ```ts
 export interface User {
@@ -178,7 +178,9 @@ export interface UserInput {
 
 Input variants are emitted only when the schema is used in data you send. They propagate to schemas that contain a variant.
 
-The generator recognizes `readOnly` and `writeOnly` on properties, referenced property schemas, and `allOf` members. It also handles a property declared in one `allOf` member and required in another. See [Approximations](./openapi.md#approximations) for limits when requiredness comes through a reference.
+Annotations work through references and compositions. For example, one `allOf` member can mark a property `readOnly` while another requires it. The request type makes it optional without changing the shared schema or nested properties.
+
+In `anyOf` and `oneOf`, an annotation affects its own branch. Other branches keep their requirements. Very large compositions may relax more requirements and emit a warning; see [Complexity limits](./openapi.md#complexity-limits).
 
 Webhook and callback requests use the main declarations because the API sends them. Their responses use input variants because you send those responses.
 

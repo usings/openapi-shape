@@ -120,12 +120,14 @@ function render(type: Type, context: TypeContext): Rendered {
     }
     case "intersection":
       return {
-        text: type.members
-          .map((m) => {
-            const r = render(m, context)
-            return r.precedence === Precedence.Union ? `(${r.text})` : r.text
-          })
-          .join(" & "),
+        text:
+          type.members
+            .filter((m) => m.kind !== "unknown")
+            .map((m) => {
+              const r = render(m, context)
+              return r.precedence === Precedence.Union ? `(${r.text})` : r.text
+            })
+            .join(" & ") || "unknown",
         precedence: Precedence.Intersection,
       }
     case "narrow":

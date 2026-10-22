@@ -4,9 +4,9 @@ The generator supports OpenAPI 3.0, 3.1, and 3.2. This page describes how descri
 
 ## Support boundaries
 
-Generated types describe the API's declared inputs and outputs. They and the client do not validate request or response data against schemas at runtime. The [client guide](./client.md) explains what can be sent and decoded, including fetch restrictions, forms, and streams.
+OpenAPI and JSON Schema define the contract. The generator produces TypeScript types and HTTP serialization metadata, not runtime validation or proof of authenticity.
 
-The sections below distinguish supported features, [compatibility rules](#following-the-real-api) for real descriptions, and [approximations](#approximations) where TypeScript cannot express the schema exactly. Warnings report actionable problems; not every omitted validation constraint produces one.
+The types follow the supported features, [compatibility rules](#following-the-real-api), and [approximations](#approximations) on this page. Incorrect types within that scope are generator defects. Use the source contract for validation; successful generation does not certify that the document fully conforms to either specification.
 
 ## Versions and documents
 
@@ -15,7 +15,7 @@ The sections below distinguish supported features, [compatibility rules](#follow
 - **Versions:** OpenAPI 3.0.x, 3.1.x, and 3.2.x. Each OpenAPI document uses its own `openapi` version; schema-only documents inherit the entry document's version. Swagger 2.0, unsupported versions, and entry documents without `openapi` are rejected.
 - **Formats:** JSON and YAML, including YAML merge keys (`<<`).
 - **Sources:** local paths, `file:` URLs, HTTP(S) URLs, and parsed objects.
-- **Schema dialect:** JSON Schema 2020-12 semantics apply regardless of `$schema` or `jsonSchemaDialect`.
+- **Schema dialect:** the generator applies its documented projection rules for JSON Schema 2020-12 keywords. `$schema` and `jsonSchemaDialect` do not select a different rule set.
 
 ### References
 
@@ -128,15 +128,14 @@ Some descriptions express clear API behavior in ways their declared OpenAPI vers
 
 ## Approximations
 
-Where a schema cannot be expressed exactly, the generator generally produces a wider type. The cases below and the compatibility rules above describe exceptions and limits.
+TypeScript cannot express every schema rule. The generator usually widens types to accept more values, but some assumptions below can also reject values the schema permits. These differences do not change the source contract.
 
 ### Deliberate type assumptions
 
-- **Shape keywords imply a shape.** Without an explicit `type`, object keywords (`properties`, `required`, `additionalProperties`, `patternProperties`) imply an object; `items` and `prefixItems` imply an array. JSON Schema also permits other value types in these cases. In an `allOf` with a definite different type, such as `type: string`, the implied shape gives way. It also gives way to alternatives in a referenced union. Below the first such union, the generator widens to either side, such as `{ b: unknown } | S`, to avoid multiplying alternatives at every level.
-- **Unmentioned properties are assumed absent.** Without `additionalProperties`, objects have no index signature. TypeScript's excess-property and weak-type checks can therefore reject extra properties in object literals. With only `patternProperties`, all extra properties use the pattern schemas' types.
+- **Shape keywords imply a shape.** Object keywords such as `properties` and `required` imply an object; `items` and `prefixItems` imply an array. JSON Schema also allows other value types when `type` is absent. An explicit different type takes precedence in an intersection; mixed cases follow the [complexity limits](#complexity-limits).
+- **Extra object properties are approximate.** Named properties alone do not create an index signature, so TypeScript may reject extra properties in object literals. Objects without named properties use an index signature: the additional/pattern property types, or `unknown` by default. Pattern types apply to all extra keys, and index signatures widen to admit named properties.
 - **Dynamic references are static.** `$dynamicRef` resolves as `$ref`.
-- **Raw bytes remain `Blob`.** Binary schema values are typed as `Blob` even inside JSON, form fields, and parameters. Those locations carry text, so the client rejects a `Blob` there. The types preserve the document's file declarations. Generation reports `unsupported-request-encoding` when an endpoint's declared binary values cannot be encoded in their request location; use a textual representation in the description or supply an already encoded body where supported. A top-level ready `Blob` and ordinary multipart file parts remain supported.
-- **Directional requiredness has reference limits.** A property required by a referenced `allOf` member remains required in requests even if another member marks it `readOnly`; the same limit applies to `writeOnly` in responses. A referenced schema's type is not changed for an individual use.
+- **Raw bytes remain `Blob`.** Types preserve file declarations even in locations that require text. The client rejects a `Blob` inside JSON or text parameters, and generation reports `unsupported-request-encoding`. Use a textual schema, such as base64, or an already encoded body where supported. Whole `Blob` bodies and ordinary multipart file parts work normally.
 
 Two additional narrowings come from outside JSON Schema:
 
@@ -148,12 +147,26 @@ Two additional narrowings come from outside JSON Schema:
 The following constraints are omitted or widened:
 
 - Numeric and string constraints, `uniqueItems`, `contains`, `dependentRequired`, `dependentSchemas`, `unevaluated*`, and `propertyNames`.
-- `not`, except `not: {}`.
+- `not`, except `not: {}` and `not: true`.
+- Conditionals without `else`, and the negation of `if` on the `else` branch.
 - `oneOf` exclusivity.
 - Key restrictions from `patternProperties` regular expressions.
 - Object closure from `additionalProperties: false`.
 
-To keep output within TypeScript's complexity limits, intersections whose unions would expand beyond 10,000 alternatives widen their largest unions until the expansion fits. This includes unions reached through references or nested intersections. Object unions widen to any object; other unions widen to `unknown`. A `schema-precision-loss` warning identifies the affected schema so this loss of constraints is visible to callers.
+### Complexity limits
+
+Large compositions may be widened to keep TypeScript usable. These limits also apply through references:
+
+| Case                                         | Limit and fallback                                                                                                                                          |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mixed object, array, and scalar alternatives | Distribute up to 16 alternatives. Beyond that, implied shape constraints may be dropped to retain other value types; definite shape constraints remain.     |
+| Nested mixed references                      | Distribute one referenced-union level at a time. Deeper cases may widen to either side, such as `{ b: unknown } \| S`.                                      |
+| Intersections of unions                      | Keep at most 10,000 combinations by widening the largest unions. Object unions become open object types; other unions become `unknown`.                     |
+| Read/write branch expansion                  | At most 64 scopes or 4,096 traversal steps. Beyond that, potentially annotated requirements become optional on the affected side; other constraints remain. |
+
+Widening preserves read/write annotations needed by outer requirements. Read/write adjustments at a use site leave shared declarations and nested properties unchanged. See [Input variants](./output.md#input-variants).
+
+These losses produce `schema-precision-loss`, with a reason and location. Exact simplifications do not warn, and neither does every omitted validation keyword.
 
 ### Verification
 

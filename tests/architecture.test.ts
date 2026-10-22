@@ -11,7 +11,7 @@ const SRC = join(import.meta.dirname, "..", "src")
 const CORE_PARTS: Record<string, string[]> = {
   entry: ["index"],
   load: ["documents", "document-reader", "document-nodes"],
-  model: ["model", "type-algebra"],
+  model: ["model", "type-algebra", "directions"],
   build: [
     "build",
     "build-context",

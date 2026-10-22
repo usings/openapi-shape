@@ -83,6 +83,32 @@ describe("schema precision diagnostics", () => {
     expect(declaration(exact.code, "T")).toContain("right")
   })
 
+  it("explains omitted implied constraints without warning about exact scalar intersections", async () => {
+    const mixed = {
+      anyOf: [
+        { type: "object", properties: { id: { type: "number" } }, required: ["id"] },
+        ...Array.from({ length: 16 }, (_, n) => ({ const: `s${n}` })),
+      ],
+    }
+    const { diagnostics, code } = await generate(
+      withSchemas("3.1", {
+        Mixed: mixed,
+        Wide: { required: ["extra"], allOf: [{ $ref: "#/components/schemas/Mixed" }] },
+        Exact: { required: ["extra"], allOf: [{ type: "string" }] },
+        Validation: { type: "string", minLength: 10, pattern: "^[a-z]+$" },
+      }),
+    )
+    expect(diagnostics).toMatchObject([
+      {
+        code: "schema-precision-loss",
+        location: "#/components/schemas/Wide",
+        message: expect.stringContaining("implied object or array constraints are omitted"),
+      },
+    ])
+    expect(declaration(code, "Wide")).toBe("Mixed")
+    expect(declaration(code, "Exact")).toBe("string")
+  })
+
   it("does not confuse source metadata with schema literal properties", async () => {
     const { code } = await generate(
       withSchemas("3.1", {

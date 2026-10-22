@@ -190,6 +190,174 @@ const post = (schema: unknown) => ({
 })
 
 describe("readOnly and writeOnly across schemas", () => {
+  it.each(["readOnly", "writeOnly"] as const)(
+    "handles deeply shared references with %s without expanding every path",
+    async (flag) => {
+      const schemas: Record<string, unknown> = {
+        Level0: { type: "object", properties: { id: { type: "string", [flag]: true } } },
+      }
+      for (let level = 1; level <= 24; level++) {
+        const keyword = ["allOf", "anyOf", "oneOf"][level % 3]
+        schemas[`Level${level}`] = {
+          [keyword]: [ref(`Level${level - 1}`), ref(`Level${level - 1}`)],
+        }
+      }
+      schemas.Pet = { type: "object", required: ["id"], allOf: [ref("Level24")] }
+      const code = await gen(oas("3.0", { paths: post(ref("Pet")), components: { schemas } }))
+      const optional = flag === "readOnly" ? "Input" : ""
+      const required = flag === "readOnly" ? "" : "Input"
+      await expectPassesTsc(
+        code,
+        [
+          'import type { Schemas } from "./file0"',
+          `const omitted: Schemas.Pet${optional} = {}`,
+          `const present: Schemas.Pet${required} = { id: "x" }`,
+          "// @ts-expect-error Shared references preserve the opposite side requirement.",
+          `const missing: Schemas.Pet${required} = {}`,
+        ].join("\n"),
+      )
+    },
+  )
+
+  it.each([
+    ["anyOf", "readOnly"],
+    ["anyOf", "writeOnly"],
+    ["oneOf", "readOnly"],
+    ["oneOf", "writeOnly"],
+  ] as const)("applies %s branch %s annotations to outer requirements", async (keyword, flag) => {
+    const branch = (type: string, annotation = flag) => ({
+      properties: { id: { type, [annotation]: true } },
+    })
+    const alternatives = [branch("string"), branch("number")]
+    const base = {
+      type: "object",
+      required: ["id"],
+      properties: {
+        nested: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+      },
+    }
+    const cases = {
+      Inline: { ...base, [keyword]: alternatives },
+      Wrapped: { ...base, allOf: [{ [keyword]: alternatives.map((b) => ({ allOf: [b] })) }] },
+      Other: { ...base, required: ["id", "other"], [keyword]: alternatives },
+      Mixed: { ...base, [keyword]: [alternatives[0], { properties: { id: { type: "number" } } }] },
+      Missing: { ...base, [keyword]: [alternatives[0], {}] },
+      Conflicting: {
+        ...base,
+        [keyword]: [
+          alternatives[0],
+          branch("number", flag === "readOnly" ? "writeOnly" : "readOnly"),
+        ],
+      },
+    }
+    const code = await gen(
+      oas("3.0", {
+        paths: Object.fromEntries(
+          Object.entries(cases).map(([name, schema]) => [`/${name}`, post(schema)["/pets"]]),
+        ),
+      }),
+    )
+    const optional = flag === "readOnly" ? "Request" : "Response"
+    const required = flag === "readOnly" ? "Response" : "Request"
+    await expectPassesTsc(
+      code,
+      [
+        'import type { Endpoints } from "./file0"',
+        ...Object.keys(cases).flatMap((name) => [
+          `type ${name}Request = NonNullable<Endpoints["POST /${name}"]["body"]>["application/json"]`,
+          `type ${name}Response = Endpoints["POST /${name}"]["responses"]["200"]["content"]["application/json"]`,
+        ]),
+        ...["Inline", "Wrapped"].flatMap((name) => [
+          `const omitted${name}: ${name}${optional} = {}`,
+          `const string${name}: ${name}${required} = { id: "x" }`,
+          `const number${name}: ${name}${required} = { id: 1 }`,
+          "// @ts-expect-error The opposite side still requires id.",
+          `const missing${name}: ${name}${required} = {}`,
+          "// @ts-expect-error Parent annotations do not change nested requirements.",
+          `const nested${name}: ${name}${optional} = { nested: {} }`,
+        ]),
+        `const other: Other${optional} = { other: true }`,
+        ...["Request", "Response"].flatMap((side) => [
+          "// @ts-expect-error Unrelated outer requirements remain required.",
+          `const missingOther${side}: Other${side} = { id: "x" }`,
+        ]),
+        ...["Request", "Response"].flatMap((side) =>
+          ["Mixed", "Missing", "Conflicting"].flatMap((name) => {
+            const checks = [`const present${name}${side}: ${name}${side} = { id: "x" }`]
+            if (side === required && name !== "Conflicting") {
+              checks.push(
+                "// @ts-expect-error Unannotated and same-direction branches still require id here.",
+              )
+            }
+            checks.push(`const missing${name}${side}: ${name}${side} = {}`)
+            return checks
+          }),
+        ),
+      ].join("\n"),
+    )
+  })
+
+  it.each(["readOnly", "writeOnly"] as const)(
+    "propagates %s requiredness through inline unions on both sides",
+    async (flag) => {
+      const shapes = {
+        type: "object",
+        properties: {
+          id: { type: "string", [flag]: true },
+          nested: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        },
+      }
+      const alternatives = { anyOf: [{ required: ["id"] }, { required: ["other"] }] }
+      const code = await gen(
+        oas("3.0", {
+          paths: post({ anyOf: [ref("Nested"), ref("Sibling"), ref("Intersection")] }),
+          components: {
+            schemas: {
+              Nested: { ...shapes, allOf: [alternatives] },
+              Sibling: { ...shapes, ...alternatives },
+              Intersection: {
+                ...shapes,
+                allOf: [
+                  {
+                    allOf: [
+                      {
+                        anyOf: Array.from({ length: 17 }, (_, i) => ({
+                          required: ["id", `p${i}`],
+                        })),
+                      },
+                      { anyOf: [{ required: ["a"] }, { required: ["b"] }] },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      )
+      const optional = flag === "readOnly" ? "Input" : ""
+      const required = flag === "readOnly" ? "" : "Input"
+      await expectPassesTsc(
+        code,
+        [
+          'import type { Schemas } from "./file0"',
+          ...["Nested", "Sibling"].flatMap((name) => [
+            `const omitted${name}: Schemas.${name}${optional} = {}`,
+            `const present${name}: Schemas.${name}${required} = { id: "x" }`,
+            `const alternate${name}: Schemas.${name}${required} = { other: true }`,
+            "// @ts-expect-error The property remains required on its applicable side.",
+            `const missing${name}: Schemas.${name}${required} = {}`,
+            "// @ts-expect-error A parent annotation does not affect nested property names.",
+            `const nested${name}: Schemas.${name}${optional} = { nested: {} }`,
+          ]),
+          `const intersection: Schemas.Intersection${optional} = { p0: true, a: true }`,
+          `const presentIntersection: Schemas.Intersection${required} = { id: "x", p0: true, a: true }`,
+          "// @ts-expect-error The intersection keeps its requirement on the applicable side.",
+          `const missingIntersection: Schemas.Intersection${required} = { p0: true, a: true }`,
+        ].join("\n"),
+      )
+    },
+  )
+
   it("applies a readOnly from one allOf member to a property another requires", async () => {
     const code = await gen(
       oas("3.0", {
