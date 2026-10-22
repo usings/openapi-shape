@@ -81,10 +81,9 @@ export class DocumentReader {
       ) {
         throw new Error(`Cannot redirect ${uri} to ${finalUri}`)
       }
-      const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
-      let format: TextFormat = formatFromPath(finalUrl.pathname)
-      if (contentType.includes("json")) format = "json"
-      else if (contentType.includes("yaml")) format = "yaml"
+      const contentType = response.headers.get("content-type") ?? ""
+      const mediaFormat = formatFromMediaType(contentType)
+      const format = mediaFormat === "unknown" ? formatFromPath(finalUrl.pathname) : mediaFormat
       const text = await readText(response, signal, this.maxBytes)
       return { uri: finalUri, root: parseText(text, format) }
     } finally {
@@ -234,6 +233,14 @@ function formatFromPath(path: string): TextFormat {
   const lower = path.toLowerCase()
   if (lower.endsWith(".json")) return "json"
   if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "yaml"
+  return "unknown"
+}
+
+/** Only the media subtype selects a parser; parameters can contain arbitrary names and URIs. */
+function formatFromMediaType(value: string): TextFormat {
+  const subtype = value.split(";", 1)[0].trim().toLowerCase().split("/", 2)[1] ?? ""
+  if (subtype === "json" || subtype === "x-json" || subtype.endsWith("+json")) return "json"
+  if (subtype === "yaml" || subtype === "x-yaml" || subtype.endsWith("+yaml")) return "yaml"
   return "unknown"
 }
 

@@ -94,7 +94,9 @@ Both limits must be positive safe integers and apply to local files and HTTP(S) 
 openapi-shape api.yaml --max-document-size 50 -o api.ts
 ```
 
-The exported `DocumentLoader` type describes the hook. It receives absolute `file:`, `http:`, or `https:` URIs without fragments. A `Response` from any fetch implementation works if its body is a web `ReadableStream` or `null`; any other result, `null` included, fails the load. A response must have a successful status. JSON/YAML parsing uses its content type and final URL; a nonempty `Response.url` becomes the base for relative references, otherwise the requested URI does. The hook does not bypass [reference boundaries](./openapi.md#references).
+The exported `DocumentLoader` type describes the hook. It receives absolute `file:`, `http:`, or `https:` URIs without fragments. A response must have a successful status and a body compatible with the runtime's web `ReadableStream`, or `null`; other hook results, including `null`, fail the load. The hook does not bypass [reference boundaries](./openapi.md#references).
+
+The response media type, excluding parameters, selects JSON or YAML parsing. If it does not identify either format, the final URL's extension is used; if that is also unknown, parsing tries JSON, then YAML. A nonempty `Response.url` becomes the base for relative references; otherwise the requested URI does.
 
 For example, authenticate requests to a known origin and delegate other sources:
 

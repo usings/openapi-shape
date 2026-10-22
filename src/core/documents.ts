@@ -66,8 +66,17 @@ const NAME_MAPS = new Set([
 ])
 // Name maps whose names (paths, status codes) never start with `x-`: such a key is an extension.
 const EXTENSIBLE_MAPS = new Set(["paths", "responses"])
-// Fields whose values are never schemas: instance data, and Links. Extensions (`x-`) are not either.
-const NO_SCHEMAS = new Set(["example", "examples", "const", "enum", "default", "links"])
+// Fields whose values are never schemas: instance data, Links, and discriminator metadata.
+// Mapping keys such as `$id` are payload values, not schema resource declarations.
+const NO_SCHEMAS = new Set([
+  "example",
+  "examples",
+  "const",
+  "enum",
+  "default",
+  "links",
+  "discriminator",
+])
 
 const MAX_LOAD_ROUNDS = 64
 

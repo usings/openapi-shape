@@ -41,6 +41,79 @@ async function errorsOf(promise: Promise<unknown>): Promise<string[]> {
 const claims = (n: number) => ({ $id: `https://spec.test/${n}.json`, type: "number" })
 
 describe("references across documents", () => {
+  it.each(["$anchor", "$dynamicAnchor"])(
+    "does not let discriminator mapping %s shadow an anchor",
+    async (keyword) => {
+      const { code, diagnostics } = await generate(
+        oas("3.1", {
+          components: {
+            schemas: {
+              Pet: {
+                oneOf: [{ $ref: "#/components/schemas/Target" }],
+                discriminator: { propertyName: "kind", mapping: { [keyword]: "Target" } },
+              },
+              Target: {
+                [keyword]: "Target",
+                type: "object",
+                properties: { kind: { type: "string" } },
+                required: ["kind"],
+              },
+              Alias: { $ref: "#Target" },
+            },
+          },
+        }),
+      )
+      expect(diagnostics).toStrictEqual([])
+      expect(declaration(code, "Alias")).toBe("Target")
+    },
+  )
+
+  it("keeps discriminator mapping names out of the schema resource index", async () => {
+    const uri = "https://spec.test/cat.json"
+    const calls: string[] = []
+    const { code, diagnostics } = await generate(
+      oas("3.1", {
+        components: {
+          schemas: {
+            Pet: {
+              oneOf: [{ $ref: uri }],
+              discriminator: {
+                propertyName: "kind",
+                mapping: { $id: uri, $anchor: "Local", $dynamicAnchor: "Dynamic" },
+              },
+            },
+            Local: { $anchor: "local", type: "string" },
+            Dynamic: { $dynamicAnchor: "dynamic", type: "number" },
+            LocalUse: { $ref: "#local" },
+            DynamicUse: { $ref: "#dynamic" },
+            Named: {
+              type: "object",
+              properties: { discriminator: { $id: "https://spec.test/named", type: "boolean" } },
+            },
+            NamedUse: { $ref: "https://spec.test/named" },
+          },
+        },
+      }),
+      {
+        base: "https://spec.test/api.json",
+        load: (url) => {
+          calls.push(url)
+          return Response.json({
+            type: "object",
+            properties: { kind: { type: "string" }, name: { type: "string" } },
+            required: ["kind", "name"],
+          })
+        },
+      },
+    )
+    expect(calls).toStrictEqual([uri])
+    expect(diagnostics).toStrictEqual([])
+    expect(declaration(code, "cat")).toContain("name: string")
+    expect(declaration(code, "LocalUse")).toBe("Local")
+    expect(declaration(code, "DynamicUse")).toBe("Dynamic")
+    expect(declaration(code, "NamedUse")).toBe("boolean")
+  })
+
   it("loads relative files, naming their definitions", async () => {
     await withFiles(
       {
@@ -308,7 +381,7 @@ describe("references across documents", () => {
     expect(result.diagnostics).toStrictEqual([])
   })
 
-  it.each(["x-User", "links", "default", "x-/~用户"])(
+  it.each(["x-User", "links", "default", "discriminator", "x-/~用户"])(
     "indexes an explicitly referenced external schema named %s",
     async (name) => {
       const pointer = name.replaceAll("~", "~0").replaceAll("/", "~1")

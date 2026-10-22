@@ -63,6 +63,21 @@ it("delegates undefined to the file loader and parses custom YAML", async () => 
   expect(result.code).toContain("YAML")
 })
 
+it.each([
+  'application/yaml; profile="https://json-schema.org/draft/2020-12/schema"',
+  "application/vnd.oai.openapi+yaml; version=3.1",
+  "text/plain; filename=openapi.json",
+])("ignores media type parameters when choosing a document parser: %s", async (contentType) => {
+  const result = await generate("https://spec.test/api.yaml", {
+    load: () =>
+      new Response("openapi: 3.1.0\ninfo: {title: YAML, version: '1'}", {
+        headers: { "content-type": contentType },
+      }),
+  })
+  expect(result.diagnostics).toStrictEqual([])
+  expect(result.code).toContain("// YAML 1")
+})
+
 it.each([0, -1, 1.5, Number.NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
   "rejects invalid loading limits %s",
   async (limit) => {
