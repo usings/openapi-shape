@@ -1,5 +1,17 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { basename, dirname, relative, resolve } from "node:path"
+import { randomUUID } from "node:crypto"
+import { constants } from "node:fs"
+import {
+  access,
+  mkdir,
+  open,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+} from "node:fs/promises"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { styleText } from "node:util"
 import { defineCommand } from "citty"
@@ -38,73 +50,131 @@ export const cli = defineCommand({
     },
   },
   async run({ args }) {
-    if (args.check && args.output === undefined) return usageError("--check requires --output")
-    if (args.output !== undefined && !isModule(args.output)) {
-      return usageError(`--output must be a .ts or .mts module, got ${args.output}`)
-    }
-
-    const size = args["max-document-size"]
-    const maxDocumentBytes = size === undefined ? undefined : Number(size) * 1024 * 1024
-    if (
-      size !== undefined &&
-      !(/^[1-9]\d*$/.test(size) && Number.isSafeInteger(maxDocumentBytes))
-    ) {
-      return usageError(`--max-document-size must be a positive whole number of MiB, got "${size}"`)
-    }
-
-    const cwd = process.cwd()
-    const isUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(args.source)
-    const source = isUrl ? args.source : relative(cwd, resolve(cwd, args.source))
-    let result
     try {
-      result = await generate(isUrl ? args.source : resolve(cwd, args.source), { maxDocumentBytes })
-    } catch (error) {
-      if (!(error instanceof GenerateError)) throw error
-      report(error.diagnostics, source, cwd)
-      return fail(`Generation failed (${counts(error.diagnostics)})`)
-    }
-    report(result.diagnostics, source, cwd)
+      if (args.check && args.output === undefined) return usageError("--check requires --output")
+      if (
+        args.output !== undefined &&
+        (typeof args.output !== "string" || !isModule(args.output))
+      ) {
+        return usageError(`--output must be a .ts or .mts module, got ${args.output}`)
+      }
 
-    if (args.output === undefined) {
-      process.stdout.write(result.code)
-      return
-    }
-    const target = resolve(cwd, args.output)
-    const warnings = result.diagnostics.length === 0 ? "" : ` (${counts(result.diagnostics)})`
-    if (args.check) {
-      let existing: string | null = null
-      try {
-        existing = await readFile(target, "utf8")
-      } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-          const reason = error instanceof Error ? error.message : String(error)
-          return fail(`Cannot read ${args.output}: ${reason}`)
-        }
-      }
-      if (existing === result.code) {
-        process.stderr.write(`${args.output} is up to date${warnings}\n`)
-        return
-      }
-      if (existing === null) {
-        return fail(
-          `${args.output} does not exist; run the same command without --check to write it`,
+      const size = args["max-document-size"]
+      const maxDocumentBytes = size === undefined ? undefined : Number(size) * 1024 * 1024
+      if (
+        size !== undefined &&
+        !(/^[1-9]\d*$/.test(size) && Number.isSafeInteger(maxDocumentBytes))
+      ) {
+        return usageError(
+          `--max-document-size must be a positive whole number of MiB, got "${size}"`,
         )
       }
-      process.stderr.write(firstDifference(args.output, existing, result.code))
-      return fail(
-        `${args.output} is out of date; run the same command without --check to update it`,
-      )
-    }
-    try {
-      await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, result.code)
+
+      const cwd = process.cwd()
+      const isUrl = /^[a-z][a-z\d+.-]*:/i.test(args.source) && !/^[a-z]:[\\/]/i.test(args.source)
+      const source = isUrl ? args.source : relative(cwd, resolve(cwd, args.source))
+      let result
+      try {
+        result = await generate(isUrl ? args.source : resolve(cwd, args.source), {
+          maxDocumentBytes,
+        })
+      } catch (error) {
+        if (!(error instanceof GenerateError)) throw error
+        report(error.diagnostics, source, cwd)
+        return fail(`Generation failed (${counts(error.diagnostics)})`)
+      }
+      report(result.diagnostics, source, cwd)
+
+      if (args.output === undefined) {
+        process.stdout.write(result.code)
+        return
+      }
+      const target = resolve(cwd, args.output)
+      const warnings = result.diagnostics.length === 0 ? "" : ` (${counts(result.diagnostics)})`
+      if (args.check) {
+        let existing: string | null = null
+        try {
+          existing = await readFile(target, "utf8")
+        } catch (error) {
+          if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+            const reason = error instanceof Error ? error.message : String(error)
+            return fail(`Cannot read ${args.output}: ${reason}`)
+          }
+        }
+        if (existing === result.code) {
+          process.stderr.write(`${args.output} is up to date${warnings}\n`)
+          return
+        }
+        if (existing === null) {
+          return fail(
+            `${args.output} does not exist; run the same command without --check to write it`,
+          )
+        }
+        process.stderr.write(firstDifference(args.output, existing, result.code))
+        return fail(
+          `${args.output} is out of date; run the same command without --check to update it`,
+        )
+      }
+      try {
+        await mkdir(dirname(target), { recursive: true })
+        await replaceOutput(target, result.code)
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        return fail(`Cannot write ${args.output}: ${reason}`)
+      }
+      process.stderr.write(`Wrote ${args.output}${warnings}\n`)
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      return fail(`Cannot write ${args.output}: ${reason}`)
+      fail(error instanceof Error ? error.message : String(error))
     }
-    process.stderr.write(`Wrote ${args.output}${warnings}\n`)
   },
 })
+
+/** Replace a complete file in one rename, following existing symlinks without replacing them. */
+async function replaceOutput(target: string, code: string): Promise<void> {
+  const destination = await outputDestination(target)
+  const existing = await stat(destination).catch((error: unknown) => {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
+    return null
+  })
+  let mode: number | undefined
+  if (existing !== null) {
+    await access(destination, constants.W_OK)
+    if (!existing.isFile()) throw new Error("Output target is not a regular file")
+    mode = existing.mode & 0o777
+  }
+  const directory = await realpath(dirname(destination))
+  const temporary = join(directory, `.openapi-shape-${randomUUID()}.tmp`)
+  const file = await open(temporary, "wx", mode ?? 0o666)
+  try {
+    try {
+      await file.writeFile(code)
+      if (mode !== undefined) await file.chmod(mode)
+    } finally {
+      await file.close()
+    }
+    await rename(temporary, destination)
+  } finally {
+    await rm(temporary, { force: true })
+  }
+}
+
+/** Follow dangling links too, without creating directories at their destinations. */
+async function outputDestination(target: string, links = 0): Promise<string> {
+  try {
+    return await realpath(target)
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
+  }
+  const link = await readlink(target).catch((error: unknown) => {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
+    return null
+  })
+  if (link === null) return target
+  if (links >= 40) throw new Error("Too many symbolic links in output target")
+  const parent = await realpath(dirname(target))
+  // Keep link text intact: normalizing `..` before following directory symlinks changes its meaning.
+  return outputDestination(isAbsolute(link) ? link : `${parent}/${link}`, links + 1)
+}
 
 /**
  * A file TypeScript reads as an ES module: `.ts` or `.mts`, but not a declaration file, which

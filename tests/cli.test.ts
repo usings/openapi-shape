@@ -1,11 +1,18 @@
-import { mkdir, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import * as fs from "node:fs/promises"
+import { chmod, lstat, mkdir, readFile, readdir, readlink, stat, symlink } from "node:fs/promises"
+import { dirname, join, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 import { stripVTControlCharacters } from "node:util"
 import { renderUsage, runCommand } from "citty"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cli } from "../src/cli/command"
+import * as core from "../src/core"
 import { oas } from "./helpers/generate"
 import { withFiles } from "./helpers/tmp"
+
+vi.mock("node:fs/promises", async (importOriginal) => ({
+  ...(await importOriginal<typeof fs>()),
+}))
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -63,6 +70,263 @@ describe("openapi-shape <source>", () => {
       const code = await readFile(join(dir, "src/gen/api.ts"), "utf8")
       expect(code).toContain("export type When = string")
       expect(code).toContain("export const contract")
+    })
+  })
+
+  it.each(["file:/", "file:///"])("loads %s URLs with encoded paths", async (prefix) => {
+    await withFiles({ "with spaces/openapi.json": spec }, async (dir) => {
+      const source = pathToFileURL(join(dir, "with spaces/openapi.json")).href.replace(
+        "file:///",
+        prefix,
+      )
+      const result = await run([source], dir)
+      expect(result).toMatchObject({ code: 0, stderr: "" })
+      expect(result.stdout).toContain("export type When = string")
+    })
+  })
+
+  it.each(["C:/spec/openapi.json", "C:\\spec\\openapi.json"])(
+    "classifies Windows drive path %s as a path",
+    async (source) => {
+      const generate = vi.spyOn(core, "generate").mockResolvedValue({ code: "", diagnostics: [] })
+      const cwd = process.cwd()
+      expect(await run([source], cwd)).toMatchObject({ code: 0 })
+      expect(generate).toHaveBeenCalledWith(resolve(cwd, source), { maxDocumentBytes: undefined })
+    },
+  )
+
+  it("passes unsupported URI schemes to core for diagnostics", async () => {
+    const result = await run(["urn:example:openapi"], process.cwd())
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain("urn:example:openapi")
+    expect(result.stderr).not.toContain("ENOENT")
+  })
+
+  it("replaces complete output repeatedly, preserving mode and cleaning temporary files", async () => {
+    await withFiles({ "openapi.json": spec, "api.ts": "previous output" }, async (dir) => {
+      const target = join(dir, "api.ts")
+      await chmod(target, 0o640)
+      const generated = await run(["openapi.json"], dir)
+      const expected = generated.stdout
+      const rename = fs.rename
+      const replacement = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        expect(await readFile(target, "utf8")).toBe("previous output")
+        expect(await readFile(from, "utf8")).toBe(expected)
+        await rename(from, to)
+      })
+      expect(await run(["openapi.json", "-o", "api.ts"], dir)).toMatchObject({ code: 0 })
+      expect(replacement).toHaveBeenCalledOnce()
+      expect(await run(["openapi.json", "-o", "api.ts"], dir)).toMatchObject({ code: 0 })
+      expect(await readFile(target, "utf8")).toBe(expected)
+      const info = await stat(target)
+      expect(info.mode & 0o777).toBe(0o640)
+      const files = await readdir(dir)
+      expect(files.toSorted()).toStrictEqual(["api.ts", "openapi.json"])
+    })
+  })
+
+  it.each(["partial write", "rename"])(
+    "preserves old output and cleans temporary files after a %s failure",
+    async (failure) => {
+      await withFiles({ "openapi.json": spec, "api.ts": "previous output" }, async (dir) => {
+        if (failure === "partial write") {
+          const open = fs.open
+          vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+            const file = await open(...args)
+            const write = file.writeFile.bind(file)
+            vi.spyOn(file, "writeFile").mockImplementation(async () => {
+              await write("partial output")
+              throw new Error("injected partial write failure")
+            })
+            return file
+          })
+        } else {
+          vi.spyOn(fs, "rename").mockRejectedValue(new Error("injected rename failure"))
+        }
+        const result = await run(["openapi.json", "-o", "api.ts"], dir)
+        expect(result.code).toBe(1)
+        expect(result.stderr).toContain(`Cannot write api.ts: injected ${failure} failure`)
+        expect(await readFile(join(dir, "api.ts"), "utf8")).toBe("previous output")
+        const files = await readdir(dir)
+        expect(files.toSorted()).toStrictEqual(["api.ts", "openapi.json"])
+      })
+    },
+  )
+
+  it("updates a symlink's target atomically while keeping the symlink", async () => {
+    await withFiles({ "openapi.json": spec, "real/api.ts": "previous output" }, async (dir) => {
+      const link = join(dir, "api.ts")
+      await symlink("real/api.ts", link)
+      expect(await run(["openapi.json", "-o", "api.ts"], dir)).toMatchObject({ code: 0 })
+      expect(await readlink(link)).toBe("real/api.ts")
+      expect(await readFile(join(dir, "real/api.ts"), "utf8")).toContain(
+        "export type When = string",
+      )
+      expect(await readdir(join(dir, "real"))).toStrictEqual(["api.ts"])
+    })
+  })
+
+  it.each(["relative", "absolute"])(
+    "creates a %s dangling symlink's final target while preserving the link",
+    async (kind) => {
+      await withFiles({ "openapi.json": spec }, async (dir) => {
+        const destination = kind === "relative" ? "missing.ts" : join(dir, "missing.ts")
+        await symlink(destination, join(dir, "api.ts"))
+        expect(await run(["openapi.json", "-o", "api.ts"], dir)).toMatchObject({ code: 0 })
+        expect(await readlink(join(dir, "api.ts"))).toBe(destination)
+        expect(await readFile(join(dir, "missing.ts"), "utf8")).toContain(
+          "export type When = string",
+        )
+        const files = await readdir(dir)
+        expect(files.toSorted()).toStrictEqual(["api.ts", "missing.ts", "openapi.json"])
+      })
+    },
+  )
+
+  it("creates the temporary file beside a dangling destination reached through an alias and ..", async () => {
+    await withFiles({ "openapi.json": spec }, async (dir) => {
+      await mkdir(join(dir, "real/nested"), { recursive: true })
+      await symlink("real/nested", join(dir, "alias"))
+      await symlink("alias/../missing.ts", join(dir, "api.ts"))
+      const directory = await fs.realpath(join(dir, "real"))
+      const rename = fs.rename
+      const replacement = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        expect(dirname(String(from))).toBe(directory)
+        await rename(from, to)
+      })
+      expect(await run(["openapi.json", "-o", "api.ts"], dir)).toMatchObject({ code: 0 })
+      expect(replacement).toHaveBeenCalledOnce()
+      expect(await readlink(join(dir, "api.ts"))).toBe("alias/../missing.ts")
+      expect(await readFile(join(dir, "real/missing.ts"), "utf8")).toContain(
+        "export type When = string",
+      )
+      const files = await readdir(join(dir, "real"))
+      expect(files.toSorted()).toStrictEqual(["missing.ts", "nested"])
+    })
+  })
+
+  it("follows relative dangling link chains through directory aliases before resolving ..", async () => {
+    await withFiles({ "openapi.json": spec }, async (dir) => {
+      await mkdir(join(dir, "real/nested"), { recursive: true })
+      await symlink("real/nested", join(dir, "alias"))
+      await symlink("alias/../next.ts", join(dir, "api.ts"))
+      await symlink("nested/missing.ts", join(dir, "real/next.ts"))
+      expect(await run(["openapi.json", "-o", "api.ts"], dir)).toMatchObject({ code: 0 })
+      expect(await readlink(join(dir, "api.ts"))).toBe("alias/../next.ts")
+      expect(await readlink(join(dir, "real/next.ts"))).toBe("nested/missing.ts")
+      expect(await readFile(join(dir, "real/nested/missing.ts"), "utf8")).toContain(
+        "export type When = string",
+      )
+      expect(await readdir(join(dir, "real/nested"))).toStrictEqual(["missing.ts"])
+      await expect(lstat(join(dir, "next.ts"))).rejects.toThrow("ENOENT")
+    })
+  })
+
+  it("does not create missing parent directories behind dangling symlinks", async () => {
+    await withFiles({ "openapi.json": spec }, async (dir) => {
+      await symlink("missing/api.ts", join(dir, "api.ts"))
+      const result = await run(["openapi.json", "-o", "api.ts"], dir)
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain("Cannot write api.ts:")
+      expect(await readlink(join(dir, "api.ts"))).toBe("missing/api.ts")
+      const files = await readdir(dir)
+      expect(files.toSorted()).toStrictEqual(["api.ts", "openapi.json"])
+    })
+  })
+
+  it("fails on a symlink cycle without replacing links or leaving temporary files", async () => {
+    await withFiles({ "openapi.json": spec }, async (dir) => {
+      await symlink("other.ts", join(dir, "api.ts"))
+      await symlink("api.ts", join(dir, "other.ts"))
+      const result = await run(["openapi.json", "-o", "api.ts"], dir)
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain("Cannot write api.ts:")
+      expect(await readlink(join(dir, "api.ts"))).toBe("other.ts")
+      expect(await readlink(join(dir, "other.ts"))).toBe("api.ts")
+      const files = await readdir(dir)
+      expect(files.toSorted()).toStrictEqual(["api.ts", "openapi.json", "other.ts"])
+    })
+  })
+
+  it.skipIf(process.getuid?.() === 0)("does not replace a read-only target", async () => {
+    await withFiles({ "openapi.json": spec, "api.ts": "previous output" }, async (dir) => {
+      const target = join(dir, "api.ts")
+      await chmod(target, 0o444)
+      try {
+        const result = await run(["openapi.json", "-o", "api.ts"], dir)
+        expect(result.code).toBe(1)
+        expect(result.stderr).toContain("Cannot write api.ts:")
+        expect(await readFile(target, "utf8")).toBe("previous output")
+        const files = await readdir(dir)
+        expect(files.toSorted()).toStrictEqual(["api.ts", "openapi.json"])
+      } finally {
+        await chmod(target, 0o644)
+      }
+    })
+  })
+
+  it.skipIf(process.getuid?.() === 0)(
+    "preserves output when its directory cannot hold a temporary file",
+    async () => {
+      await withFiles({ "openapi.json": spec, "out/api.ts": "previous output" }, async (dir) => {
+        const outputDirectory = join(dir, "out")
+        await chmod(outputDirectory, 0o555)
+        try {
+          const result = await run(["openapi.json", "-o", "out/api.ts"], dir)
+          expect(result.code).toBe(1)
+          expect(result.stderr).toContain("Cannot write out/api.ts:")
+          expect(await readFile(join(outputDirectory, "api.ts"), "utf8")).toBe("previous output")
+          expect(await readdir(outputDirectory)).toStrictEqual(["api.ts"])
+        } finally {
+          await chmod(outputDirectory, 0o755)
+        }
+      })
+    },
+  )
+
+  it("checks current, stale, and missing output without writing", async () => {
+    await withFiles({ "openapi.json": spec, "stale.ts": "previous output" }, async (dir) => {
+      await run(["openapi.json", "-o", "api.ts"], dir)
+      const before = await lstat(join(dir, "api.ts"))
+      expect(await run(["openapi.json", "-o", "api.ts", "--check"], dir)).toMatchObject({ code: 0 })
+      expect(await run(["openapi.json", "-o", "stale.ts", "--check"], dir)).toMatchObject({
+        code: 1,
+      })
+      expect(await run(["openapi.json", "-o", "new/api.ts", "--check"], dir)).toMatchObject({
+        code: 1,
+      })
+      const after = await lstat(join(dir, "api.ts"))
+      expect(after.ino).toBe(before.ino)
+      expect(after.mtimeMs).toBe(before.mtimeMs)
+      expect(await readFile(join(dir, "stale.ts"), "utf8")).toBe("previous output")
+      const files = await readdir(dir)
+      expect(files.toSorted()).toStrictEqual(["api.ts", "openapi.json", "stale.ts"])
+    })
+  })
+
+  it("concurrent writers leave one complete output and no temporary files", async () => {
+    await withFiles({ "a.json": spec, "b.json": oas("3.1", {}) }, async (dir) => {
+      const a = await run(["a.json"], dir)
+      const b = await run(["b.json"], dir)
+      vi.spyOn(process, "cwd").mockReturnValue(dir)
+      vi.spyOn(process.stderr, "write").mockReturnValue(true)
+      const temporaryFiles = new Set()
+      const ready = Promise.withResolvers<void>()
+      const rename = fs.rename
+      vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+        temporaryFiles.add(from)
+        if (temporaryFiles.size === 2) ready.resolve()
+        await ready.promise
+        await rename(from, to)
+      })
+      await Promise.all([
+        runCommand(cli, { rawArgs: ["a.json", "-o", "api.ts"] }),
+        runCommand(cli, { rawArgs: ["b.json", "-o", "api.ts"] }),
+      ])
+      expect(process.exitCode).toBeUndefined()
+      expect([a.stdout, b.stdout]).toContain(await readFile(join(dir, "api.ts"), "utf8"))
+      const files = await readdir(dir)
+      expect(files.toSorted()).toStrictEqual(["a.json", "api.ts", "b.json"])
     })
   })
 
@@ -187,10 +451,35 @@ describe("openapi-shape <source>", () => {
     },
   )
 
-  it("requires a source", async () => {
+  it("reports unexpected generation errors without writing output", async () => {
+    vi.spyOn(core, "generate").mockRejectedValue(new Error("unexpected failure"))
+    expect(await run(["source.json"], process.cwd())).toStrictEqual({
+      code: 1,
+      stdout: "",
+      stderr: "error: unexpected failure\n",
+    })
+  })
+
+  it("rejects a negated output option before loading", async () => {
+    const generate = vi.spyOn(core, "generate")
+    const result = await run(["source.json", "--no-output"], process.cwd())
+    expect(generate).not.toHaveBeenCalled()
+    expect(result).toStrictEqual({
+      code: 1,
+      stdout: "",
+      stderr: "error: --output must be a .ts or .mts module, got false; see openapi-shape --help\n",
+    })
+  })
+
+  it("requires a source before loading, including with output options", async () => {
+    const generate = vi.spyOn(core, "generate")
     await expect(runCommand(cli, { rawArgs: [] })).rejects.toThrow(
       "Missing required positional argument: SOURCE",
     )
+    await expect(runCommand(cli, { rawArgs: ["-o", "api.ts", "--check"] })).rejects.toThrow(
+      "Missing required positional argument: SOURCE",
+    )
+    expect(generate).not.toHaveBeenCalled()
   })
 
   it("takes the last of a repeated option, and --no-* flags", async () => {
@@ -206,7 +495,11 @@ describe("openapi-shape <source>", () => {
     expect(usage).toContain(
       "Generate a TypeScript module (types and the client contract) from an OpenAPI 3.0, 3.1, or 3.2 description.",
     )
+    expect(usage).toContain("USAGE openapi-shape [OPTIONS] <SOURCE>")
+    expect(usage).toContain("(Required)")
     expect(usage).toContain("--check")
     expect(usage).toContain("--max-document-size")
+    expect(usage).not.toContain("--diagnostics")
+    expect(usage).not.toContain("--fail-on")
   })
 })

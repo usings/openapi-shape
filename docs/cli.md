@@ -1,24 +1,26 @@
 # CLI and programmatic API
 
-Generate a module from a local file or URL, check committed output for changes, or call the generator from code. Both interfaces report structured [diagnostics](#diagnostics).
+Generate a TypeScript module from the command line or from code. Use `--check` to detect outdated output.
 
 ## CLI
 
 ```sh
-openapi-shape <source> [-o <file>] [--check] [--max-document-size <MiB>]
+openapi-shape <source> [-o <file>] [--check]
 ```
 
-| Option                        | Description                                                                                                                                                           |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<source>`                    | File path or URL of a JSON or YAML OpenAPI document.                                                                                                                  |
-| `-o, --output <file>`         | Write a `.ts` or `.mts` module, creating parent directories as needed. `.cts` and declaration files are not supported. Omit this option to write to stdout.           |
-| `--check`                     | Compare generated output with `<file>` without writing. Requires `--output`. Exit with 1 if the file is missing or differs; show the first difference when it exists. |
-| `--max-document-size <MiB>`   | The largest document to load, local or remote, entry or reference, as a positive whole number of MiB (1 MiB = 1,048,576 bytes). Default: `10`.                        |
-| `-h, --help`, `-v, --version` | Help, version.                                                                                                                                                        |
+| Option                        | Description                                                                                                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<source>`                    | Required. Local path or `file:`, HTTP(S) URL of a JSON or YAML OpenAPI document.                                                                            |
+| `-o, --output <file>`         | Write a `.ts` or `.mts` module, creating parent directories as needed. `.cts` and declaration files are not supported. Omit this option to write to stdout. |
+| `--check`                     | Compare generated output with `<file>` without writing. Requires `--output`. Exit with 1 if the file is missing or differs.                                 |
+| `--max-document-size <MiB>`   | Maximum size of each loaded document, as a positive whole number of MiB (1 MiB = 1,048,576 bytes). Default: `10`.                                           |
+| `-h, --help`, `-v, --version` | Help and version.                                                                                                                                           |
+
+Unknown options are ignored. When an option is repeated, its last value wins.
 
 ### Checking generated files
 
-Use paired scripts to regenerate a committed module locally and check it in CI:
+Use paired scripts to regenerate a committed module and check whether it is current:
 
 ```json
 {
@@ -29,25 +31,33 @@ Use paired scripts to regenerate a committed module locally and check it in CI:
 }
 ```
 
+`--check` compares the complete generated output, including formatting. For missing or outdated output, rerun without `--check` and commit the generated file.
+
 ### Output and exit status
 
-The generated module goes to the output file or stdout. Diagnostics and command results go to stderr, with one diagnostic per line:
+Generated TypeScript goes to the output file or stdout. Diagnostics and command status go to stderr. Warnings do not fail the command. Help and version go to stdout; argument parsing errors also print usage there.
+
+| Exit code | Meaning                                                                                                               |
+| --------- | --------------------------------------------------------------------------------------------------------------------- |
+| `0`       | Generation succeeded, or `--check` found matching output.                                                             |
+| `1`       | Generation failed, arguments were invalid, an output operation failed, or `--check` found missing or outdated output. |
+
+Each diagnostic occupies one line:
 
 ```text
 openapi.yaml#/components/schemas/User-Profile/type: warning invalid-schema: Unknown type "text"
 Wrote src/api.ts (1 warning)
 ```
 
-Locations contain the source file and a JSON Pointer. Failed runs end with `error:` and a description of the failure. When `--check` finds a difference, it prints the first differing line as `<file>:<line>:` before the failure message.
+Text locations include the source path or URI and a JSON Pointer. Generation and file-operation failures end with `error:` and a description. An outdated file also shows the first differing line as `<file>:<line>:`. Colors are enabled for compatible terminals; `NO_COLOR` and `FORCE_COLOR` apply.
 
-For a missing or outdated output, rerun without `--check` and commit the generated file. A `Cannot read` or `Cannot write` error reports the filesystem failure; check the target path and access permissions before retrying.
+### Atomic file replacement
 
-| Exit code | Meaning                                                                                                                |
-| --------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `0`       | Generation succeeded, or `--check` found matching output.                                                              |
-| `1`       | Generation failed, output could not be written, arguments were invalid, or `--check` found missing or outdated output. |
+With `--output`, the CLI writes a complete temporary file beside the destination, then renames it over the destination. A failed write or rename preserves the previous output. `--check` does not create temporary output.
 
-Colors are enabled when stderr is a compatible terminal; `NO_COLOR` and `FORCE_COLOR` apply. Unknown options are ignored. When an option is repeated, its last value wins.
+Symbolic links and normal permission bits are preserved. The destination directory must be writable. Replacement creates a new file: hard links retain the old contents, and ownership, ACLs, and special permission bits are not copied.
+
+This protects against partial writes, not power loss. Abrupt termination may leave a temporary file.
 
 ## Programmatic API
 
