@@ -1,6 +1,8 @@
 # Client
 
-`openapi-shape/client` uses [the generated contract](./output.md#the-runtime-contract) to build typed requests with standard `Request` and `Response` objects. It handles parameter styles, media types, and form encodings, and supports middleware around each request. The client has no dependencies and runs wherever `fetch` is available. It does not validate response data.
+`openapi-shape/client` uses [the generated contract](./output.md#the-runtime-contract) to build typed requests with standard `Request` and `Response` objects. It handles parameter styles, media types, and form encodings, and supports middleware around each request. The client has no dependencies and uses standard Fetch API globals.
+
+The client serializes requests and decodes responses; it does not validate their schemas. If the schema says `{ id: number }` but the server returns `{"id":"wrong"}`, the JSON is still returned with the declared static type. Validate data separately when needed. See [type guarantees and limits](./openapi.md#support-boundaries).
 
 ```ts
 import { createClient } from "openapi-shape/client"
@@ -73,25 +75,39 @@ The media type determines which body values the client accepts and how it sends 
 | JSON: `…/json`, `…+json`, `*/*`, `application/*` | The schema's type                       | JSON                                                                                       |
 | `application/x-www-form-urlencoded`              | The schema's type, or an encoded string | Fields serialized as their Encoding Objects say (`deepObject` as `metadata[key]=value`, …) |
 | `multipart/form-data`                            | The schema's type                       | `FormData`: schema-derived or explicit part types; arrays repeat their parts               |
-| `text/*`, except `text/event-stream`             | A string                                | As given                                                                                   |
+| Other `text/*`, except `text/event-stream`       | A string                                | As given                                                                                   |
 | Anything else                                    | A `Blob`, buffer, stream, or string     | As given                                                                                   |
 
-A `Blob`, `FormData`, `URLSearchParams`, buffer, or stream passes through for any media type. `FormData` and `URLSearchParams` supply their own content type. Other ready-made bodies use the explicitly selected media type, or the operation's non-JSON default. Without a label, a `Blob`'s own type applies, including under a wildcard such as `image/*`. Web and Node.js streams use half duplex.
+A `Blob`, `FormData`, `URLSearchParams`, buffer, or stream passes through unchanged. `FormData` and `URLSearchParams` set their own content type. Web and Node.js streams use half duplex.
 
-For URL-encoded and multipart forms, field encodings follow the selected media type, including its parameters. Different variants can declare different field encodings.
+Other ready bodies use the selected media type or the generated [`contentType` default](./output.md#the-runtime-contract). An `application/json` default does not relabel them, even when it has parameters. Without a label, a `Blob` uses its own type. Wildcards such as `image/*` do not label a body.
 
-For named schema properties without an explicit style, the generator records their default content types: objects use JSON, primitive values use text, and raw bytes use `application/octet-stream`. Array fields apply the encoding to each item. For example, a URL-encoded object field `meta: { id: 1 }` is sent as `meta=%7B%22id%22%3A1%7D`; an array of objects repeats that field with one JSON value per item. Form `querystring` parameters follow the same rule; ordinary query parameters keep their declared parameter styles.
+Only `multipart/form-data` is encoded automatically. For other multipart types, provide an encoded body with its content type and boundary.
 
-Defaults follow referenced and composed schemas, retaining `contentEncoding` on array items. A schema without an explicit type defaults to `application/octet-stream`; a constant or inferred shape does not substitute for that declaration. When a named field is absent from another schema alternative, alternatives do not determine one content type, conditional schemas may change its encoding, or inference reaches its recursion or complexity limit, generation warns; specify the field's `encoding.contentType` or an explicit style. Fields not named by the schema retain the client's fallback encoding.
+### Form field defaults
+
+URL-encoded and multipart forms use the encodings for the selected media type, including its parameters. Without an explicit style, named fields use these defaults:
+
+| Field type                     | Default content type                          |
+| ------------------------------ | --------------------------------------------- |
+| Object                         | `application/json`                            |
+| Primitive                      | `text/plain`                                  |
+| Raw bytes, or no explicit type | `application/octet-stream`                    |
+| Array                          | The item type's default, applied to each item |
+
+For example, `meta: { id: 1 }` becomes `meta=%7B%22id%22%3A1%7D` in a URL-encoded form. Arrays of objects repeat the field with one JSON value per item. Form `querystring` parameters follow these rules; ordinary query parameters use parameter styles.
+
+Defaults follow references and compositions, including array items' `contentEncoding`. A `const` or inferred shape does not replace an explicit `type`. If the generator cannot determine a default, it warns; set `encoding.contentType` or an explicit style. Unnamed fields use the client's fallback encoding.
 
 ### Multipart parts
 
 For `multipart/form-data`, a field's Encoding Object can change how its parts are sent. Array properties repeat the field and apply it to each item.
 
-- **`contentType`:** one concrete media type other than `text/plain` types each part: values are sent as JSON for a JSON type and as text otherwise, and a `Blob` or buffer takes that type, keeping a `File`'s name. Such a part is a `Blob`, the only `FormData` value with its own type, so it carries a filename (`blob` unless a `File` supplies one), and some servers treat it as an upload. Object properties default to `application/json`, including object items in arrays. With `text/plain`, values other than files remain text fields.
-- **`style`, `explode`, or `allowReserved`:** any of these, even at its default value, serializes the field as a URL-encoded field would, without percent-encoding, and `contentType` no longer applies. Supported styles are `form`, `spaceDelimited`, `pipeDelimited`, and `deepObject`. Such a field is text, so it rejects a `Blob` or buffer at any depth of its arrays and plain objects; send files for it in a ready `FormData`. As OpenAPI 3.0 specifies, 3.0 descriptions apply these fields to URL-encoded forms only.
+`contentType` sets each part's media type. JSON types encode values as JSON; other types encode text. A `Blob` or buffer uses the specified type, preserving a `File`'s name. With `text/plain`, non-file values remain text fields. Other explicitly typed parts are files named `blob` unless a `File` supplies its name; some servers treat them as uploads.
 
-The generator warns about part headers other than `Content-Type`, nested or positional encodings, unsupported styles, and a `contentType` that is not one concrete media type, such as a list or wildcard, none of which are applied. For a choice of part types, supply a `Blob` of the chosen type or a ready `FormData`. For anything `FormData` cannot express, supply an encoded body with its complete content type, including the boundary.
+Setting `style`, `explode`, or `allowReserved` switches the field to text serialization, even at their default values. It overrides `contentType` and uses URL-encoded form rules without percent-encoding. Supported styles are `form`, `spaceDelimited`, `pipeDelimited`, and `deepObject`. Files or buffers nested in these fields are rejected; send them in a ready `FormData`. OpenAPI 3.0 applies these style fields only to URL-encoded forms.
+
+Part headers other than `Content-Type`, nested/positional encodings, unsupported styles, and content-type lists or wildcards are ignored with warnings. Supply a typed `Blob`, ready `FormData`, or fully encoded body when these features are needed.
 
 ### Serialization
 

@@ -11,7 +11,7 @@
 - **Types for real APIs.** Get named component schemas, typed request inputs, and responses that narrow by HTTP status. Documented compatibility rules handle common OpenAPI quirks.
 - **Small footprint.** One generated `.ts` file and a dependency-free client.
 - **Controlled generation.** Cancel work, bound document loading, and provide a custom loader for authenticated or cached sources.
-- **CI-ready.** Use `--check` to catch outdated generated files.
+- **Automation.** Check generated files with `--check` and inspect diagnostics through `generate()`.
 
 **Contract first. Types are a projection. Validation is a separate responsibility.** OpenAPI and JSON Schema define the contract. `openapi-shape` generates TypeScript types and HTTP serialization metadata; it does not validate runtime data. Types alone do not prove validity, conformance, or authenticity. See [support and limits](./docs/openapi.md#support-boundaries).
 
@@ -45,9 +45,9 @@ The generated module has no imports or runtime dependencies. Its `Endpoints` and
 ## Requirements
 
 - **Generator:** Node.js 22 or later.
-- **Client:** a runtime with `fetch` support.
+- **Client:** a runtime with standard Fetch API globals.
 
-The generated module and client use ES modules. CommonJS is not supported. The current contract format is v3. After upgrading the package, [regenerate the module](./docs/output.md#format-compatibility) with the installed version.
+The generated module and client use ES modules. CommonJS is not supported. After upgrading the package, [regenerate the module](./docs/output.md#format-compatibility) with the installed version.
 
 ## Documentation
 

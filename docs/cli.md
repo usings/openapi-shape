@@ -61,7 +61,7 @@ This protects against partial writes, not power loss. Abrupt termination may lea
 
 ## Programmatic API
 
-`generate(input, options?)` accepts a file path, a `URL`, or a parsed document object. It resolves to `{ code, diagnostics }`, where `code` is the generated module and `diagnostics` contains warnings. Document failures reject with a `GenerateError` whose diagnostics describe the failure. Cancellation rejects with `signal.reason`; invalid loading limits reject with a `TypeError`.
+`generate(input, options?)` accepts a file path, a URL string or `URL`, or a parsed document object. It resolves to `{ code, diagnostics }`: the generated module and any warnings. Document failures reject with `GenerateError`, which contains error diagnostics and any warnings found. Cancellation rejects with `signal.reason`; invalid loading limits reject with `TypeError`.
 
 ```ts
 import { generate, GenerateError } from "openapi-shape"
@@ -75,20 +75,22 @@ try {
 }
 ```
 
-| Option | Description                                                                                                                                                                         |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `base` | The location of a parsed document, as a path or URL, used to resolve relative `$ref`s. Without it, references must stay within the document. Ignored when `input` is a path or URL. |
+`generate()` does not write files. The caller handles warnings and saves `code`; output checks and atomic replacement belong to the CLI.
+
+| Option | Description                                                                                                                                                                                                               |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `base` | The location of a parsed document, as a path or URL, used to resolve references. Without it, references must stay within that document, even if an external reference is absolute. Ignored when `input` is a path or URL. |
 
 ### Loading and cancellation
 
-| Option                  | Default             | Description                                                                                                                           |
-| ----------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `signal`                | —                   | An `AbortSignal` for the whole generation.                                                                                            |
-| `load(uri, { signal })` | Built-in loader     | Return a `Response`, or `undefined` to delegate to the built-in file/HTTP loader, directly or through a promise.                      |
-| `maxConcurrentLoads`    | `8`                 | Maximum loads in progress at once. A load, its hook and body reading included, is in progress until it succeeds, fails, or times out. |
-| `maxDocumentBytes`      | `10485760` (10 MiB) | Maximum bytes per loaded document, measured from its response stream before parsing.                                                  |
+| Option                  | Default             | Description                                                                                                      |
+| ----------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `signal`                | —                   | An `AbortSignal` for the whole generation.                                                                       |
+| `load(uri, { signal })` | Built-in loader     | Return a `Response`, or `undefined` to delegate to the built-in file/HTTP loader, directly or through a promise. |
+| `maxConcurrentLoads`    | `8`                 | Maximum active document loads, including the loader hook and response-body reading.                              |
+| `maxDocumentBytes`      | `10485760` (10 MiB) | Maximum bytes per loaded document, measured from its response stream before parsing.                             |
 
-Both limits must be positive safe integers and apply to local files and HTTP(S) sources alike. The byte limit applies to the entry document and every external reference, and counts decompressed HTTP bytes; it does not limit an already parsed input object, total memory, or data a custom loader buffers before returning its response. The CLI sets the byte limit with `--max-document-size`, in MiB, and uses the other defaults:
+Both numeric limits must be positive safe integers and apply to local files and HTTP(S) sources. The byte limit covers the entry document and each external reference, counting decompressed HTTP bytes. It does not limit an already parsed input object, total memory, or data a custom loader buffers before returning its response. The CLI exposes the byte limit in MiB and uses the other defaults:
 
 ```sh
 openapi-shape api.yaml --max-document-size 50 -o api.ts
@@ -127,9 +129,9 @@ Build and render work checks cancellation between work units. Parsing and large 
 
 ## Diagnostics
 
-Errors stop generation. Warnings identify invalid input or parts of the description the output cannot apply. Documented [compatibility rules](./openapi.md#following-the-real-api) do not produce warnings.
+Errors stop generation. Warnings identify invalid input, unsupported behavior, or loss of type precision. Documented [compatibility rules](./openapi.md#following-the-real-api) do not produce warnings. Diagnostics are not a complete OpenAPI/JSON Schema validation report, and not every omitted validation constraint produces a warning.
 
-Each diagnostic has four fields:
+Each generator diagnostic has four fields:
 
 | Field      | Meaning                                                                                                   |
 | ---------- | --------------------------------------------------------------------------------------------------------- |
@@ -140,21 +142,21 @@ Each diagnostic has four fields:
 
 ### Diagnostic codes
 
-| Code                           | Severity | Meaning                                                                                                                                                                                                                      |
-| ------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invalid-document`             | error    | The document is not a JSON object, refers to itself, nests too deeply, or a `patternProperties` match exceeds its 100 ms limit.                                                                                              |
-| `unsupported-version`          | error    | The document does not declare a supported OpenAPI 3.0, 3.1, or 3.2 version.                                                                                                                                                  |
-| `read-failed`                  | error    | The entry document cannot be read or parsed.                                                                                                                                                                                 |
-| `unresolved-ref`               | error    | A `$ref` target is missing, unreadable, or not allowed.                                                                                                                                                                      |
-| `circular-ref`                 | error    | Non-schema references form a cycle.                                                                                                                                                                                          |
-| `ignored-field`                | warning  | An unapplied field: path or operation servers, a redefined fixed method in `additionalOperations`, `itemSchema` on a non-sequential media type, unsupported multipart encoding, or a form default that cannot be determined. |
-| `invalid-schema`               | warning  | An invalid schema value, type, or literal, or an empty `allOf`, `anyOf`, or `oneOf`.                                                                                                                                         |
-| `circular-schema`              | warning  | Schemas that refer back through only `allOf`, `anyOf`, `oneOf`, or `$ref`; the cycle is cut.                                                                                                                                 |
-| `schema-precision-loss`        | warning  | A composition is widened at a [complexity or mixed-shape boundary](./openapi.md#complexity-limits). The message explains the reason and the location identifies the affected schema.                                         |
-| `unsupported-request-encoding` | warning  | An endpoint request declares binary values in a location the client encodes as text or nested JSON. The schema types are preserved; correct the declaration or supply an encoded body where supported.                       |
-| `discriminator-mismatch`       | warning  | A discriminator value or branch that conflicts with the schemas.                                                                                                                                                             |
-| `invalid-parameter`            | warning  | A malformed or duplicated parameter.                                                                                                                                                                                         |
-| `path-parameter-mismatch`      | warning  | Path parameters and the path template disagree.                                                                                                                                                                              |
-| `invalid-status-code`          | warning  | A response key that is not a status code, range, or `default`.                                                                                                                                                               |
-| `path-item-conflict`           | warning  | A local Path Item field that overrides a field inherited through `$ref`.                                                                                                                                                     |
-| `renamed-schema`               | warning  | A schema or input-variant name changed to avoid a collision.                                                                                                                                                                 |
+| Code                           | Severity | Meaning                                                                                                                                                                              |
+| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `invalid-document`             | error    | The entry value is not an object, an in-memory object graph is cyclic, nesting exceeds processing capacity, or a `patternProperties` match exceeds its 100 ms limit.                 |
+| `unsupported-version`          | error    | The entry document does not declare a supported OpenAPI 3.0, 3.1, or 3.2 version.                                                                                                    |
+| `read-failed`                  | error    | The entry document cannot be read or parsed.                                                                                                                                         |
+| `unresolved-ref`               | error    | A reference target is missing, unreadable, unsupported, or not allowed.                                                                                                              |
+| `circular-ref`                 | error    | Non-schema references form a cycle.                                                                                                                                                  |
+| `ignored-field`                | warning  | A field is not applied: for example, path/operation servers, unsupported multipart encoding, or a form default that cannot be determined.                                            |
+| `invalid-schema`               | warning  | An invalid schema value, type, or literal, or an empty `allOf`, `anyOf`, or `oneOf`.                                                                                                 |
+| `circular-schema`              | warning  | Schemas refer back through only `allOf`, `anyOf`, `oneOf`, or `$ref`; the cycle is cut.                                                                                              |
+| `schema-precision-loss`        | warning  | A composition is widened at a [complexity or mixed-shape boundary](./openapi.md#complexity-limits). The message explains the reason and the location identifies the affected schema. |
+| `unsupported-request-encoding` | warning  | An endpoint request declares binary values in a location the client encodes as text or nested JSON. Correct the declaration or supply an encoded body where supported.               |
+| `discriminator-mismatch`       | warning  | A discriminator value or branch conflicts with the schemas.                                                                                                                          |
+| `invalid-parameter`            | warning  | A malformed or duplicated parameter.                                                                                                                                                 |
+| `path-parameter-mismatch`      | warning  | Path parameters and the path template disagree.                                                                                                                                      |
+| `invalid-status-code`          | warning  | A response key is not a status code, range, or `default`.                                                                                                                            |
+| `path-item-conflict`           | warning  | A nearer Path Item field overrides one inherited through `$ref`.                                                                                                                     |
+| `renamed-schema`               | warning  | A schema or input-variant name changed to avoid a collision.                                                                                                                         |

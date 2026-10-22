@@ -1,6 +1,6 @@
 # OpenAPI support
 
-The generator supports OpenAPI 3.0, 3.1, and 3.2. This page describes how descriptions become TypeScript types, the [compatibility rules](#following-the-real-api) used for real APIs, and the [approximations](#approximations) needed where TypeScript cannot express a schema exactly.
+The generator supports OpenAPI 3.0, 3.1, and 3.2. This page describes how descriptions become TypeScript types, the [compatibility rules](#following-the-real-api) used for real APIs, and the [approximations](#approximations) arising from TypeScript limits and deliberate type assumptions.
 
 ## Support boundaries
 
@@ -21,9 +21,9 @@ The types follow the supported features, [compatibility rules](#following-the-re
 
 References resolve against the document location, OpenAPI 3.2's `$self`, or the nearest schema `$id` in 3.1+. Targets may use JSON Pointers or `$anchor` names in any document. If multiple documents claim the same URI, the first referenced document keeps it, along with the anchors under that URI.
 
-An `$id` or anchor inside an extension (`x-…`), instance data (`example`, `examples`, `default`, `const`, `enum`), or a Link is ignored: it claims no URI, and references inside it resolve against the base outside it.
+An `$id` or anchor inside an extension (`x-…`), instance data (`example`, `examples`, `default`, `const`, `enum`), a Link, or discriminator metadata is ignored: it claims no URI, and references inside it resolve against the base outside it. Discriminator mapping keys are payload values, including keys named `$id`, `$anchor`, or `$dynamicAnchor`.
 
-External schema entries named `x-…`, `links`, or an instance-data keyword can still be used through an explicit JSON Pointer schema reference. For files without `openapi`, that reference enables `$id` and anchor indexing along the pointer and within the target schema. Extensions and instance data inside the target remain excluded unless themselves explicitly referenced.
+External schema entries named `x-…`, `links`, `discriminator`, or an instance-data keyword can still be used through an explicit JSON Pointer schema reference. For files without `openapi`, that reference enables `$id` and anchor indexing along the pointer and within the target schema. Extensions and instance data inside the target remain excluded unless themselves explicitly referenced.
 
 Non-schema Reference Objects are supported wherever components can be referenced, including 3.2 media types. In 3.1+, sibling `summary` and `description` fields override the target's annotations.
 
@@ -49,17 +49,17 @@ Each `patternProperties` match, including compiling its pattern, has a 100 ms ex
 - **Parameters:** Path Item and operation parameters are merged by name and location; the operation wins on conflicts. Header names are case-insensitive. Parameter types come from `schema` or the single `content` entry.
 - **Ignored headers:** header parameters named `Accept`, `Content-Type`, or `Authorization`, and response headers named `Content-Type`, are ignored as required by OpenAPI.
 - **Path templates:** undeclared template variables become `string` parameters. Parameters absent from the template are dropped. Both cases produce diagnostics.
-- **Request bodies:** bodies on `GET`, `HEAD`, and `DELETE` remain in `Endpoints`. The client cannot send a body with `GET` or `HEAD` because `fetch` does not allow it.
+- **Request bodies:** bodies on `GET`, `HEAD`, and `DELETE` remain in `Endpoints`. The client cannot send a body with `GET` or `HEAD` because `fetch` does not allow it. Its callable endpoint types also exclude `CONNECT`, `TRACE`, and `TRACK`; those operations can still appear in generated types.
 - **Servers:** root servers are listed in the module header. Path and operation servers produce an `ignored-field` warning. Configure a separate client for operations that need a different `baseUrl`.
 
 ## Media types
 
-The generator uses the media type to determine request and response content types:
+The generator uses the media type to determine the content types stored in `Endpoints`. These types also support custom clients and stream parsers; they are not necessarily the decoded values returned by `api.result()`. See [client responses](./client.md#responses) for runtime decoding.
 
 | Media type                                                                                        | Type                                                            |
 | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | JSON: `…/json`, `…+json`, and the wildcards `*/*` and `application/*`                             | Its schema (`unknown` without one)                              |
-| `application/x-www-form-urlencoded`, `multipart/form-data`                                        | Its schema                                                      |
+| `application/x-www-form-urlencoded`, `multipart/*`                                                | Its schema                                                      |
 | Sequences with `itemSchema`: `text/event-stream` and JSON sequences                               | An array of its items                                           |
 | JSON sequences: `application/jsonl`, `application/x-ndjson`, `application/json-seq`, `…+json-seq` | An array of `itemSchema` items, or of `schema` read as the item |
 | Other `text/*`, including `text/event-stream` without `itemSchema`                                | `string`, or the schema's type when it says which strings       |
@@ -68,28 +68,28 @@ The generator uses the media type to determine request and response content type
 
 ### Binary content
 
-Raw byte strings become `Blob`: `format: binary`, a binary `contentMediaType` without `contentEncoding`, or Swagger's `type: file`. In multipart content, these values represent file parts. Under a text media type, they remain strings, and under the range `text/*`, `unknown`.
+For a `type: string` schema without `const` or `enum`, `format: binary` or a binary `contentMediaType` without `contentEncoding` produces `Blob`. Legacy `type: file` also produces `Blob`. In multipart content, these values represent file parts. A non-JSON text media type instead projects them as strings, and the range `text/*` as `unknown`. A binary media type itself produces `Blob`, even without a schema.
 
 Encoding Objects do not change generated types. See [request bodies](./client.md#request-bodies) for how the client encodes them.
 
 ## Schemas
 
-| Schema                                      | TypeScript                                                                                                                                     |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `true`, `{}`, annotations only              | `unknown`                                                                                                                                      |
-| `false`, `not: {}`, empty `enum`            | `never`                                                                                                                                        |
-| `type` (or 3.1+ `type` arrays)              | `string`, `number` (also for `integer`), `boolean`, `null`, arrays, objects, or their union                                                    |
-| `const`, `enum`                             | Literal types, including object and array literals; values outside `type` are dropped                                                          |
-| `format`                                    | The original type plus `@format`; `binary` produces `Blob`, and `byte` remains base64 text                                                     |
-| `items`, `prefixItems`                      | `T[]` or a tuple. Elements beyond `minItems` are optional; `items: false` closes the tuple. Recursive tuples use labels when needed to compile |
-| `properties`, `required`                    | Required or optional properties. Undeclared required properties use `patternProperties`, `additionalProperties`, or `unknown`                  |
-| `additionalProperties`, `patternProperties` | An index signature, widened to admit the declared properties                                                                                   |
-| `allOf`                                     | Intersection; plain object members are merged into one object                                                                                  |
-| `anyOf`, `oneOf`                            | Union                                                                                                                                          |
-| `if`/`then`/`else`                          | `(if & then) \| else`                                                                                                                          |
-| `$ref`                                      | The target, intersected with the other keywords                                                                                                |
-| `$dynamicRef`                               | Resolved like `$ref` ([Approximations](#approximations))                                                                                       |
-| `nullable: true`                            | The schema also admits `null`, wherever `nullable` appears                                                                                     |
+| Schema                                        | TypeScript                                                                                                                                     |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `true`, `{}`, annotations only                | `unknown`                                                                                                                                      |
+| `false`, `not: {}`, `not: true`, empty `enum` | `never`                                                                                                                                        |
+| `type`, including type arrays                 | `string`, `number` (also for `integer`), `boolean`, `null`, arrays, objects, or their union                                                    |
+| `const`, `enum`                               | Literal types, including object and array literals; values outside `type` are dropped                                                          |
+| `format`                                      | The original type plus `@format`; binary string schemas produce `Blob` as described above; `byte` remains text                                 |
+| `items`, `prefixItems`                        | `T[]` or a tuple. Elements beyond `minItems` are optional; `items: false` closes the tuple. Recursive tuples use labels when needed to compile |
+| `properties`, `required`                      | Required or optional properties. Undeclared required properties use `patternProperties`, `additionalProperties`, or `unknown`                  |
+| `additionalProperties`, `patternProperties`   | An index signature, widened to admit the declared properties                                                                                   |
+| `allOf`                                       | Intersection; plain object members are merged into one object                                                                                  |
+| `anyOf`, `oneOf`                              | Union                                                                                                                                          |
+| `if`/`then`/`else`                            | With `if` and `else`: `(if & then) \| else`; without `then`: `if \| else`                                                                      |
+| `$ref`                                        | The target, intersected with the other keywords                                                                                                |
+| `$dynamicRef`                                 | Resolved like `$ref` ([Approximations](#approximations))                                                                                       |
+| `nullable: true`                              | The schema also admits `null`, wherever `nullable` appears                                                                                     |
 
 Validation-only keywords such as `minimum`, `pattern`, `uniqueItems`, `contains`, `dependentRequired`, and `unevaluatedProperties` do not change the type. Some supported keywords extend earlier OpenAPI versions; see [Following the real API](#following-the-real-api).
 

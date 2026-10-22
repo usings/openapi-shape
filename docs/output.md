@@ -2,6 +2,8 @@
 
 `openapi-shape` generates one TypeScript module per OpenAPI description. It contains operation types (`Endpoints`, plus `Webhooks` and `Callbacks` when present), named schema types in `Schemas`, and the runtime `contract` used by [the client](./client.md).
 
+The module has no imports or runtime dependencies. Its types describe the contract under the generator's [projection rules and limits](./openapi.md#support-boundaries); they do not validate values at runtime. The `contract` value contains serialization metadata, not executable schemas.
+
 ## Example
 
 This excerpt is generated from [the example description](https://github.com/usings/openapi-shape/blob/main/tests/fixtures/readme.yaml):
@@ -130,16 +132,11 @@ In these entries, `headers`, `query`, and `body` describe what your server recei
 import type { Webhooks } from "./api"
 
 type PetCreated = Webhooks["POST pet.created"]
-type Received = PetCreated["responses"]["200"]["content"]["application/json"]
-
-export async function onPetCreated(request: Request): Promise<Response> {
-  // Verify the signature before trusting the payload (see below).
-  const pet: PetCreated["body"]["application/json"] = await request.json()
-  return Response.json({ received: pet.id } satisfies Received)
-}
+export type PetPayload = PetCreated["body"]["application/json"]
+export type Receipt = PetCreated["responses"]["200"]["content"]["application/json"]
 ```
 
-These types describe the documented API without validating incoming requests. Authenticate the sender and validate payloads as needed. Declared signature headers appear in `headers`.
+Use these types when implementing handlers. Assigning a parsed payload to `PetPayload` does not validate it or authenticate its sender; those checks belong to the handler or a separate layer. Declared signature headers appear in `headers`.
 
 ## Schemas
 
@@ -155,7 +152,7 @@ Schemas in external components, under `$defs`, in standalone schema files, or wi
 
 JSDoc preserves titles, descriptions, deprecation, and constraints that TypeScript cannot express: `@format`, `@default`, `@minimum`, `@maximum`, `@exclusiveMinimum`, `@exclusiveMaximum`, `@multipleOf`, `@minLength`, `@maxLength`, `@pattern`, `@minItems`, `@maxItems`, `@uniqueItems`, `@minProperties`, `@maxProperties`, `@contentMediaType`, `@contentEncoding`, `@readOnly`, `@writeOnly`, and `@see`.
 
-Formats usually add documentation without changing the type. The exception is `binary`, which produces `Blob`. A `date-time` remains a `string`, and an `int64` remains a `number`, with JavaScript's precision limits beyond 2^53. Convert these values in application code as needed.
+Formats usually add documentation without changing the type. A non-literal `type: string` schema with `format: binary` produces `Blob`; see [Binary content](./openapi.md#binary-content). A `date-time` remains a `string`, and an `int64` remains a `number`, with JavaScript's precision limits beyond 2^53. Convert these values in application code as needed.
 
 ### Input variants
 
@@ -188,13 +185,15 @@ This is OpenAPI 3.0's rule, applied in 3.1+ too ([Following the real API](./open
 
 ## The runtime contract
 
-`contract` stores the serialization metadata the client needs at runtime, including schema-derived form defaults:
+The generated `contract` records HTTP serialization settings. Operations that use client defaults may be absent from its `endpoints` map. It contains no runtime schema validator. Entries can contain:
 
 - Parameter encodings under `params`, `query`, and `headers`: `{ style, explode }` (with `allowReserved` when set), or `{ contentType }` for a parameter with `content`.
 - `querystring`: the media type of an OpenAPI 3.2 querystring parameter. Form querystrings instead store their field encodings under `query`.
-- `contentType`: the non-JSON default request media type, when it is the only declared type.
-- `json`: the default `application/json` media type when it has parameters, such as `application/json; charset=utf-8`, used to label encoded JSON when the call omits `contentType`. See [call inputs](./client.md#what-a-call-takes).
-- `bodyEncodings`: explicit encodings and schema-derived content types of `application/x-www-form-urlencoded` and `multipart/form-data` bodies, keyed by the full media type (including parameters), then by field. An explicit style overrides the field's content type. `repeat: true` applies a URL-encoded field's content type to each array item; parameter `content` continues to encode the entire value. A field without an entry uses the client's fallback encoding.
+- `contentType`: the default request media type when it is not `application/json`, `application/*`, or `*/*`. This includes form types and JSON types such as `application/merge-patch+json`. The [default selection rule](./client.md#what-a-call-takes) determines which media type is used.
+- `json`: the default `application/json` label when it differs from plain `application/json`, such as `application/json; charset=utf-8`, used to label encoded JSON when the call omits `contentType`. See [call inputs](./client.md#what-a-call-takes).
+- `bodyEncodings`: form field settings, keyed by the full media type (including parameters), then field name. These include explicit encodings and schema-derived defaults. An explicit style overrides content type; missing entries use the client's fallback.
+
+For URL-encoded form arrays, `repeat: true` encodes each item separately. A parameter's `content` instead encodes the whole value.
 
 `GET` and `HEAD` endpoints have no `contentType`, `json`, or `bodyEncodings`: the client sends them without a body.
 
