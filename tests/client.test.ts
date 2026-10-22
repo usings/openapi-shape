@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm"
 import { describe, expect, it } from "vitest"
 import type { Client, ClientOptions, Contract, Middleware } from "../src/client"
 import { createClient, defineMiddleware } from "../src/client"
@@ -76,8 +77,7 @@ describe("createClient", () => {
       undefined,
       null,
       { endpoints: {} },
-      { version: 1, endpoints: {} },
-      { version: 3, endpoints: {} },
+      { version: 999, endpoints: {} },
       { version: "2", endpoints: {} },
     ]) {
       expect(() => createClient(given as never)).toThrow(
@@ -102,6 +102,83 @@ describe("building requests", () => {
       params: { x: "雪/a b", y: ["1", "2"], z: { k: "v w" } },
     })
     expect(url(sent())).toBe("/a/%E9%9B%AA%2Fa%20b/1,2/k,v%20w")
+  })
+
+  it.each(["a/b", "a#b", "a?b", "a;b=c", "雪/名", "a\n/b"])(
+    "expands the entire legal parameter name %s and escapes matrix names",
+    async (name) => {
+      const endpoint = `GET /files/{${name}}/tail`
+      const { client, sent } = recorder<
+        Record<string, { params: Record<string, unknown>; responses: object }>
+      >({
+        version: 2,
+        endpoints: { [endpoint]: { params: { [name]: { style: "matrix", allowReserved: true } } } },
+      })
+      await client.fetch(endpoint, { params: { [name]: "safe" } })
+      expect(url(sent())).toBe(`/files/;${encodeURIComponent(name)}=safe/tail`)
+      const exploded = recorder<
+        Record<string, { params: Record<string, unknown>; responses: object }>
+      >({
+        version: 2,
+        endpoints: { [endpoint]: { params: { [name]: { style: "matrix", explode: true } } } },
+      })
+      await exploded.client.fetch(endpoint, { params: { [name]: ["a", "b"] } })
+      expect(url(exploded.sent())).toBe(
+        `/files/;${encodeURIComponent(name)}=a;${encodeURIComponent(name)}=b/tail`,
+      )
+      const simple = recorder<
+        Record<string, { params: Record<string, unknown>; responses: object }>
+      >({ version: 2, endpoints: {} })
+      await simple.client.fetch(endpoint, { params: { [name]: "safe" } })
+      expect(url(simple.sent())).toBe("/files/safe/tail")
+      await expect(simple.client.fetch(endpoint, { params: {} })).rejects.toThrow(
+        "Missing path parameter",
+      )
+    },
+  )
+
+  it("preserves segment boundaries and traversal rejection around slash-bearing names", async () => {
+    const { client, sent } = recorder<
+      Record<string, { params: Record<string, unknown>; responses: object }>
+    >({
+      version: 2,
+      endpoints: {
+        "GET /files/{a/b}/tail": { params: { "a/b": { allowReserved: true } } },
+      },
+    })
+    await client.fetch("GET /files//prefix-{a/b}-{c/d}/", { params: { "a/b": "x", "c/d": "y" } })
+    expect(url(sent())).toBe("/files//prefix-x-y/")
+    for (const value of ["", ".", "..", "%2e%2E", "x/../y", "x//y"]) {
+      // oxlint-disable-next-line no-await-in-loop -- each traversal case is independent
+      await expect(
+        client.fetch("GET /files/{a/b}/tail", { params: { "a/b": value } }),
+      ).rejects.toThrow("another resource")
+    }
+  })
+
+  it("serializes cross-realm plain objects and Dates as ordinary parameter values", async () => {
+    const { client, sent } = recorder<{
+      "GET /files/{meta}": {
+        params: { meta: object }
+        query: Record<string, unknown>
+        responses: object
+      }
+    }>({
+      version: 2,
+      endpoints: { "GET /files/{meta}": { query: { filter: { style: "deepObject" } } } },
+    })
+    const input = runInNewContext(
+      '({ params: { meta: { id: 1 } }, query: { filter: { items: ["x", "y"] }, when: new Date(0) }, headers: { "x-meta": { id: 1 } } })',
+    ) as {
+      params: { meta: object }
+      query: Record<string, unknown>
+      headers: Record<string, unknown>
+    }
+    await client.fetch("GET /files/{meta}", input)
+    expect(url(sent())).toBe(
+      "/files/id,1?filter[items][0]=x&filter[items][1]=y&when=1970-01-01T00%3A00%3A00.000Z",
+    )
+    expect(sent().headers.get("x-meta")).toBe("id,1")
   })
 
   it("rejects, sending nothing, when a request cannot be built", async () => {
@@ -375,6 +452,40 @@ describe("request bodies", () => {
     }
   })
 
+  it.each([
+    "new Uint8Array([65, 66]).buffer",
+    "new Uint8Array([0, 65, 66, 0]).subarray(1, 3)",
+    "new DataView(new Uint8Array([0, 65, 66, 0]).buffer, 1, 2)",
+    "new Uint8Array(new SharedArrayBuffer(2)).map((_, i) => 65 + i).buffer",
+    "(() => { const b = new SharedArrayBuffer(2); new Uint8Array(b).set([65,66]); return b })()",
+  ])("passes cross-realm bytes through (%s)", async (expression) => {
+    const { client, sent } = recorder(contract)
+    const body: unknown = runInNewContext(expression)
+    await client.fetch("POST /upload", {
+      contentType: "application/octet-stream",
+      body: body as ArrayBuffer,
+    })
+    expect(new Uint8Array(await sent().arrayBuffer())).toStrictEqual(new Uint8Array([65, 66]))
+  })
+
+  it.each([
+    "Blob",
+    "File",
+    "FormData",
+    "URLSearchParams",
+    "ReadableStream",
+    "ArrayBuffer",
+    "SharedArrayBuffer",
+    "Date",
+  ])("does not recognize a toStringTag-only %s as a native body or value", async (tag) => {
+    const { client, sent } = recorder<{
+      "POST /json": { body: { "application/json": unknown }; responses: object }
+    }>({ version: 2, endpoints: {} })
+    const body = { [Symbol.toStringTag]: tag, value: "kept" }
+    await client.fetch("POST /json", { body })
+    expect(await sent().text()).toBe('{"value":"kept"}')
+  })
+
   it("refuses to guess an encoding", async () => {
     const { client, sent } = recorder<{
       "POST /x": { body: { "application/xml": { a: string } }; responses: object }
@@ -406,7 +517,7 @@ describe("request bodies", () => {
   it("refuses a Blob wherever it would be written as text or JSON", async () => {
     const { client } = recorder<{
       "POST /m": {
-        query: { q?: unknown; j?: unknown }
+        query?: { q?: unknown; j?: unknown }
         body?: {
           "application/json": unknown
           "multipart/form-data": { meta?: object }
@@ -443,6 +554,24 @@ describe("request bodies", () => {
       // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
       await expect(call()).rejects.toThrow(`A Blob cannot be sent ${where}`)
     }
+  })
+
+  it("rejects a branded Blob in JSON even without the local Blob prototype", async () => {
+    // Node VM contexts have no Blob constructor. Retain native state while replacing the
+    // prototype chain to exercise the same brand check needed for another browser realm.
+    const blob = new Blob(["binary"])
+    Object.setPrototypeOf(
+      blob,
+      Object.create(Object.prototype, Object.getOwnPropertyDescriptors(Blob.prototype)),
+    )
+    expect(blob).not.toBeInstanceOf(Blob)
+    const { client, requests } = recorder<{
+      "POST /json": { body: { "application/json": unknown }; responses: object }
+    }>({ version: 2, endpoints: {} })
+    await expect(client.fetch("POST /json", { body: { nested: blob } })).rejects.toThrow(
+      "A Blob cannot be sent inside JSON",
+    )
+    expect(requests).toHaveLength(0)
   })
 })
 

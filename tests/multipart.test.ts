@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm"
 import { expect, it } from "vitest"
 import type { Contract } from "../src/client"
 import { createClient } from "../src/client"
@@ -318,4 +319,51 @@ it("preserves ready FormData despite declared part encodings", async () => {
   await client.fetch("POST /upload", { contentType: multipart, body })
   const parts = await requests[0].formData()
   expect(parts.get("meta")).toBe("already encoded")
+})
+
+it("encodes cross-realm multipart objects and buffers and rejects nested styled binary", async () => {
+  const { client, requests } = await generatedClient({
+    [multipart]: {
+      schema: { type: "object" },
+      encoding: {
+        meta: { contentType: "application/json" },
+        styled: { style: "deepObject" },
+      },
+    },
+  })
+  const body = runInNewContext(
+    "({ meta: { id: 1 }, file: new Uint8Array([65, 66]).buffer })",
+  ) as Record<string, unknown>
+  await client.fetch("POST /upload", { contentType: multipart, body })
+  const parts = await requests[0].formData()
+  expect(await (parts.get("meta") as Blob).text()).toBe('{"id":1}')
+  expect(await (parts.get("file") as Blob).text()).toBe("AB")
+  const styled = runInNewContext("({ styled: { nested: [new ArrayBuffer(2)] } })") as Record<
+    string,
+    unknown
+  >
+  await expect(
+    client.fetch("POST /upload", { contentType: multipart, body: styled }),
+  ).rejects.toThrow('Multipart field "styled" is declared with a style')
+})
+
+it("preserves a branded File's name when retyping without the local File prototype", async () => {
+  const file = new File(["binary"], "original.bin")
+  Object.setPrototypeOf(
+    file,
+    Object.create(Blob.prototype, Object.getOwnPropertyDescriptors(File.prototype)),
+  )
+  expect(file).not.toBeInstanceOf(File)
+  const { client, requests } = await generatedClient({
+    [multipart]: {
+      schema: { type: "object" },
+      encoding: { file: { contentType: "application/octet-stream" } },
+    },
+  })
+  await client.fetch("POST /upload", { contentType: multipart, body: { file } })
+  const parts = await requests[0].formData()
+  const part = parts.get("file") as File
+  expect(part.name).toBe("original.bin")
+  expect(part.type).toBe("application/octet-stream")
+  expect(await part.text()).toBe("binary")
 })

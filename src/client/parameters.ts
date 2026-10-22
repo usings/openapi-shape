@@ -39,29 +39,25 @@ export function expandPath(
   declared: EndpointContract["params"],
 ): string {
   if (!path.includes("{")) return path
-  return path
-    .split("/")
-    .map((segment) => {
-      const expanded = segment.replaceAll(/\{([^{}]+)\}/g, (_, name: string) =>
-        expandParam(
-          name,
-          params != null && Object.hasOwn(params, name) ? params[name] : undefined,
-          declared?.[name],
-        ),
-      )
-      // A value that leaves a segment empty, ".", or ".." would send the request
-      // to another resource once the URL is normalized.
-      if (
-        expanded !== segment &&
-        expanded.split("/").some((part) => /^\.{0,2}$/.test(part.replaceAll(/%2e/gi, ".")))
-      ) {
-        throw new TypeError(
-          `Path parameters turn "${segment}" into "${expanded}", another resource`,
-        )
-      }
-      return expanded
-    })
-    .join("/")
+  // A slash inside a placeholder belongs to its name, not to the URL hierarchy.
+  return path.replaceAll(/(?:\{[^{}]+\}|[^/])+/g, (segment) => {
+    const expanded = segment.replaceAll(/\{([^{}]+)\}/g, (_, name: string) =>
+      expandParam(
+        name,
+        params != null && Object.hasOwn(params, name) ? params[name] : undefined,
+        declared?.[name],
+      ),
+    )
+    // A value that leaves a segment empty, ".", or ".." would send the request
+    // to another resource once the URL is normalized.
+    if (
+      expanded !== segment &&
+      expanded.split("/").some((part) => /^\.{0,2}$/.test(part.replaceAll(/%2e/gi, ".")))
+    ) {
+      throw new TypeError(`Path parameters turn "${segment}" into "${expanded}", another resource`)
+    }
+    return expanded
+  })
 }
 
 /** A path template variable; `simple` style unless declared otherwise. */
@@ -72,15 +68,16 @@ function expandParam(name: string, value: unknown, spec: Encoding | undefined): 
   if (contentType) return enc(encodeContent(value, contentType))
   if (style === "label") return `.${delimited(value, explode, explode ? "." : ",", enc)}`
   if (style === "matrix") {
+    const key = encode(name, null)
     if (Array.isArray(value) && explode) {
-      return value.map((v) => `;${name}=${enc(scalar(v))}`).join("")
+      return value.map((v) => `;${key}=${enc(scalar(v))}`).join("")
     }
     if (isPlainObject(value) && explode) {
       return Object.entries(value)
         .map(([k, v]) => `;${enc(k)}=${enc(scalar(v))}`)
         .join("")
     }
-    return `;${name}=${delimited(value, false, ",", enc)}`
+    return `;${key}=${delimited(value, false, ",", enc)}`
   }
   return delimited(value, explode, ",", enc)
 }

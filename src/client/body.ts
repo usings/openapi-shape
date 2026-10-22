@@ -165,12 +165,13 @@ function readyBody(value: unknown): BodyLike | undefined {
  */
 function bytes(value: unknown): ArrayBuffer | Uint8Array<ArrayBuffer> | undefined {
   if (value instanceof ArrayBuffer) return value
-  const view = isInstance(value, "SharedArrayBuffer")
-    ? new Uint8Array(value as SharedArrayBuffer)
-    : value
+  const view =
+    isInstance(value, "ArrayBuffer") || isInstance(value, "SharedArrayBuffer")
+      ? new Uint8Array(value as ArrayBuffer | SharedArrayBuffer)
+      : value
   if (!ArrayBuffer.isView(view)) return undefined
   const octets = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-  return octets.buffer instanceof ArrayBuffer
+  return isInstance(octets.buffer, "ArrayBuffer")
     ? (octets as Uint8Array<ArrayBuffer>)
     : new Uint8Array(octets)
 }

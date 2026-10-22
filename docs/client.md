@@ -97,7 +97,7 @@ The generator warns about part headers other than `Content-Type`, nested or posi
 
 The contract controls path, query, and header styles (`label`, `matrix`, `pipeDelimited`, `deepObject`, and others), `allowReserved`, JSON `content` parameters, and the OpenAPI 3.2 `querystring`. For example, `deepObject` encodes a field as `created[gte]=1`.
 
-Value handling follows these rules:
+Plain records and native buffers from another JavaScript realm, such as a same-origin iframe, retain their ordinary encodings. Native body detection checks the value's brand rather than trusting `Symbol.toStringTag`. Value handling follows these rules:
 
 - `Date` values become ISO strings.
 - Missing, `null`, or `undefined` path parameters reject.
