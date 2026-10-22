@@ -119,9 +119,11 @@ const { code } = await generate("https://spec.example.com/openapi.yaml", {
 })
 ```
 
-Each load has a 30-second deadline, including the hook and body reading. Its signal combines that deadline with the caller's signal. Pass it to any work the hook starts. Cancellation stops queued loads, cancels active response streams, and rejects promptly even if a hook ignores the signal. Such a hook's own work cannot be stopped: it keeps running after its load times out or is cancelled, no longer counted by `maxConcurrentLoads`, and a response it returns late is discarded.
+Each load has a 30-second deadline covering the hook and body reading. Its signal combines that deadline with the caller's signal. Pass it to work the hook starts. A timeout, oversized document, unsuccessful status, loader error, or invalid loader result produces `read-failed` for the entry document or `unresolved-ref` for an external reference.
 
-Synchronous build and render stages run to completion, but no module is returned after cancellation. Any other load failure, such as a timeout, the byte limit, an unsuccessful status, a loader error, or an invalid loader result, is reported as `read-failed` for the entry document or `unresolved-ref` for an external reference.
+Cancellation stops queued loads, cancels active response streams, and rejects even if a hook ignores its signal. The hook's own work may continue after cancellation or timeout, no longer counted by `maxConcurrentLoads`; a response returned late is discarded.
+
+Build and render work checks cancellation between work units. Parsing and large individual schemas can delay it; cancellation is not an immediate interruption. A cancelled run returns no partial module.
 
 ## Diagnostics
 

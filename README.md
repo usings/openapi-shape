@@ -54,7 +54,7 @@ The generated module and client use ES modules. CommonJS is not supported. The c
 - [The generated module](./docs/output.md): `Endpoints`, `Webhooks`, `Callbacks`, `Schemas`, and the runtime `contract`.
 - [Client](./docs/client.md): requests, responses, serialization, and middleware.
 - [OpenAPI support](./docs/openapi.md): supported versions, references, schemas, media types, compatibility rules, and approximations.
-- [CLI and programmatic API](./docs/cli.md): options, `--check`, `generate()`, and diagnostics.
+- [CLI and programmatic API](./docs/cli.md): options, `--check`, `generate()`, cancellation, and diagnostics.
 
 ## Development
 

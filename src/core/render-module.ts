@@ -9,7 +9,10 @@ import { block, indexOf, renderFields, renderType } from "./render-types"
  * Render the model as a TypeScript module that imports nothing: its types, and the runtime
  * `contract` for openapi-shape/client.
  */
-export function renderModule(model: Model): string {
+export async function renderModule(
+  model: Model,
+  workpoint?: () => Promise<void> | undefined,
+): Promise<string> {
   // Inside `Schemas`, a schema named `Blob` would capture raw bytes.
   const shadowed = model.declarations.some((d) => d.name === "Blob" || d.inputName === "Blob")
   const inside = (side: TypeContext["side"]): TypeContext => ({
@@ -19,16 +22,17 @@ export function renderModule(model: Model): string {
   })
 
   const parts = [header(model.info)]
-  parts.push(operations("Endpoints", model.endpoints, outside, false))
+  parts.push(await operations("Endpoints", model.endpoints, outside, false, workpoint))
   // The API sends webhook and callback requests, and receives their responses.
   if (model.webhooks.length > 0) {
-    parts.push(operations("Webhooks", model.webhooks, outside, true))
+    parts.push(await operations("Webhooks", model.webhooks, outside, true, workpoint))
   }
   if (model.callbacks.length > 0) {
-    parts.push(operations("Callbacks", model.callbacks, outside, true))
+    parts.push(await operations("Callbacks", model.callbacks, outside, true, workpoint))
   }
-  if (model.declarations.length > 0) parts.push(schemas(model.declarations, inside))
-  parts.push(contract(model.endpoints))
+  if (model.declarations.length > 0)
+    parts.push(await schemas(model.declarations, inside, workpoint))
+  parts.push(await contract(model.endpoints, workpoint))
   return `${parts.join("\n\n")}\n`
 }
 
@@ -49,13 +53,15 @@ function header(info: Info): string {
   return lines.map((line) => (line === "" ? "//" : `// ${line}`)).join("\n")
 }
 
-function operations(
+async function operations(
   name: string,
   list: Operation[],
   context: (side: TypeContext["side"]) => TypeContext,
   incoming: boolean,
-): string {
-  const entries = list.map((operation) => {
+  workpoint?: () => Promise<void> | undefined,
+): Promise<string> {
+  const entries: string[] = []
+  for (const operation of list) {
     const request = context(incoming ? "response" : "request")
     const response = context(incoming ? "request" : "response")
     const members: string[] = []
@@ -89,8 +95,11 @@ function operations(
     })
     members.push(`responses: ${block(responses)}`)
     const body = members.map((member) => indentTail(member, "  ")).join("\n  ")
-    return `${jsdoc(operation.annotations)}${JSON.stringify(operation.key)}: {\n  ${body}\n}`
-  })
+    entries.push(`${jsdoc(operation.annotations)}${JSON.stringify(operation.key)}: {\n  ${body}\n}`)
+    const pending = workpoint?.()
+    // oxlint-disable-next-line no-await-in-loop -- yield between independent operations
+    if (pending) await pending
+  }
   const lines = entries.map((entry) => `  ${indentTail(entry, "  ")}`)
   return lines.length === 0
     ? `export interface ${name} {}`
@@ -106,16 +115,20 @@ function contentMap(content: Media[], context: TypeContext): string {
   )
 }
 
-function schemas(
+async function schemas(
   declarations: Declaration[],
   context: (side: TypeContext["side"]) => TypeContext,
-): string {
+  workpoint?: () => Promise<void> | undefined,
+): Promise<string> {
   const rendered: string[] = []
   for (const declaration of declarations) {
     rendered.push(declare(declaration.name, declaration, context("response")))
     if (declaration.inputName !== undefined) {
       rendered.push(declare(declaration.inputName, declaration, context("request")))
     }
+    const pending = workpoint?.()
+    // oxlint-disable-next-line no-await-in-loop -- yield between independent declarations
+    if (pending) await pending
   }
   const body = rendered.map((d) => `  ${indentTail(d, "  ")}`).join("\n\n")
   return `export namespace Schemas {\n${body}\n}`
@@ -137,18 +150,27 @@ const CONTRACT_VERSION = 3
  * How requests go over the wire, for `openapi-shape/client`: each endpoint's serialization and
  * default media type, where they differ from OpenAPI's defaults.
  */
-function contract(endpoints: Operation[]): string {
-  const entries = Object.fromEntries(
-    endpoints.flatMap((operation) => {
-      const entry = contractEntry(operation)
-      return entry ? [[operation.key, entry]] : []
-    }),
-  )
+async function contract(
+  endpoints: Operation[],
+  workpoint?: () => Promise<void> | undefined,
+): Promise<string> {
+  const entries: string[] = []
+  for (const operation of endpoints) {
+    const entry = contractEntry(operation)
+    if (entry) {
+      const head = `${literalKey(operation.key)}: `
+      entries.push(`  ${head}${literal(entry, "  ", 2 + head.length)},`)
+    }
+    const pending = workpoint?.()
+    // oxlint-disable-next-line no-await-in-loop -- yield between independent endpoint encodings
+    if (pending) await pending
+  }
+  const value = entries.length === 0 ? "{}" : `{\n${entries.join("\n")}\n}`
   // Typed here, not by openapi-shape/client, so that the module imports nothing:
   // createClient checks it, `version` above all, and infers `Endpoints` from `types`.
   return [
     "/** Request serialization settings, including schema-derived form defaults. */",
-    `const endpoints = ${literal(entries, "", 0, true)} as const`,
+    `const endpoints = ${value} as const`,
     "",
     "/** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */",
     "export const contract: {",

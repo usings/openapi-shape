@@ -35,6 +35,7 @@ export interface LoadingOptions {
 export class DocumentReader {
   readonly concurrency: number
   private readonly maxBytes: number
+  private lastYield = performance.now()
 
   constructor(private readonly options: LoadingOptions = {}) {
     this.concurrency = positiveInteger(options.maxConcurrentLoads, 8, "maxConcurrentLoads")
@@ -51,6 +52,14 @@ export class DocumentReader {
     if (signal === undefined) return
     await setImmediate()
     signal.throwIfAborted()
+    this.lastYield = performance.now()
+  }
+
+  /** Yield between synchronous work units after a short time slice, only for cancellable runs. */
+  workpoint(): Promise<void> | undefined {
+    if (this.options.signal === undefined) return undefined
+    this.throwIfAborted()
+    return performance.now() - this.lastYield >= 8 ? this.checkpoint() : undefined
   }
 
   async read(source: string): Promise<FetchedDocument> {

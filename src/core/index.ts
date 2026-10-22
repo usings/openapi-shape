@@ -86,7 +86,7 @@ async function run(
   const { model, diagnostics } = await buildModel(documents)
   if (diagnostics.hasErrors) throw new GenerateError(diagnostics.list)
   await reader.checkpoint()
-  const code = renderModule(model)
+  const code = await renderModule(model, () => reader.workpoint())
   await reader.checkpoint()
   return { code, diagnostics: diagnostics.list }
 }

@@ -123,7 +123,7 @@ export class SchemaBuilder {
   }
 
   /** Build every declared schema, including those declared while building. */
-  buildDeclarations(): void {
+  async buildDeclarations(): Promise<void> {
     for (let state = this.queue.shift(); state !== undefined; state = this.queue.shift()) {
       let type = this.type(state.node)
       if (state.componentName !== undefined) {
@@ -135,6 +135,9 @@ export class SchemaBuilder {
       const annotations =
         (state.origin && schemaAnnotations(state.origin)) ?? schemaAnnotations(state.node)
       if (annotations) state.decl.annotations = annotations
+      const pending = this.context.documents.reader.workpoint()
+      // oxlint-disable-next-line no-await-in-loop -- declarations are built in queue order
+      if (pending) await pending
     }
   }
 

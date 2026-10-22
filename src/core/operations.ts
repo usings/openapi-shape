@@ -41,7 +41,10 @@ export interface Operations {
 }
 
 /** Every operation under `paths`, `webhooks`, and (recursively) `callbacks`, in document order. */
-export function buildOperations(context: BuildContext, schemas: SchemaBuilder): Operations {
+export async function buildOperations(
+  context: BuildContext,
+  schemas: SchemaBuilder,
+): Promise<Operations> {
   const out: Operations = { endpoints: [], webhooks: [], callbacks: [] }
   const ops = new OperationBuilder(context, schemas, out)
   const root = context.documents.root(context.documents.entry)
@@ -51,6 +54,9 @@ export function buildOperations(context: BuildContext, schemas: SchemaBuilder): 
       // The Paths Object allows specification extensions beside its paths.
       if (path.startsWith("x-")) continue
       ops.pathItem(context.documents.child(paths, path), "endpoint", path, "", new Set())
+      const pending = context.documents.reader.workpoint()
+      // oxlint-disable-next-line no-await-in-loop -- yield between independent path items
+      if (pending) await pending
     }
   }
   const webhooks = context.documents.child(root, "webhooks")
@@ -58,6 +64,9 @@ export function buildOperations(context: BuildContext, schemas: SchemaBuilder): 
   if (isRecord(webhooks.value)) {
     for (const name of Object.keys(webhooks.value)) {
       ops.pathItem(context.documents.child(webhooks, name), "webhook", name, "", new Set())
+      const pending = context.documents.reader.workpoint()
+      // oxlint-disable-next-line no-await-in-loop -- yield between independent webhook items
+      if (pending) await pending
     }
   }
   return out

@@ -24,7 +24,8 @@ export async function buildModel(
     // oxlint-disable-next-line no-await-in-loop -- abort between complete build rounds
     await documents.reader.checkpoint()
     const diagnostics = new Diagnostics()
-    const model = buildOnce(new BuildContext(documents, diagnostics))
+    // oxlint-disable-next-line no-await-in-loop -- each round builds the documents loaded so far
+    const model = await buildOnce(new BuildContext(documents, diagnostics))
     if (documents.hasPending) {
       // oxlint-disable-next-line no-await-in-loop -- each build needs the documents the previous one asked for
       if (await documents.loadPending()) continue
@@ -34,21 +35,24 @@ export async function buildModel(
   }
 }
 
-function buildOnce(context: BuildContext): Model {
+async function buildOnce(context: BuildContext): Promise<Model> {
   const root = context.documents.root(context.documents.entry)
   const entry = isRecord(root.value) ? root.value : {}
   const schemas = new SchemaBuilder(context)
   schemas.declareComponents()
-  schemas.buildDeclarations()
-  const operations = buildOperations(context, schemas)
+  await schemas.buildDeclarations()
+  const operations = await buildOperations(context, schemas)
   // The schemas operations reference, named while building them.
-  schemas.buildDeclarations()
+  await schemas.buildDeclarations()
 
   // Every declaration is built: analysis may now look into referenced types.
-  applyDiscriminators(context, schemas, operations)
+  await applyDiscriminators(context, schemas, operations)
+  await context.documents.reader.checkpoint()
   breakDirectCycles(context, schemas)
-  normalizeTypes(schemas, operations)
+  await context.documents.reader.checkpoint()
+  await normalizeTypes(schemas, operations)
   diagnoseRequestEncodings(context, operations.endpoints)
+  await context.documents.reader.checkpoint()
   assignInputVariants(context, schemas, operations)
   return { info: readInfo(entry), ...operations, declarations: schemas.declarations }
 }
@@ -58,22 +62,22 @@ function allOperations(operations: Operations): Operation[] {
 }
 
 /** Narrow discriminated alternatives by their values (see `discriminators`). */
-function applyDiscriminators(
+async function applyDiscriminators(
   context: BuildContext,
   schemas: SchemaBuilder,
   operations: Operations,
-): void {
+): Promise<void> {
   const report = (message: string, location: string): void =>
     context.diagnostics.warn("discriminator-mismatch", message, location)
-  transformAll(schemas, allOperations(operations), (type) =>
+  await transformAll(schemas, allOperations(operations), (type) =>
     type.kind === "narrow" ? applyNarrowing(type, report) : type,
   )
 }
 
 /** With references final, simplify every type again: shapes behind references are known now. */
-function normalizeTypes(schemas: SchemaBuilder, operations: Operations): void {
+async function normalizeTypes(schemas: SchemaBuilder, operations: Operations): Promise<void> {
   seal(schemas.declarations)
-  transformAll(schemas, allOperations(operations), (type) => type)
+  await transformAll(schemas, allOperations(operations), (type) => type)
 }
 
 /**
@@ -121,17 +125,20 @@ function readInfo(entry: Record<string, unknown>): Info {
  * Rebuild every type of the model bottom-up, renormalizing unions and intersections, and passing
  * each node through `finish`.
  */
-function transformAll(
+async function transformAll(
   schemas: SchemaBuilder,
   operations: Operation[],
   finish: (type: Type) => Type,
-): void {
+): Promise<void> {
   const fields = (list: Field[]): Field[] =>
     list.map((f) => ({ ...f, type: rebuild(f.type, finish, schemas, f.location) }))
   for (const declaration of schemas.declarations) {
     const source = schemas.stateOf(declaration)?.node
     const location = source && schemas.context.documents.locate(source.document, source.pointer)
     declaration.type = rebuild(declaration.type, finish, schemas, location)
+    const pending = schemas.context.documents.reader.workpoint()
+    // oxlint-disable-next-line no-await-in-loop -- yield between declarations, never inside algebra
+    if (pending) await pending
   }
   for (const operation of operations) {
     operation.params = fields(operation.params)
@@ -153,6 +160,9 @@ function transformAll(
         media.type = rebuild(media.type, finish, schemas, media.location)
       response.headers = fields(response.headers)
     }
+    const pending = schemas.context.documents.reader.workpoint()
+    // oxlint-disable-next-line no-await-in-loop -- yield between complete operations
+    if (pending) await pending
   }
 }
 
