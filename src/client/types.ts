@@ -180,9 +180,7 @@ type IsUnion<T, All = T> = T extends unknown ? ([All] extends [T] ? false : true
 type Field<Name extends "params" | "query", Op extends Operation> = Name extends keyof Op
   ? Empty extends Pick<Op, Name>
     ? Partial<Record<Name, Op[Name]>>
-    : Empty extends Op[Name]
-      ? Partial<Record<Name, Op[Name]>>
-      : Record<Name, Op[Name]>
+    : Record<Name, Op[Name]>
   : Partial<Record<Name, never>>
 
 /**
@@ -376,9 +374,9 @@ type JsonOf<Shape> = Shape extends { content: infer Content }
     : JsonContent<Content>
   : never
 
-/** Raw bytes are never JSON, though a wildcard media type may declare them. */
+/** Apply the same raw-byte and wildcard uncertainty as decoded result bodies. */
 type JsonContent<Content> = {
-  [M in keyof Content & string]: IsJson<M> extends true ? Exclude<Content[M], Blob> : never
+  [M in keyof Content & string]: IsJson<M> extends true ? JsonValue<M, Content[M]> : never
 }[keyof Content & string]
 
 /**

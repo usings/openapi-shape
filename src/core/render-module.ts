@@ -67,7 +67,8 @@ function operations(
         `${jsdoc(operation.querystring.annotations)}query${optional}: ${renderType(operation.querystring.type, request)}`,
       )
     } else if (operation.query.length > 0) {
-      members.push(`query: ${renderFields(operation.query, undefined, request)}`)
+      const optional = operation.query.some((field) => field.required) ? "" : "?"
+      members.push(`query${optional}: ${renderFields(operation.query, undefined, request)}`)
     }
     if (operation.headers.length > 0)
       members.push(`headers: ${renderFields(operation.headers, undefined, request)}`)
@@ -130,7 +131,7 @@ function declare(name: string, declaration: Declaration, context: TypeContext): 
 }
 
 /** The format version written here must agree with openapi-shape/client's `Contract`. */
-const CONTRACT_VERSION = 2
+const CONTRACT_VERSION = 3
 
 /**
  * How requests go over the wire, for `openapi-shape/client`: each endpoint's serialization and

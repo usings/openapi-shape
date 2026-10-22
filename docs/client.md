@@ -52,12 +52,12 @@ For typed wrappers, `openapi-shape/client` exports `Endpoint<Endpoints>` for cal
 
 The second argument combines request options such as `signal`, `cache`, and `keepalive` with the operation's typed inputs below. The endpoint determines `method`; the client types `headers` and `body` from the operation.
 
-This argument is required only when the operation has required inputs. Unknown endpoints produce a compile error on the endpoint argument, whether or not options are supplied.
+This argument is required when `params`, `query`, or `body` is required. Declared headers are optional per call because defaults or middleware may provide them. Unknown endpoints and methods forbidden by Fetch (`CONNECT`, `TRACE`, `TRACK`) produce compile errors on the endpoint argument.
 
 | Field         | Rule                                                                                                                                                                                                                                                            |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `params`      | Required when the path has parameters; values must be own properties of `params`, not inherited.                                                                                                                                                                |
-| `query`       | Required when any query parameter is required.                                                                                                                                                                                                                  |
+| `query`       | Required when any query parameter is required, or when the whole `querystring` parameter is required, even if all of its properties are optional.                                                                                                               |
 | `headers`     | Optional. Object values use the declared parameter types and styles; additional headers are allowed. A `Headers` instance or entries are passed through. Call headers override defaults. `FormData` and `URLSearchParams` always supply their own content type. |
 | `body`        | Required when the request body is required. Not taken with `GET` or `HEAD`, which `fetch` cannot send a body with.                                                                                                                                              |
 | `contentType` | The declared media type of `body`. Optional when there is a default: the sole `application/json` entry, including media type parameters, or otherwise the sole declared media type.                                                                             |
@@ -161,7 +161,7 @@ The server chooses the response media type. A response declared as both JSON and
 
 ### Typed responses
 
-`api.fetch()` returns a `TypedResponse`. Its `ok` and `status` fields narrow the response, and `json()` returns the declared JSON type for that status, including JSON-compatible wildcard media types. Raw bytes under a wildcard are typed as `unknown`. Where no content is declared, `json()` is typed as `Promise<never>` because parsing an empty body rejects.
+`api.fetch()` returns a `TypedResponse`. Its `ok` and `status` fields narrow the response, and `json()` returns the declared JSON type for that status, including JSON-compatible wildcard media types. Raw bytes under a wildcard are typed as `unknown`, including unions of raw bytes and structured schemas. Where no content is declared, `json()` is typed as `Promise<never>` because parsing an empty body rejects.
 
 The remaining API is the standard `Response`: `headers`, `text()`, `blob()`, and the `body` stream. Read or cancel unused bodies (`response.body?.cancel()`) so the connection can be reused.
 

@@ -1,5 +1,5 @@
 /** The only contract format version this client reads. */
-export const CONTRACT_VERSION = 2
+export const CONTRACT_VERSION = 3
 
 /**
  * The runtime details a generated module exports as `contract`. Encodings record deviations from

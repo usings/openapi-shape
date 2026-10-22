@@ -20,7 +20,7 @@ export interface Endpoints {
    * @operationId listPets
    */
   "GET /pets": {
-    query: {
+    query?: {
       /** @maximum 100 */
       limit?: number
     }
@@ -80,11 +80,11 @@ const endpoints = {
 /** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */
 export const contract: {
   /** The contract's format; `createClient` refuses one it does not read. */
-  readonly version: 2
+  readonly version: 3
   /** Carries `Endpoints` for `createClient` to infer; never set. */
   readonly types?: Endpoints
   readonly endpoints: typeof endpoints
-} = { version: 2, endpoints }
+} = { version: 3, endpoints }
 ```
 
 ## Operations
@@ -103,16 +103,18 @@ Standard method fields produce uppercase names; OpenAPI 3.2's `query` becomes `Q
 
 ### Entry fields
 
-Fields appear only when the operation declares corresponding inputs or outputs. `responses` is always present, even when empty:
+Fields describe the operation after parameter inheritance and path-template normalization. Absent input groups are omitted; `responses` is always present, even when empty:
 
-| Member      | Type                                                                                   |
-| ----------- | -------------------------------------------------------------------------------------- |
-| `params`    | Path parameters, all required, typed by their schemas.                                 |
-| `query`     | Query parameters, or (3.2) the type of the single `in: querystring` parameter.         |
-| `headers`   | Header parameters.                                                                     |
-| `cookies`   | Cookie parameters.                                                                     |
-| `body`      | Request body, by media type; `body?:` when `required` is not `true`.                   |
-| `responses` | By status key (`"200"`, `"4XX"`, `"default"`): `{ headers?, content? }`; `{}` if none. |
+| Member      | Type                                                                                                                    |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `params`    | Path parameters, all required, typed by their schemas.                                                                  |
+| `query`     | Query parameters, or the value of the single `in: querystring` parameter; optional when the whole query may be omitted. |
+| `headers`   | Header parameters.                                                                                                      |
+| `cookies`   | Cookie parameters.                                                                                                      |
+| `body`      | Request body, by media type; `body?:` when `required` is not `true`.                                                    |
+| `responses` | By status key (`"200"`, `"4XX"`, `"default"`): `{ headers?, content? }`; `{}` if none.                                  |
+
+Ordinary query parameters produce `query?` when none is required. A whole `querystring` parameter follows its own `required` flag, even when every property in its value is optional. The client reads this outer optionality directly; hand-written endpoint types must use `query?` when the entire query may be omitted.
 
 Each response contains its declared `headers`, typed by their schemas, and a `content` map from media types to [content types](./openapi.md#media-types). A response with neither is `{}`.
 
@@ -198,7 +200,7 @@ The client uses its configured `baseUrl`, rather than the description's [servers
 
 ### Format compatibility
 
-The generated module has no imports. Its contract type carries `Endpoints` through the optional `types` field for inference; that field is absent at runtime. The `version` field identifies the contract format.
+The current format is v3. The `version` field identifies the format, and the contract type carries `Endpoints` through the optional `types` field for inference. That field is absent at runtime.
 
 The contract version must match the installed client. A different version fails to compile at `createClient`; JavaScript callers receive an error instructing them to regenerate the module with the installed version of openapi-shape.
 

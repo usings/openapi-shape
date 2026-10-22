@@ -132,8 +132,8 @@ const endpoints = {
 /** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */
 export const contract: {
   /** The contract's format; `createClient` refuses one it does not read. */
-  readonly version: 2
+  readonly version: 3
   /** Carries `Endpoints` for `createClient` to infer; never set. */
   readonly types?: Endpoints
   readonly endpoints: typeof endpoints
-} = { version: 2, endpoints }
+} = { version: 3, endpoints }

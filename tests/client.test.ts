@@ -40,7 +40,7 @@ async function decoded(body: BodyInit | null, type?: string, status = 200): Prom
   const headers = type === undefined ? undefined : { "content-type": type }
   const { client } = recorder<{
     "GET /x": { responses: object }
-  }>({ version: 2, endpoints: {} }, {}, () => new Response(body, { status, headers }))
+  }>({ version: 3, endpoints: {} }, {}, () => new Response(body, { status, headers }))
   const { data, error } = await client.result("GET /x")
   return status < 300 ? data : error
 }
@@ -78,10 +78,10 @@ describe("createClient", () => {
       null,
       { endpoints: {} },
       { version: 999, endpoints: {} },
-      { version: "2", endpoints: {} },
+      { version: "3", endpoints: {} },
     ]) {
       expect(() => createClient(given as never)).toThrow(
-        "createClient takes a generated contract of format 2 as its first argument; regenerate the module with this version of openapi-shape",
+        "createClient takes a generated contract of format 3 as its first argument; regenerate the module with this version of openapi-shape",
       )
     }
   })
@@ -97,7 +97,7 @@ describe("building requests", () => {
   it("encodes path parameter values, arrays, and objects", async () => {
     const { client, sent } = recorder<{
       "GET /a/{x}/{y}/{z}": { params: { x: string; y: string[]; z: object }; responses: object }
-    }>({ version: 2, endpoints: {} })
+    }>({ version: 3, endpoints: {} })
     await client.fetch("GET /a/{x}/{y}/{z}", {
       params: { x: "雪/a b", y: ["1", "2"], z: { k: "v w" } },
     })
@@ -111,7 +111,7 @@ describe("building requests", () => {
       const { client, sent } = recorder<
         Record<string, { params: Record<string, unknown>; responses: object }>
       >({
-        version: 2,
+        version: 3,
         endpoints: { [endpoint]: { params: { [name]: { style: "matrix", allowReserved: true } } } },
       })
       await client.fetch(endpoint, { params: { [name]: "safe" } })
@@ -119,7 +119,7 @@ describe("building requests", () => {
       const exploded = recorder<
         Record<string, { params: Record<string, unknown>; responses: object }>
       >({
-        version: 2,
+        version: 3,
         endpoints: { [endpoint]: { params: { [name]: { style: "matrix", explode: true } } } },
       })
       await exploded.client.fetch(endpoint, { params: { [name]: ["a", "b"] } })
@@ -128,7 +128,7 @@ describe("building requests", () => {
       )
       const simple = recorder<
         Record<string, { params: Record<string, unknown>; responses: object }>
-      >({ version: 2, endpoints: {} })
+      >({ version: 3, endpoints: {} })
       await simple.client.fetch(endpoint, { params: { [name]: "safe" } })
       expect(url(simple.sent())).toBe("/files/safe/tail")
       await expect(simple.client.fetch(endpoint, { params: {} })).rejects.toThrow(
@@ -141,7 +141,7 @@ describe("building requests", () => {
     const { client, sent } = recorder<
       Record<string, { params: Record<string, unknown>; responses: object }>
     >({
-      version: 2,
+      version: 3,
       endpoints: {
         "GET /files/{a/b}/tail": { params: { "a/b": { allowReserved: true } } },
       },
@@ -164,7 +164,7 @@ describe("building requests", () => {
         responses: object
       }
     }>({
-      version: 2,
+      version: 3,
       endpoints: { "GET /files/{meta}": { query: { filter: { style: "deepObject" } } } },
     })
     const input = runInNewContext(
@@ -196,7 +196,7 @@ describe("building requests", () => {
     async (name) => {
       const { client, sent, requests } = recorder<
         Record<string, { params: Record<string, string>; responses: object }>
-      >({ version: 2, endpoints: {} })
+      >({ version: 3, endpoints: {} })
       const endpoint = `GET /x/{${name}}`
       const inherited = Object.create({ [name]: "inherited" }) as Record<string, string>
       await expect(client.fetch(endpoint, { params: {} })).rejects.toThrow(
@@ -220,7 +220,7 @@ describe("building requests", () => {
   it("serializes the query with form style, exploding arrays and objects", async () => {
     const { client, sent } = recorder<{
       "GET /q?fixed=1": { query: Record<string, unknown>; responses: object }
-    }>({ version: 2, endpoints: { "GET /q?fixed=1": { query: { compact: { explode: false } } } } })
+    }>({ version: 3, endpoints: { "GET /q?fixed=1": { query: { compact: { explode: false } } } } })
     const query = {
       a: [1, null, 2, undefined, 0, false, ""],
       b: null,
@@ -239,7 +239,7 @@ describe("building requests", () => {
   it("serializes sparse deep fields without invoking methods on the input array", async () => {
     const { client, sent } = recorder<{
       "GET /q": { query: Record<string, unknown>; responses: object }
-    }>({ version: 2, endpoints: { "GET /q": { query: { filter: { style: "deepObject" } } } } })
+    }>({ version: 3, endpoints: { "GET /q": { query: { filter: { style: "deepObject" } } } } })
     const items = Object.assign(Array<string | undefined>(4), {
       forEach: () => {
         throw new Error("Do not call a method on the input")
@@ -260,7 +260,7 @@ describe("building requests", () => {
     const { client, sent } = recorder<{
       "GET /q": { query: Record<string, unknown>; responses: object }
     }>({
-      version: 2,
+      version: 3,
       endpoints: {
         "GET /q": {
           query: {
@@ -352,7 +352,7 @@ describe("request bodies", () => {
   it("distinguishes an omitted body from empty text", async () => {
     const { client, sent } = recorder<{
       "POST /text": { body?: { "text/plain": string }; responses: object }
-    }>({ version: 2, endpoints: { "POST /text": { contentType: "text/plain" } } })
+    }>({ version: 3, endpoints: { "POST /text": { contentType: "text/plain" } } })
     await client.fetch("POST /text")
     expect(sent().body).toBeNull()
     expect(sent().headers.has("content-type")).toBe(false)
@@ -386,7 +386,7 @@ describe("request bodies", () => {
   it("encodes multipart bodies as FormData", async () => {
     const { client, sent } = recorder<{
       "POST /m": { body: { "multipart/form-data": Record<string, unknown> }; responses: object }
-    }>({ version: 2, endpoints: { "POST /m": { contentType: "multipart/form-data" } } })
+    }>({ version: 3, endpoints: { "POST /m": { contentType: "multipart/form-data" } } })
     const body = {
       photo: new File(["PNG"], "photo.png", { type: "image/png" }),
       raw: new Blob(["x"]),
@@ -480,7 +480,7 @@ describe("request bodies", () => {
   ])("does not recognize a toStringTag-only %s as a native body or value", async (tag) => {
     const { client, sent } = recorder<{
       "POST /json": { body: { "application/json": unknown }; responses: object }
-    }>({ version: 2, endpoints: {} })
+    }>({ version: 3, endpoints: {} })
     const body = { [Symbol.toStringTag]: tag, value: "kept" }
     await client.fetch("POST /json", { body })
     expect(await sent().text()).toBe('{"value":"kept"}')
@@ -491,7 +491,7 @@ describe("request bodies", () => {
       "POST /x": { body: { "application/xml": { a: string } }; responses: object }
       "POST /t": { body: { "text/plain": string }; responses: object }
     }>({
-      version: 2,
+      version: 3,
       endpoints: {
         "POST /x": { contentType: "application/xml" },
         "POST /t": { contentType: "text/plain" },
@@ -526,7 +526,7 @@ describe("request bodies", () => {
         responses: object
       }
     }>({
-      version: 2,
+      version: 3,
       endpoints: {
         "POST /m": {
           query: { j: { contentType: "application/json" } },
@@ -567,7 +567,7 @@ describe("request bodies", () => {
     expect(blob).not.toBeInstanceOf(Blob)
     const { client, requests } = recorder<{
       "POST /json": { body: { "application/json": unknown }; responses: object }
-    }>({ version: 2, endpoints: {} })
+    }>({ version: 3, endpoints: {} })
     await expect(client.fetch("POST /json", { body: { nested: blob } })).rejects.toThrow(
       "A Blob cannot be sent inside JSON",
     )
@@ -580,7 +580,7 @@ describe("reserved characters, delimiters, and path segments", () => {
     "GET /files/{path}": { params: { path: string }; responses: object }
     "GET /q": { query: Record<string, unknown>; responses: object }
   }>({
-    version: 2,
+    version: 3,
     endpoints: {
       "GET /files/{path}": {
         params: { path: { style: "simple", explode: false, allowReserved: true } },
@@ -666,7 +666,7 @@ describe("responses", () => {
     expect(await decoded(null, "application/json", 304)).toBeNull()
     // A body where none can be is still consumed, so that the connection is free.
     const { client } = recorder<{ "HEAD /x": { responses: object } }>(
-      { version: 2, endpoints: {} },
+      { version: 3, endpoints: {} },
       {},
       () => new Response("x", { status: 200, headers: { "content-type": "application/json" } }),
     )

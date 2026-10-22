@@ -14,9 +14,153 @@ import type { EndpointResult } from "../src/client/types"
 import { generate } from "../src/core/index"
 import type { Endpoints, Schemas } from "./__snapshots__/client-api"
 import { contract } from "./__snapshots__/client-api"
+import { contractOf } from "./helpers/contract"
+import { oas } from "./helpers/generate"
 import { expectPassesTsc, typecheck } from "./helpers/tsc"
 
 describe("types", () => {
+  it("keeps raw-byte wildcard json results unknown even beside a structured alternative", async () => {
+    const { code } = await generate(
+      oas("3.1", {
+        paths: Object.fromEntries(
+          ["*/*", "application/*"].map((media, i) => [
+            `/mixed${i}`,
+            {
+              get: {
+                responses: {
+                  "200": {
+                    description: "mixed",
+                    content: {
+                      [media]: {
+                        schema: {
+                          anyOf: [
+                            { type: "string", format: "binary" },
+                            {
+                              type: "object",
+                              properties: { id: { type: "number" } },
+                              required: ["id"],
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ]),
+        ),
+      }),
+    )
+    expect(
+      await typecheck({
+        "api.ts": code,
+        "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const api = createClient(contract)
+async function use() {
+  const response = await api.fetch("GET /mixed0")
+  if (response.ok) {
+    const data = await response.json()
+    // @ts-expect-error raw bytes under a wildcard can decode to arbitrary JSON
+    data.id.toFixed()
+  }
+  const result = await api.result("GET /mixed1")
+  if (result.status === 200) {
+    const data = await result.response.json()
+    // @ts-expect-error result.response must preserve the same uncertainty
+    data.id.toFixed()
+  }
+}
+`,
+      }),
+    ).toBe("")
+    const api = createClient(await contractOf(code), {
+      baseUrl: "https://api.test",
+      fetch: () => Promise.resolve(Response.json("raw")),
+    })
+    const response = await api.fetch("GET /mixed0")
+    expect(await response.json()).toBe("raw")
+  })
+
+  it("distinguishes required whole queries from optional ordinary query parameters", async () => {
+    const paths = Object.fromEntries(
+      [
+        [
+          "/required",
+          [
+            {
+              name: "whole",
+              in: "querystring",
+              required: true,
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { q: { type: "string" } } },
+                },
+              },
+            },
+          ],
+        ],
+        [
+          "/optional",
+          [
+            {
+              name: "whole",
+              in: "querystring",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["q"],
+                    properties: { q: { type: "string" } },
+                  },
+                },
+              },
+            },
+          ],
+        ],
+        ["/ordinary", [{ name: "q", in: "query", schema: { type: "string" } }]],
+        [
+          "/ordinary-required",
+          [{ name: "q", in: "query", required: true, schema: { type: "string" } }],
+        ],
+      ].map(([path, parameters]) => [
+        path,
+        { get: { parameters, responses: { "204": { description: "ok" } } } },
+      ]),
+    )
+    const { code, diagnostics } = await generate(oas("3.2", { paths }))
+    expect(diagnostics).toStrictEqual([])
+    expect(
+      await typecheck(
+        {
+          "api.ts": code,
+          "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const api = createClient(contract)
+// @ts-expect-error required querystring cannot be omitted even if its properties can
+void api.fetch("GET /required")
+// @ts-expect-error both client entry points require the whole query
+void api.result("GET /required", {})
+void api.fetch("GET /required", {query: {}})
+void api.result("GET /optional")
+void api.fetch("GET /optional", {query: {q: "ok"}})
+// @ts-expect-error optional whole-query presence does not relax its required properties
+void api.fetch("GET /optional", {query: {}})
+void api.fetch("GET /ordinary")
+void api.result("GET /ordinary", {})
+// @ts-expect-error required ordinary parameters still require query
+void api.fetch("GET /ordinary-required")
+void api.fetch("GET /ordinary-required", {query: {q: "ok"}})
+`,
+        },
+        { compilerOptions: { exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true } },
+      ),
+    ).toBe("")
+  })
+
   it("keeps endpoint correlations through cross-file wrappers under stricter optional and index checks", async () => {
     expect(
       await typecheck(
@@ -356,7 +500,7 @@ void function endpointChecks(client: Client<Endpoints>): void {
     "GET /search": { body: { "application/json": { q: string } }; responses: object }
     "TRACE /debug": { responses: object }
     "connect /tunnel": { responses: object }
-  }>({ version: 2, endpoints: {} })
+  }>({ version: 3, endpoints: {} })
   // @ts-expect-error fetch cannot send a body with GET
   void unusual.result("GET /search", { body: { q: "x" } })
   void unusual.result("GET /search")
@@ -374,7 +518,7 @@ void function endpointChecks(client: Client<Endpoints>): void {
         responses: { "200": { content: { "application/json": number } } }
       }
     >
-  >({ version: 2, endpoints: {} })
+  >({ version: 3, endpoints: {} })
   void loose.result("GET /anything")
   void loose.fetch("POST /x")
   const anyEndpoint: string = "POST /x"
@@ -404,7 +548,7 @@ void function endpointChecks(client: Client<Endpoints>): void {
     [endpoint: `${string} /files/${string}`]: Json<{ size: number }>
     [endpoint: string]: Json<unknown>
     "GET /a": Json<{ a: number }>
-  }>({ version: 2, endpoints: {} })
+  }>({ version: 3, endpoints: {} })
   // A template's HEAD has no content, as HEAD has.
   void patterned.result("HEAD /files/x").then(({ data }) => {
     expectTypeOf(data).toEqualTypeOf<undefined>()
@@ -437,11 +581,11 @@ void function clientOptionChecks(): void {
   // @ts-expect-error one signal would cancel every request; a call or the fetch option takes it
   void createClient(contract, { signal: AbortSignal.timeout(10_000) })
   // @ts-expect-error contract entries name declared endpoints
-  void createClient<Endpoints>({ version: 2, endpoints: { "GET /nope": {} } })
+  void createClient<Endpoints>({ version: 3, endpoints: { "GET /nope": {} } })
   // @ts-expect-error an older contract must be regenerated
   void createClient({ ...contract, version: 1 })
   // @ts-expect-error a newer contract must be regenerated with the installed package
-  void createClient({ ...contract, version: 3 })
+  void createClient({ ...contract, version: 999 })
 }
 
 void async function fetchTypeChecks(client: Client<Endpoints>): Promise<void> {
@@ -525,7 +669,7 @@ void async function responseEdgeChecks(): Promise<void> {
       responses: { default: { content: { "application/json": Schemas.Error } } }
     }
     "head /x": { responses: { "200": { content: { "application/json": Schemas.Pet } } } }
-  }>({ version: 2, endpoints: {} })
+  }>({ version: 3, endpoints: {} })
   // A wildcard's raw bytes may come labelled as anything; JSON is parsed, never a Blob.
   const download = await edge.result("GET /download")
   if (download.error === undefined) expectTypeOf(download.data).toEqualTypeOf<unknown>()

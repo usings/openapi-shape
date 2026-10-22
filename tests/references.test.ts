@@ -174,7 +174,7 @@ describe("references across documents", () => {
         expect(entry(code, "GET /pets")).toBe(
           [
             "{",
-            "  query: { limit?: number }",
+            "  query?: { limit?: number }",
             "  responses: {",
             "    /** OK */",
             '    "200": { content: { "application/json": Schemas.Pet[] } }',

@@ -272,7 +272,7 @@ it.each([
 it("treats any style field of a hand-written contract as style-based, ignoring contentType", async () => {
   const requests: Request[] = []
   const contract = {
-    version: 2,
+    version: 3,
     endpoints: {
       "POST /upload": {
         bodyEncodings: {

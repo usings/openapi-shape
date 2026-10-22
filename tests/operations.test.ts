@@ -196,7 +196,7 @@ describe("parameters", () => {
         },
       }),
     )
-    expect(entry(code, "GET /r")).toContain("query: { filter?: { a?: string } }")
+    expect(entry(code, "GET /r")).toContain("query?: { filter?: { a?: string } }")
   })
 
   it("matches path parameters to the path template", async () => {
