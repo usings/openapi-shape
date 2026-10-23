@@ -1,6 +1,6 @@
 # Client
 
-`openapi-shape/client` uses [the generated contract](./output.md#the-runtime-contract) to build typed requests with standard `Request` and `Response` objects. It handles parameter styles, media types, and form encodings, and supports middleware around each request. The client has no dependencies and uses standard Fetch API globals.
+`openapi-shape/client` provides three ways to consume an API response: decoded results, server-sent events, and a typed `Response`. Each uses [the generated contract](./output.md#the-runtime-contract) for request serialization and endpoint types, with shared request defaults and middleware. The client has no dependencies and runs on standard Fetch API globals.
 
 The client serializes requests and decodes responses; it does not validate their schemas. If the schema says `{ id: number }` but the server returns `{"id":"wrong"}`, the JSON is still returned with the declared static type. Validate data separately when needed. See [type guarantees and limits](./openapi.md#support-boundaries).
 
@@ -37,18 +37,23 @@ if (error === undefined) {
 | `fetch`          | The transport function: takes a `Request` and resolves to a `Response` after the middleware runs. Defaults to global `fetch`; replace it with a test double or custom transport.                                  |
 | Request defaults | `RequestInit` fields other than `method`, `body`, and `signal`, including `headers`, `credentials`, and `cache`. Each call overrides these defaults; headers are merged with the call's values taking precedence. |
 
-## Two calls
+## Calls
 
-| Call                          | Resolves to                                                                                                                       |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `api.result(endpoint, init?)` | `{ data, error, status, response }`: the body, read and decoded, as `data` for a 2xx status or `error` for any other, never both. |
-| `api.fetch(endpoint, init?)`  | The `Response`, typed by status, its body unread, for streams, downloads, and anything else `fetch` does.                         |
+Choose a method according to the response you need:
 
-Both calls accept the same arguments and resolve for any HTTP status, including errors. They reject for network failures, middleware errors, or requests that cannot be built. Missing path parameters reject with a `TypeError`. `result` also rejects if the body cannot be decoded according to its `Content-Type`.
+| Method                        | Endpoints              | Return value                                                                            |
+| ----------------------------- | ---------------------- | --------------------------------------------------------------------------------------- |
+| `api.result(endpoint, init?)` | Non-SSE endpoints      | A promise of `{ data, error, status, response }` after reading and decoding the body.   |
+| `api.stream(endpoint, init?)` | SSE endpoints          | A promise of `void` when the subscription completes; events arrive through `onMessage`. |
+| `api.fetch(endpoint, init?)`  | All callable endpoints | A promise of the `Response`, typed by status, with its body unread.                     |
 
-Use `result` for decoded data, or `fetch` to [read the response yourself](#typed-responses).
+An SSE endpoint has a successful response that explicitly declares `text/event-stream`, ignoring media type case and parameters. The [status rules](#status-handling) determine which response declaration applies; `HEAD` and bodyless statuses do not qualify. Wildcards such as `text/*` and SSE declared only for an error do not classify an endpoint as SSE.
 
-For typed wrappers, `openapi-shape/client` exports `Endpoint<Endpoints>` for callable endpoint keys, `EndpointArgs<Endpoints, K>` for arguments and their requiredness, and `EndpointData<Endpoints, K>` for decoded success data.
+`result` and `stream` accept separate endpoint sets, checked by TypeScript and at runtime. An endpoint offering both JSON and SSE belongs to `stream`; use `fetch` to select and read its JSON representation. For JSON sequences, downloads, and other formats you want to process incrementally, use `fetch` and read `response.body`.
+
+All calls take the operation's typed inputs and per-call request options. `stream` also accepts [lifecycle callbacks](#lifecycle). Request construction errors, such as missing path parameters, reject the returned promise. `result` and `fetch` resolve for every HTTP status and reject on transport or middleware failures; `result` also rejects on decoding errors. The stream's [connection policy](#reconnection) determines which failures retry.
+
+## Requests
 
 ### What a call takes
 
@@ -78,11 +83,13 @@ The media type determines which body values the client accepts and how it sends 
 | Other `text/*`, except `text/event-stream`       | A string                                | As given                                                                                   |
 | Anything else                                    | A `Blob`, buffer, stream, or string     | As given                                                                                   |
 
-A `Blob`, `FormData`, `URLSearchParams`, buffer, or stream passes through unchanged. `FormData` and `URLSearchParams` set their own content type. Web and Node.js streams use half duplex.
+Ready bodies such as `Blob`, `FormData`, `URLSearchParams`, and buffers use their own bytes. `FormData` and `URLSearchParams` set their own content type. `fetch` and `result` also accept Web and Node.js streams, sent with half duplex.
 
 Other ready bodies use the selected media type or the generated [`contentType` default](./output.md#the-runtime-contract). An `application/json` default does not relabel them, even when it has parameters. Without a label, a `Blob` uses its own type. Wildcards such as `image/*` do not label a body.
 
 Only `multipart/form-data` is encoded automatically. For other multipart types, provide an encoded body with its content type and boundary.
+
+`stream` buffers the encoded request body once and reuses those bytes across connection attempts. It accepts JSON, text, forms, blobs, and buffers, and rejects `ReadableStream` and async iterable bodies because they cannot be replayed. A retried POST can repeat an operation; use a server protocol that supports resumption or deduplication where needed.
 
 ### Form field defaults
 
@@ -132,7 +139,7 @@ Path values that create an empty segment, `.` or `..` are rejected because URL n
 
 ### Status handling
 
-Both calls derive their response types from the operation's declared statuses:
+Response types and SSE endpoint selection follow the operation's declared statuses:
 
 - A range such as `4XX` stands for each of its statuses not declared on their own.
 - If any 2xx status is declared, the types assume successful responses use one of those statuses. `default` covers all other statuses, including 2xx statuses when none are declared.
@@ -142,7 +149,7 @@ Both calls derive their response types from the operation's declared statuses:
 
 ### Results
 
-`api.result()` consumes the response body, or cancels it for `HEAD` and bodyless statuses, allowing the connection to be reused. It decodes the body by `Content-Type`:
+`api.result()` reads the complete response body, or cancels it for `HEAD` and bodyless statuses, allowing the connection to be reused. The actual `Content-Type` determines decoding:
 
 - JSON (`…/json`, `…+json`): parsed; an empty body, or one of only JSON whitespace (spaces, tabs, line breaks), is no content. A body that does not parse rejects, with the status in the message.
 - Other `text/*`: a string.
@@ -194,23 +201,72 @@ if (response.ok) {
 }
 ```
 
-### Streams
+## Streams
 
-`api.result()` buffers the entire body, so it returns event streams and JSON sequences as text or a `Blob`. Use `api.fetch()` to read incrementally. The generated `Endpoints` types describe the items for your own parser:
+`api.stream()` consumes an SSE response one event at a time. Its promise represents the subscription, including any reconnections, and resolves when the server finishes normally or responds with 204.
 
 ```ts
-const { body } = await api.fetch("GET /events")
-const reader = body?.pipeThrough(new TextDecoderStream()).getReader()
-while (reader) {
-  const { done, value } = await reader.read()
-  if (done) break
-  console.log(value) // event stream text, as it arrives
-}
+const controller = new AbortController()
+await api.stream("GET /events", {
+  signal: controller.signal,
+  onMessage(event) {
+    console.log(event.event, event.data)
+  },
+})
 ```
+
+### Events
+
+The client parses UTF-8 chunks and SSE fields into messages with these properties:
+
+| Property | Value                                                          |
+| -------- | -------------------------------------------------------------- |
+| `data`   | String formed by joining the event's data lines with newlines. |
+| `event`  | Event name, or `"message"` when none is given.                 |
+| `id`     | Current event cursor. An empty `id:` clears it.                |
+| `retry`  | Optional numeric reconnection interval supplied in the event.  |
+
+`onMessage` receives named events as well as default events. Comments and blocks without data do not produce messages. An incomplete event at EOF is discarded.
+
+The operation's `itemSchema` narrows the standard message fields, including literal event names and unions. Without it, messages use `StreamMessage`. Additional schema properties are not synthesized. `data` remains text even when it contains JSON; parse it in your handler according to your protocol. See [sequential content types](./openapi.md#sequential-content) for how the schema describes an event.
+
+### Lifecycle
+
+Callbacks run in order and may return promises. The client awaits each handler before delivering another event, so asynchronous processing applies backpressure.
+
+| Callback             | When it runs                                                                  |
+| -------------------- | ----------------------------------------------------------------------------- |
+| `onOpen(response)`   | After validating each successful SSE connection, before reading events.       |
+| `onMessage(message)` | For each complete event containing data.                                      |
+| `onClose()`          | At normal EOF or on a 204 response.                                           |
+| `onError(error)`     | After a connection, reading, or callback failure, to decide whether to retry. |
+
+The client supplies `Accept: text/event-stream` when no Accept header is configured. A successful connection must have an SSE content type and a body; 204 completes without opening an event reader. A refused response raises `StreamResponseError`, whose `response` retains its status and headers. Its body is canceled before error handling.
+
+### Reconnection
+
+The default policy is:
+
+| Outcome                                                     | Action                                      |
+| ----------------------------------------------------------- | ------------------------------------------- |
+| Transport/read failure, HTTP 408, 429, or 5xx               | Reconnect after the current retry interval. |
+| Other HTTP error, invalid SSE response, or callback failure | Reject with the error.                      |
+| Normal EOF or HTTP 204                                      | Complete after `onClose`.                   |
+| Call signal aborted                                         | Stop and reject with `signal.reason`.       |
+
+The retry interval starts at 1000 ms. A valid SSE `retry:` field updates it for subsequent attempts. `onError` can override the policy: return a finite non-negative number to retry after that many milliseconds, `false` to reject with the original error, or nothing to keep the default. Throwing rejects with the thrown error. To reopen a subscription after normal EOF, throw from `onClose` and return a delay from `onError` for that error.
+
+Each attempt uses the [same encoded request body](#request-bodies) and runs through the full middleware chain. The latest completed event block's cursor is sent as `Last-Event-ID`. Events may be delivered more than once; applications that need deduplication should use their IDs.
+
+### Cancellation
+
+Call `controller.abort()` from your shutdown or unsubscribe handler. Cancellation closes the active reader, clears the retry timer, and prevents further attempts, including while a callback or transport is still pending. A callback's own asynchronous work must observe the signal if it needs cancellation too.
+
+Subscriptions keep running when a browser page becomes hidden. Their lifecycle is controlled by the server, callbacks, and call signal in both browsers and Node.
 
 ## Middleware
 
-Middleware wraps requests for authentication, timeouts, retries, or logging. Each function receives a `Request` and `next`, and resolves to a `Response`. Call `next(request)` to continue through the remaining middleware. Code before `next` handles the request; code after it handles the response; a `try`/`catch` around it handles failures.
+Middleware wraps every request made by `fetch`, `result`, and `stream`, including stream reconnections. Use it for authentication, timeouts, retries, or logging. Each function receives a `Request` and `next`, and resolves to a `Response`. Call `next(request)` to continue through the remaining middleware. Code before `next` handles the request; code after it handles the response; a `try`/`catch` around it handles failures.
 
 The first middleware runs outermost. The client's `fetch` option sends the request after the last middleware:
 
@@ -252,11 +308,24 @@ A middleware may forward a different request, return a response without calling 
 ### Requests, bodies, and retries
 
 - Middleware receives the same `Request` object passed by its caller. In-place changes remain visible to outer middleware, so an outer logger could expose a newly added token. Forward a copy with `new Request(request)` or `new Request(request, init)` to isolate changes. These constructors take over the original body.
-- Bodies can be read only once. For retries, clone the request before the first attempt. To inspect a response body, read a `response.clone()` and return the original; consuming the original causes `api.result()` to reject. Cancel discarded response bodies with `response.body?.cancel()` so their connections can be reused.
+- Bodies can be read only once. For retries, clone the request before the first attempt. To inspect a response body, read a `response.clone()` and return the original; consuming the original leaves no body for the caller to read or parse. Cancel discarded response bodies with `response.body?.cancel()` so their connections can be reused.
+- Stream reconnection creates a fresh request and reruns the chain. Retry middleware can add attempts within each connection attempt, so account for both retry policies.
 - A function that takes only a request also qualifies as middleware and can stop the chain. Put transport test doubles in the `fetch` option so every middleware still runs.
 
 ### Credentials and timeouts
 
 Put static credentials in the client's `headers` defaults. Use middleware when credentials need to be refreshed for each request.
 
-Set timeouts in middleware or a call's `signal`. Client-wide options exclude `signal`: sharing one timeout signal across all requests would cancel every request after it expires.
+A call's `signal` limits the whole call, including a stream subscription's retries. A timeout created in middleware limits each request that passes through it; for a stream, that timeout also applies while its response body is being read. Client-wide options exclude `signal`: sharing one timeout signal across all requests would cancel every request after it expires.
+
+## Typed wrappers
+
+The client exports helper types for functions that forward calls. `Endpoints` is the generated interface; `K` selects one endpoint.
+
+| Method   | Endpoint keys               | Arguments                    | Data                                                      |
+| -------- | --------------------------- | ---------------------------- | --------------------------------------------------------- |
+| `fetch`  | `Endpoint<Endpoints>`       | `EndpointArgs<Endpoints, K>` | The returned `TypedResponse` narrows by status.           |
+| `result` | `ResultEndpoint<Endpoints>` | `EndpointArgs<Endpoints, K>` | `EndpointData<Endpoints, K>` is the decoded success data. |
+| `stream` | `StreamEndpoint<Endpoints>` | `StreamArgs<Endpoints, K>`   | `EndpointMessage<Endpoints, K>` is a parsed event.        |
+
+The argument types preserve required parameters and bodies. Constrain a wrapper's endpoint to the key type for its method; a single call cannot take a union of endpoint keys. `StreamOptions<Message>` describes the lifecycle callbacks separately when defining reusable handlers.

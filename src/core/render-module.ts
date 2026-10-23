@@ -1,5 +1,5 @@
 import { indentTail, jsdoc, text } from "./jsdoc"
-import { acceptsJson, defaultMediaType, isApplicationJson } from "./media-types"
+import { acceptsJson, classifyMediaType, defaultMediaType, isApplicationJson } from "./media-types"
 import type { Declaration, Field, Info, Media, Model, Operation } from "./model"
 import { propertyKey } from "./naming"
 import type { TypeContext } from "./render-types"
@@ -144,7 +144,7 @@ function declare(name: string, declaration: Declaration, context: TypeContext): 
 }
 
 /** The format version written here must agree with openapi-shape/client's `Contract`. */
-const CONTRACT_VERSION = 3
+const CONTRACT_VERSION = 4
 
 /**
  * How requests go over the wire, for `openapi-shape/client`: each endpoint's serialization and
@@ -189,6 +189,7 @@ function contractEntry(operation: Operation): Record<string, unknown> | undefine
   const content = method === "GET" || method === "HEAD" ? [] : (operation.body?.content ?? [])
   const fallback = defaultMediaType(content.map((media) => media.mediaType))
   const entry: Record<string, unknown> = {
+    stream: supportsEvents(operation) ? "sse" : undefined,
     params: fieldEncodings(operation.params),
     query: fieldEncodings(operation.query) ?? operation.querystring?.encoding,
     querystring: operation.querystring?.mediaType,
@@ -209,6 +210,24 @@ function contractEntry(operation: Operation): Record<string, unknown> | undefine
   }
   for (const key of Object.keys(entry)) if (entry[key] === undefined) delete entry[key]
   return Object.keys(entry).length > 0 ? entry : undefined
+}
+
+/** Match the client's success statuses: exact before range, default only without a success. */
+function supportsEvents(operation: Operation): boolean {
+  const method = operation.key.split(" ", 1)[0].toUpperCase()
+  if (["HEAD", "CONNECT", "TRACE", "TRACK"].includes(method)) return false
+  const responses = new Map(operation.responses.map((response) => [response.status, response]))
+  const hasSuccess = [...responses.keys()].some((status) => /^2(?:\d\d|XX)$/.test(status))
+  for (let status = 200; status < 300; status++) {
+    if (status === 204 || status === 205) continue
+    const response =
+      responses.get(String(status)) ??
+      responses.get("2XX") ??
+      (hasSuccess ? undefined : responses.get("default"))
+    if (response?.content.some((media) => classifyMediaType(media.mediaType) === "events"))
+      return true
+  }
+  return false
 }
 
 function fieldEncodings(fields: Field[]): Record<string, unknown> | undefined {

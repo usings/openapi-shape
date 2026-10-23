@@ -6,6 +6,7 @@ import type {
   Endpoint,
   EndpointArgs,
   EndpointData,
+  ResultEndpoint,
   Middleware,
   TypedResponse,
 } from "../src/client"
@@ -177,10 +178,10 @@ void api.fetch("GET /ordinary-required", {query: {q: "ok"}})
                 `${style}.ts`,
                 `
 import { createClient } from "openapi-shape/client"
-import type { Endpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
+import type { ResultEndpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
 import { contract, type Endpoints } from "./api"
 const { result } = createClient(contract)
-export async function data<K extends Endpoint<Endpoints>>(
+export async function data<K extends ResultEndpoint<Endpoints>>(
   endpoint: K, ...args: EndpointArgs<Endpoints, K>
 ): Promise<EndpointData<Endpoints, K>> {
   const ${binding} = await result(endpoint, ...args)
@@ -500,7 +501,7 @@ void function endpointChecks(client: Client<Endpoints>): void {
     "GET /search": { body: { "application/json": { q: string } }; responses: object }
     "TRACE /debug": { responses: object }
     "connect /tunnel": { responses: object }
-  }>({ version: 3, endpoints: {} })
+  }>({ version: 4, endpoints: {} })
   // @ts-expect-error fetch cannot send a body with GET
   void unusual.result("GET /search", { body: { q: "x" } })
   void unusual.result("GET /search")
@@ -518,7 +519,7 @@ void function endpointChecks(client: Client<Endpoints>): void {
         responses: { "200": { content: { "application/json": number } } }
       }
     >
-  >({ version: 3, endpoints: {} })
+  >({ version: 4, endpoints: {} })
   void loose.result("GET /anything")
   void loose.fetch("POST /x")
   const anyEndpoint: string = "POST /x"
@@ -548,7 +549,7 @@ void function endpointChecks(client: Client<Endpoints>): void {
     [endpoint: `${string} /files/${string}`]: Json<{ size: number }>
     [endpoint: string]: Json<unknown>
     "GET /a": Json<{ a: number }>
-  }>({ version: 3, endpoints: {} })
+  }>({ version: 4, endpoints: {} })
   // A template's HEAD has no content, as HEAD has.
   void patterned.result("HEAD /files/x").then(({ data }) => {
     expectTypeOf(data).toEqualTypeOf<undefined>()
@@ -581,7 +582,7 @@ void function clientOptionChecks(): void {
   // @ts-expect-error one signal would cancel every request; a call or the fetch option takes it
   void createClient(contract, { signal: AbortSignal.timeout(10_000) })
   // @ts-expect-error contract entries name declared endpoints
-  void createClient<Endpoints>({ version: 3, endpoints: { "GET /nope": {} } })
+  void createClient<Endpoints>({ version: 4, endpoints: { "GET /nope": {} } })
   // @ts-expect-error an older contract must be regenerated
   void createClient({ ...contract, version: 1 })
   // @ts-expect-error a newer contract must be regenerated with the installed package
@@ -650,9 +651,8 @@ void async function resultTypeChecks(client: Client<Endpoints>): Promise<void> {
   if (checked.error === undefined) expectTypeOf(checked.data).toEqualTypeOf<unknown>()
   const file = await client.result("GET /files/{names}", { params: { names: [] } })
   if (file.error === undefined) expectTypeOf(file.data).toEqualTypeOf<Blob>()
-  const events = await client.result("GET /events")
-  if (events.error === undefined) expectTypeOf(events.data).toEqualTypeOf<string>()
-  expectTypeOf(events.response).toExtend<Response>()
+  // @ts-expect-error SSE belongs to stream(), not result()
+  void client.result("GET /events")
 }
 
 void async function responseEdgeChecks(): Promise<void> {
@@ -669,7 +669,7 @@ void async function responseEdgeChecks(): Promise<void> {
       responses: { default: { content: { "application/json": Schemas.Error } } }
     }
     "head /x": { responses: { "200": { content: { "application/json": Schemas.Pet } } } }
-  }>({ version: 3, endpoints: {} })
+  }>({ version: 4, endpoints: {} })
   // A wildcard's raw bytes may come labelled as anything; JSON is parsed, never a Blob.
   const download = await edge.result("GET /download")
   if (download.error === undefined) expectTypeOf(download.data).toEqualTypeOf<unknown>()
@@ -700,7 +700,7 @@ void async function responseEdgeChecks(): Promise<void> {
 
 void async function forwardingChecks(client: Client<Endpoints>): Promise<void> {
   // A function that passes a call on names what it returns of a success by `EndpointData`.
-  const dataOf = async <K extends Endpoint<Endpoints>>(
+  const dataOf = async <K extends ResultEndpoint<Endpoints>>(
     endpoint: K,
     ...args: EndpointArgs<Endpoints, K>
   ): Promise<EndpointData<Endpoints, K>> => {
@@ -754,7 +754,7 @@ async function call${i}() {
     const binding = style === "whole" ? "result" : "{ data, error, status, response }"
     const field = style === "whole" ? "result." : ""
     return `
-async function checked_${style}<K extends Endpoint<Endpoints>>(
+async function checked_${style}<K extends ResultEndpoint<Endpoints>>(
   endpoint: K, ...args: EndpointArgs<Endpoints, K>
 ): Promise<EndpointData<Endpoints, K>> {
   const ${binding} = await client.result(endpoint, ...args)
@@ -785,7 +785,7 @@ async function checked_${style}<K extends Endpoint<Endpoints>>(
     await typecheck(
       {
         "use.ts": `
-import type { Client, Endpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
+import type { Client, ResultEndpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
 interface Endpoints { ${endpoints.join("\n")} }
 declare const client: Client<Endpoints>
 ${calls.join("\n")}

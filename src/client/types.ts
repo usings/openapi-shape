@@ -1,3 +1,5 @@
+import type { StreamMessage, StreamOptions } from "./stream"
+
 /** A `Response` for one declared status or range: `json()` resolves to its JSON content. */
 export interface TypedResponse<Status extends number, Ok extends boolean, Json> extends Response {
   readonly status: Status
@@ -48,6 +50,68 @@ type Callable<K> = K extends `${infer Method} ${string}`
     : K
   : K
 
+/** Callable endpoints with an explicitly declared SSE success response. */
+export type StreamEndpoint<E> = {
+  [K in Endpoint<E>]: [EventContent<OperationOf<E, K>, MethodOf<K>>] extends [never] ? never : K
+}[Endpoint<E>]
+
+/** Endpoints whose bodies result() can read to completion. */
+export type ResultEndpoint<E> = Exclude<Endpoint<E>, StreamEndpoint<E>>
+
+type EventsIn<Shape> = Shape extends { content: infer Content }
+  ? {
+      // Keep media presence even when its schema allows no values (content is never).
+      [M in keyof Content & string]: Essence<M> extends "text/event-stream"
+        ? { content: Content[M] }
+        : never
+    }[keyof Content & string]
+  : never
+
+// Avoid expanding status ranges for operations that have no event media at all.
+type EventContent<Op extends Operation, Method extends string> = [
+  EventsIn<Op["responses"][keyof Op["responses"]]>,
+] extends [never]
+  ? never
+  : Outcomes<Op, Method> extends infer Outcome
+    ? Outcome extends [infer Status extends number, infer Shape]
+      ? [Extract<Status, StatusIn<"2">>] extends [never]
+        ? never
+        : EventsIn<Shape>
+      : never
+    : never
+
+/** A single parsed event, narrowed by itemSchema when present; data remains wire text. */
+export type EndpointMessage<E, K extends StreamEndpoint<E>> = MessageOf<
+  EventContent<OperationOf<E, K>, MethodOf<K>>
+>
+type MessageOf<Media> = Media extends { content: infer Content }
+  ? Content extends ReadonlyArray<infer Item>
+    ? EventItem<Item>
+    : StreamMessage
+  : never
+type EventItem<Item> = Item extends object
+  ? StreamMessage & Pick<Item, Extract<keyof Item, keyof StreamMessage>>
+  : StreamMessage
+
+type Replayable<Call> = Call extends unknown
+  ? {
+      [P in keyof Call]: P extends "body"
+        ? Exclude<Call[P], ReadableStream | AsyncIterable<Uint8Array>>
+        : Call[P]
+    }
+  : never
+type StreamInit<E, K extends StreamEndpoint<E>> = Replayable<Init<OperationOf<E, K>, MethodOf<K>>> &
+  StreamOptions<EndpointMessage<E, K>>
+
+/** Stream arguments preserve the operation's required inputs and exclude one-shot bodies. */
+export type StreamArgs<E, K extends StreamEndpoint<E>> = [K] extends [never]
+  ? [init?: never]
+  : IsUnion<K> extends true
+    ? [init: never]
+    : Empty extends StreamInit<E, K>
+      ? [init?: StreamInit<E, K>]
+      : [init: StreamInit<E, K>]
+
 /** Per-call input: the operation's parameters and body, and any other `RequestInit` field. */
 type Init<Op extends Operation, Method extends string> = Omit<
   RequestInit,
@@ -78,14 +142,14 @@ export type EndpointArgs<Endpoints, K extends Endpoint<Endpoints>> =
  * The data of an endpoint's 2xx responses: what `result` gives as `data` once `error` is
  * `undefined`, for functions that pass calls on and return it.
  */
-export type EndpointData<Endpoints, K extends Endpoint<Endpoints>> = [OpenKeys<Endpoints>] extends [
-  never,
-]
+export type EndpointData<Endpoints, K extends ResultEndpoint<Endpoints>> = [
+  OpenKeys<Endpoints>,
+] extends [never]
   ? { [S in SuccessStatus<Endpoints>]: DataAt<Endpoints, S>[K] }[SuccessStatus<Endpoints>]
   : OpenData<Endpoints, K>[K]
 
 // Open maps need the called key to distinguish HEAD from other methods.
-type OpenData<Endpoints, K extends Endpoint<Endpoints>> = {
+type OpenData<Endpoints, K extends ResultEndpoint<Endpoints>> = {
   [P in Endpoint<Endpoints> as P]: Extract<
     CallResult<Endpoints, P, K>,
     { error?: undefined }
@@ -97,7 +161,7 @@ type OpenData<Endpoints, K extends Endpoint<Endpoints>> = {
  * `error === undefined` narrows `data` to {@link EndpointData} also while the endpoint is a type
  * parameter.
  */
-export type EndpointResult<Endpoints, K extends Endpoint<Endpoints>> = [
+export type EndpointResult<Endpoints, K extends ResultEndpoint<Endpoints>> = [
   OpenKeys<Endpoints>,
 ] extends [never]
   ? FiniteResult<Endpoints, K>

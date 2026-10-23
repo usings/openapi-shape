@@ -638,6 +638,7 @@ describe("path items", () => {
 
 /** The fields of the contract format, as the client's types define them, every one listed. */
 const ENTRY_FIELDS = [
+  "stream",
   "params",
   "query",
   "querystring",

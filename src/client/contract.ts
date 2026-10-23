@@ -1,5 +1,5 @@
 /** The only contract format version this client reads. */
-export const CONTRACT_VERSION = 3
+export const CONTRACT_VERSION = 4
 
 /**
  * The runtime details a generated module exports as `contract`. Encodings record deviations from
@@ -29,6 +29,8 @@ export interface Encoding {
 
 /** One endpoint's parameter encodings, media selection, and form serialization. */
 export interface EndpointContract {
+  /** A successful response supports server-sent events. */
+  readonly stream?: "sse"
   readonly params?: Readonly<Record<string, Encoding>>
   readonly query?: Readonly<Record<string, Encoding>>
   /** Media type of the 3.2 `querystring` parameter. */

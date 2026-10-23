@@ -60,9 +60,17 @@ const VALUE: Record<Write, string> = { value: '{ a: "x" }', string: '"x"', ready
 describe("media types", () => {
   it("are typed as the client reads and writes them", async () => {
     const code = await gen(description)
-    const checks = MEDIA.flatMap(([, read, write], i) => [
-      `  const r${i} = await api.result("GET /m${i}")`,
-      `  if (r${i}.error === undefined) { const t: Equal<typeof r${i}.data, ${READ_TYPE[read]}> = true; void t }`,
+    const checks = MEDIA.flatMap(([mediaType, read, write], i) => [
+      ...(mediaType === "text/event-stream"
+        ? [
+            `  // @ts-expect-error SSE is consumed with stream`,
+            `  await api.result("GET /m${i}")`,
+            `  await api.stream("GET /m${i}", { onMessage(event) { const t: Equal<typeof event.data, string> = true; void t } })`,
+          ]
+        : [
+            `  const r${i} = await api.result("GET /m${i}")`,
+            `  if (r${i}.error === undefined) { const t: Equal<typeof r${i}.data, ${READ_TYPE[read]}> = true; void t }`,
+          ]),
       // Values the client cannot encode go only as ready-made bodies.
       ...(write === "ready" ? ["  // @ts-expect-error a ready-made body only"] : []),
       `  await api.fetch("POST /m${i}", { body: ${VALUE[write]} })`,
@@ -92,11 +100,26 @@ describe("media types", () => {
           sent.push(request)
           const read = MEDIA[i][1]
           const headers = { "content-type": mediaType }
-          return Promise.resolve(new Response(BODY[read], { status: 200, headers }))
+          const body = mediaType === "text/event-stream" ? "data: x\n\n" : BODY[read]
+          return Promise.resolve(new Response(body, { status: 200, headers }))
         },
       })
-      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-      const { data } = await api.result(`GET /m${i}`)
+      let data: unknown
+      if (mediaType === "text/event-stream") {
+        // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+        await api.stream(
+          `GET /m${i}` as never,
+          {
+            onMessage: (event: { data: string }) => {
+              data = event.data
+            },
+          } as never,
+        )
+      } else {
+        // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+        const result = await api.result(`GET /m${i}`)
+        data = result.data
+      }
       const read =
         data instanceof Blob
           ? "blob"

@@ -4,7 +4,7 @@ The generator supports OpenAPI 3.0, 3.1, and 3.2. This page describes how descri
 
 ## Support boundaries
 
-OpenAPI and JSON Schema define the contract. The generator produces TypeScript types and HTTP serialization metadata, not runtime validation or proof of authenticity.
+OpenAPI and JSON Schema define the contract. The generator produces TypeScript types and runtime client settings, not runtime validation or proof of authenticity.
 
 The types follow the supported features, [compatibility rules](#following-the-real-api), and [approximations](#approximations) on this page. Incorrect types within that scope are generator defects. Use the source contract for validation; successful generation does not certify that the document fully conforms to either specification.
 
@@ -54,7 +54,7 @@ Each `patternProperties` match, including compiling its pattern, has a 100 ms ex
 
 ## Media types
 
-The generator uses the media type to determine the content types stored in `Endpoints`. These types also support custom clients and stream parsers; they are not necessarily the decoded values returned by `api.result()`. See [client responses](./client.md#responses) for runtime decoding.
+Each request or response `content` entry maps its media type to a TypeScript type in `Endpoints`. These types describe the content for clients and parsers; [client methods](./client.md#calls) determine how it is read at runtime.
 
 | Media type                                                                                        | Type                                                            |
 | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
@@ -65,6 +65,12 @@ The generator uses the media type to determine the content types stored in `Endp
 | Other `text/*`, including `text/event-stream` without `itemSchema`                                | `string`, or the schema's type when it says which strings       |
 | The range `text/*`, which also covers JSON such as `text/json`                                    | The schema's type when it says which strings, else `unknown`    |
 | Anything else: binary, XML, YAML, vendor types                                                    | `Blob`                                                          |
+
+### Sequential content
+
+For SSE and JSON sequences, `itemSchema` describes one item and the generated content type is an array of those items. The array represents the sequence's type; a client can process each item as it arrives. For JSON sequences without `itemSchema`, the generator reads `schema` as the item schema.
+
+An SSE item is the parsed event: `data`, `event`, and `id` are strings, and `retry` is a number. JSON embedded in `data` can be described with `contentMediaType` and `contentSchema`, but the field remains a string. `api.stream()` infers the standard event fields from `itemSchema`; application code handles any further decoding. See [SSE events](./client.md#events).
 
 ### Binary content
 

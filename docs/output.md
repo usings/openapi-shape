@@ -2,7 +2,7 @@
 
 `openapi-shape` generates one TypeScript module per OpenAPI description. It contains operation types (`Endpoints`, plus `Webhooks` and `Callbacks` when present), named schema types in `Schemas`, and the runtime `contract` used by [the client](./client.md).
 
-The module has no imports or runtime dependencies. Its types describe the contract under the generator's [projection rules and limits](./openapi.md#support-boundaries); they do not validate values at runtime. The `contract` value contains serialization metadata, not executable schemas.
+The module has no imports or runtime dependencies. Its types describe operations and schemas under the generator's [projection rules and limits](./openapi.md#support-boundaries). The `contract` provides request serialization settings and SSE endpoint markers for the client. Neither contains a runtime schema validator.
 
 ## Example
 
@@ -77,16 +77,17 @@ const endpoints = {
       },
     },
   },
+  "GET /events": { stream: "sse" },
 } as const
 
 /** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */
 export const contract: {
   /** The contract's format; `createClient` refuses one it does not read. */
-  readonly version: 3
+  readonly version: 4
   /** Carries `Endpoints` for `createClient` to infer; never set. */
   readonly types?: Endpoints
   readonly endpoints: typeof endpoints
-} = { version: 3, endpoints }
+} = { version: 4, endpoints }
 ```
 
 ## Operations
@@ -185,31 +186,32 @@ This is OpenAPI 3.0's rule, applied in 3.1+ too ([Following the real API](./open
 
 ## The runtime contract
 
-The generated `contract` records HTTP serialization settings. Operations that use client defaults may be absent from its `endpoints` map. It contains no runtime schema validator. Entries can contain:
+`createClient(contract)` reads the module's runtime settings and infers its `Endpoints` through the optional `types` field, which is absent at runtime. The contract's `endpoints` map records the settings each operation needs; operations using only client defaults may be omitted.
 
-- Parameter encodings under `params`, `query`, and `headers`: `{ style, explode }` (with `allowReserved` when set), or `{ contentType }` for a parameter with `content`.
-- `querystring`: the media type of an OpenAPI 3.2 querystring parameter. Form querystrings instead store their field encodings under `query`.
-- `contentType`: the default request media type when it is not `application/json`, `application/*`, or `*/*`. This includes form types and JSON types such as `application/merge-patch+json`. The [default selection rule](./client.md#what-a-call-takes) determines which media type is used.
-- `json`: the default `application/json` label when it differs from plain `application/json`, such as `application/json; charset=utf-8`, used to label encoded JSON when the call omits `contentType`. See [call inputs](./client.md#what-a-call-takes).
-- `bodyEncodings`: form field settings, keyed by the full media type (including parameters), then field name. These include explicit encodings and schema-derived defaults. An explicit style overrides content type; missing entries use the client's fallback.
+| Entry field                  | Purpose                                                                                                                                                   |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `params`, `query`, `headers` | Parameter encodings: `style`, `explode`, `allowReserved`, or `contentType` for a parameter with `content`.                                                |
+| `querystring`                | Media type of an OpenAPI 3.2 querystring parameter. Form querystrings instead store field encodings under `query`.                                        |
+| `contentType`                | Default request media type when it is not `application/json`, `application/*`, or `*/*`, such as `multipart/form-data` or `application/merge-patch+json`. |
+| `json`                       | Full label of the default JSON media type when its spelling differs from `application/json`, including case or parameters.                                |
+| `bodyEncodings`              | Form encodings keyed by full media type, then field name, including explicit settings and schema-derived defaults.                                        |
+| `stream`                     | `"sse"` for an endpoint with an effective SSE success response, selecting `api.stream()` as its event consumer.                                           |
 
-For URL-encoded form arrays, `repeat: true` encodes each item separately. A parameter's `content` instead encodes the whole value.
+The [client's endpoint rules](./client.md#calls) apply the same classification in types and at runtime. Request media defaults follow the [call input rules](./client.md#what-a-call-takes). `GET` and `HEAD` entries have no `contentType`, `json`, or `bodyEncodings` because Fetch sends those methods without a body.
 
-`GET` and `HEAD` endpoints have no `contentType`, `json`, or `bodyEncodings`: the client sends them without a body.
+Form encodings use the selected media type, including its parameters. An explicit style overrides a field's content type. For URL-encoded arrays, `repeat: true` encodes each item separately; a parameter's `content` encodes the whole value. Missing settings use the client's [form field defaults](./client.md#form-field-defaults).
 
-The client uses its configured `baseUrl`, rather than the description's [servers](./openapi.md#operations). Credentials come from headers or middleware, cookies are managed by the runtime, and multipart parts follow the selected media type's field encodings. See the [client guide](./client.md) for request encoding.
+Connection settings belong to the client configuration: `baseUrl` selects the server, credentials come from headers or middleware, and the runtime manages cookies. The contract contains metadata, not executable schemas or transport code.
 
 ### Format compatibility
 
-The current format is v3. The `version` field identifies the format, and the contract type carries `Endpoints` through the optional `types` field for inference. That field is absent at runtime.
+The contract format is v4. Its `version` must match the installed client; a mismatch fails to compile at `createClient` and is rejected at runtime.
 
-The contract version must match the installed client. A different version fails to compile at `createClient`; JavaScript callers receive an error instructing them to regenerate the module with the installed version of openapi-shape.
-
-After upgrading, rerun your generation command and commit the updated module. Use the local executable so generation and the client use the same installed package:
+Generate and check the module with your application's installed package:
 
 ```sh
 pnpm exec openapi-shape ./openapi.yaml -o src/api.ts
 pnpm exec openapi-shape ./openapi.yaml -o src/api.ts --check
 ```
 
-Do not change `version` by hand: regeneration also updates serialization metadata. If a mismatch remains, check that your application imports the regenerated file and that generation and runtime resolve the same package version.
+Regenerate after package upgrades and commit the updated module. Changing `version` by hand does not update its metadata. If a mismatch remains, check that the application imports the regenerated file and that generation and runtime resolve the same package version.

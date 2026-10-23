@@ -3,6 +3,8 @@ import type { Contract, EndpointContract } from "./contract"
 import { CONTRACT_VERSION } from "./contract"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest } from "./request"
+import type { StreamOptions } from "./stream"
+import { stream as subscribe } from "./stream"
 import type {
   Endpoint,
   EndpointArgs,
@@ -10,10 +12,24 @@ import type {
   MethodOf,
   OperationOf,
   ResponseOf,
+  ResultEndpoint,
+  StreamArgs,
+  StreamEndpoint,
 } from "./types"
 
 export type { Contract } from "./contract"
-export type { Endpoint, EndpointArgs, EndpointData, TypedResponse } from "./types"
+export type {
+  Endpoint,
+  EndpointArgs,
+  EndpointData,
+  EndpointMessage,
+  ResultEndpoint,
+  StreamArgs,
+  StreamEndpoint,
+  TypedResponse,
+} from "./types"
+export type { StreamMessage, StreamOptions } from "./stream"
+export { StreamResponseError } from "./stream"
 
 /**
  * Defaults for every request: any `RequestInit` field but `signal`, which every request would share
@@ -60,9 +76,14 @@ export interface Client<Endpoints> {
    * (`null` when there is none), never both; `status` narrows them by status.
    */
   result<K extends string>(
-    endpoint: K & Endpoint<Endpoints>,
-    ...init: EndpointArgs<Endpoints, K & Endpoint<Endpoints>>
-  ): Promise<EndpointResult<Endpoints, K & Endpoint<Endpoints>>>
+    endpoint: K & ResultEndpoint<Endpoints>,
+    ...init: EndpointArgs<Endpoints, K & ResultEndpoint<Endpoints>>
+  ): Promise<EndpointResult<Endpoints, K & ResultEndpoint<Endpoints>>>
+  /** Consume SSE events until EOF or cancellation; reconnect on transient failures. */
+  stream<K extends string>(
+    endpoint: K & StreamEndpoint<Endpoints>,
+    ...init: StreamArgs<Endpoints, K & StreamEndpoint<Endpoints>>
+  ): Promise<void>
 }
 
 /** Create a typed `fetch` from a generated module's `contract`. */
@@ -104,6 +125,9 @@ export function createClient<Endpoints>(
 
   // The body is always read, so that the connection is free again.
   const result = async (endpoint: string, call: CallInit = {}): Promise<unknown> => {
+    if (defaults.endpoints[endpoint]?.stream === "sse") {
+      throw new TypeError(`Endpoint "${endpoint}" requires api.stream() or api.fetch()`)
+    }
     const request = buildRequest(endpoint, call, defaults)
     const response = await send(request)
     const body = await decodeBody(response, request.method)
@@ -114,5 +138,9 @@ export function createClient<Endpoints>(
       : { data: undefined, error: body ?? null, status, response }
   }
 
-  return { fetch, result } as unknown as Client<Endpoints>
+  const stream = async (endpoint: string, call: CallInit & StreamOptions = {}): Promise<void> => {
+    await subscribe(endpoint, call, defaults, send)
+  }
+
+  return { fetch, result, stream } as unknown as Client<Endpoints>
 }
