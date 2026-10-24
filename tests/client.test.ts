@@ -1,6 +1,6 @@
 import { runInNewContext } from "node:vm"
-import { describe, expect, it } from "vitest"
-import type { Middleware } from "../src/client"
+import { describe, expect, it, vi } from "vitest"
+import type { Fetcher, Middleware, MiddlewareContext } from "../src/client"
 import { createClient, defineMiddleware } from "../src/client"
 import type { BodyLike } from "../src/client/types"
 import { contract } from "./__snapshots__/client-api"
@@ -798,6 +798,209 @@ describe("responses", () => {
 })
 
 describe("middleware", () => {
+  it("snapshots the chain and isolates contexts across concurrent client methods", async () => {
+    const ready = Promise.withResolvers<void>()
+    const seen: MiddlewareContext[] = []
+    const observe: Middleware = async (request, next, context) => {
+      const received = await next(request)
+      expect(Object.isFrozen(context)).toBe(true)
+      seen.push(context)
+      return received
+    }
+    const middleware = [observe]
+    const api = createClient(contract, {
+      baseURL: "https://api.test",
+      middleware,
+      fetch: async (request) => {
+        await ready.promise
+        return request.url.endsWith("/events")
+          ? new Response("data: hello\n\n", { headers: { "content-type": "text/event-stream" } })
+          : Response.json({ id: 1, name: "Milo" })
+      },
+    })
+    middleware[0] = () => Promise.reject(new Error("changed configuration"))
+    const fetched = api.fetch("GET /pets/{id}", { params: { id: 1 } })
+    const result = api.result("GET /pets/{id}", { params: { id: 2 } })
+    const reader = api.stream("GET /events", { retry: false }).getReader()
+    const reading = reader.read()
+    ready.resolve()
+    await Promise.all([fetched, result, reading])
+    expect(seen.toSorted((a, b) => a.kind.localeCompare(b.kind))).toStrictEqual([
+      { endpoint: "GET /pets/{id}", kind: "fetch" },
+      { endpoint: "GET /pets/{id}", kind: "result" },
+      { endpoint: "GET /events", kind: "stream" },
+    ])
+    const fetchedResponse = await fetched
+    await fetchedResponse.body?.cancel()
+    await reader.cancel()
+  })
+
+  it.each(["fetch", "result"] as const)(
+    "cleans an undelivered response and preserves a middleware error in %s",
+    async (kind) => {
+      const failure = new Error("after response")
+      const cancel = vi.fn<() => void>()
+      const api = createClient(contract, {
+        baseURL: "https://api.test",
+        middleware: [
+          async (request, next) => {
+            await next(request)
+            throw failure
+          },
+        ],
+        fetch: () => Promise.resolve(new Response(new ReadableStream({ cancel }))),
+      })
+      await expect(api[kind]("GET /pets")).rejects.toBe(failure)
+      expect(cancel).toHaveBeenCalledOnce()
+    },
+  )
+
+  it.each(["fetch", "result"] as const)(
+    "retires transport and intermediate middleware responses before handing off %s",
+    async (kind) => {
+      const transportCancel = vi.fn<() => void>()
+      const middleCancel = vi.fn<() => void>()
+      const selected = Response.json({ id: 1, name: "Milo" })
+      const api = createClient(contract, {
+        baseURL: "https://api.test",
+        middleware: [
+          async (request, next) => {
+            await next(request)
+            return selected
+          },
+          async (request, next) => {
+            await next(request)
+            return new Response(new ReadableStream({ cancel: middleCancel }))
+          },
+        ],
+        fetch: () => Promise.resolve(new Response(new ReadableStream({ cancel: transportCancel }))),
+      })
+      const answer = await api[kind]("GET /pets/{id}", { params: { id: 1 } })
+      expect(transportCancel).toHaveBeenCalledOnce()
+      expect(middleCancel).toHaveBeenCalledOnce()
+      const data = answer instanceof Response ? await answer.json() : answer.data
+      expect(data).toStrictEqual({ id: 1, name: "Milo" })
+    },
+  )
+
+  it("keeps a selected response body alive when middleware wraps the same stream", async () => {
+    const original = new Response('"kept"', { headers: { "content-type": "application/json" } })
+    const api = createClient(contract, {
+      baseURL: "https://api.test",
+      middleware: [
+        async (request, next) => {
+          const received = await next(request)
+          return new Response(received.body)
+        },
+      ],
+      fetch: () => Promise.resolve(original),
+    })
+    const selected = await api.fetch("GET /pets")
+    expect(selected.body).toBe(original.body)
+    expect(await selected.json()).toBe("kept")
+  })
+
+  it("cancels a late next response without canceling the selected response", async () => {
+    const pending = Promise.withResolvers<Response>()
+    const cancel = vi.fn<() => void>()
+    let late: Promise<Response> | undefined
+    let attempts = 0
+    const api = createClient(contract, {
+      baseURL: "https://api.test",
+      middleware: [
+        (request, next) => {
+          const selected = next(request.clone())
+          late = next(request)
+          return selected
+        },
+      ],
+      fetch: () =>
+        ++attempts === 1 ? Promise.resolve(Response.json("selected")) : pending.promise,
+    })
+    const selected = await api.fetch("GET /pets")
+    pending.resolve(new Response(new ReadableStream({ cancel })))
+    await late
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(await selected.json()).toBe("selected")
+  })
+
+  it.each(["fetch", "result"] as const)(
+    "aborts pending %s middleware and retires its late transport response",
+    async (kind) => {
+      const pending = Promise.withResolvers<Response>()
+      const started = Promise.withResolvers<void>()
+      const canceled = Promise.withResolvers<void>()
+      const abort = new AbortController()
+      const failure = { reason: "stop" }
+      const api = createClient(contract, {
+        baseURL: "https://api.test",
+        fetch: () => {
+          started.resolve()
+          return pending.promise
+        },
+      })
+      const result = api[kind]("GET /pets", { signal: abort.signal }).catch(
+        (error: unknown) => error,
+      )
+      await started.promise
+      abort.abort(failure)
+      expect(await result).toBe(failure)
+      pending.resolve(
+        new Response(
+          new ReadableStream({
+            cancel() {
+              canceled.resolve()
+            },
+          }),
+        ),
+      )
+      await canceled.promise
+    },
+  )
+
+  it("blocks a retained next after cancellation even if its request replaces the signal", async () => {
+    const fetch = vi.fn<Fetcher>()
+    const abort = new AbortController()
+    let resume: Fetcher | undefined
+    const api = createClient(contract, {
+      baseURL: "https://api.test",
+      middleware: [
+        (_request, next) => {
+          resume = next
+          return Promise.resolve(Response.json([]))
+        },
+      ],
+      fetch,
+    })
+    const selected = await api.fetch("GET /pets", { signal: abort.signal })
+    const failure = new Error("finished")
+    abort.abort(failure)
+    await expect(resume?.(new Request("https://api.test/pets"))).rejects.toBe(failure)
+    expect(fetch).not.toHaveBeenCalled()
+    await selected.body?.cancel()
+  })
+
+  it("leaves result decoding outside the HTTP middleware error boundary", async () => {
+    const caught = vi.fn<() => void>()
+    const api = createClient(contract, {
+      baseURL: "https://api.test",
+      middleware: [
+        async (request, next) => {
+          try {
+            return await next(request)
+          } catch (error) {
+            caught()
+            throw error
+          }
+        },
+      ],
+      fetch: () =>
+        Promise.resolve(new Response("{bad}", { headers: { "content-type": "application/json" } })),
+    })
+    await expect(api.result("GET /pets")).rejects.toBeInstanceOf(SyntaxError)
+    expect(caught).not.toHaveBeenCalled()
+  })
+
   it("wraps sending, the first outermost, with the fetch option after the last", async () => {
     const answered: string[] = []
     const via = (name: string): Middleware =>

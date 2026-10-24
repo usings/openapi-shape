@@ -1,5 +1,6 @@
 import { mediaTypeEssence, streamFormat } from "../shared/media"
 import { abortable, cancelBody } from "./cancellation"
+import type { MiddlewareContext, Sender } from "./middleware"
 import { readJsonLines } from "./ndjson-parser"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest } from "./request"
@@ -20,19 +21,12 @@ export class StreamResponseError extends Error {
   }
 }
 
-/** Observe the actual transport boundary without changing errors seen by middleware. */
-export interface StreamAttempt {
-  received: (response: Response) => void
-  failed: (error: unknown) => void
-}
-export type StreamSender = (request: Request, attempt: StreamAttempt) => Promise<Response>
-
 /** Adapt one lazy subscription to standard Streams demand and cancellation. */
 export function stream(
   endpoint: string,
   init: CallInit & StreamOptions,
   defaults: RequestDefaults,
-  send: StreamSender,
+  send: Sender,
 ): ReadableStream<unknown> {
   const externalSignal = init.signal
   const abortController = new AbortController()
@@ -102,7 +96,7 @@ async function* subscription(
   endpoint: string,
   init: CallInit & StreamOptions,
   defaults: RequestDefaults,
-  send: StreamSender,
+  send: Sender,
   signal: AbortSignal,
 ): AsyncGenerator<unknown, void> {
   signal.throwIfAborted()
@@ -127,6 +121,7 @@ async function* subscription(
   headers.set("accept", selected)
   const initialId = headers.get("last-event-id") ?? ""
   state.id = new TextDecoder().decode(Uint8Array.from(initialId, (char) => char.charCodeAt(0)))
+  const context: MiddlewareContext = { endpoint, kind: "stream" }
   let first = true
   const connect = (): AsyncGenerator<unknown, boolean> => {
     const own = new Headers(headers)
@@ -136,14 +131,14 @@ async function* subscription(
     }
     first = false
     const request = new Request(template, { headers: own, ...(body === undefined ? {} : { body }) })
-    return connection(request, selected, state, send, signal)
+    return connection(request, selected, state, send, context, signal)
   }
   if (format === "sse") yield* sseSession(connect, state, retry, signal)
   else yield* connect()
 }
 
 /**
- * Own every response produced by one middleware traversal, including late and replaced responses.
+ * Own the delivered response for one connection; the sender retires unselected responses.
  *
  * @yields Parsed items from this connection only.
  */
@@ -151,31 +146,17 @@ async function* connection(
   request: Request,
   selected: string,
   state: EventState,
-  send: StreamSender,
+  send: Sender,
+  context: MiddlewareContext,
   signal: AbortSignal,
 ): AsyncGenerator<unknown, boolean> {
-  const responses = new Set<Response>()
   const transportFailures: unknown[] = []
-  let finished = false
-  const attempt: StreamAttempt = {
-    received(response) {
-      if (finished || signal.aborted) cancelBody(response)
-      else responses.add(response)
-    },
-    failed(error) {
-      transportFailures.push(error)
-    },
-  }
+  let response: Response | undefined
   const sse = streamFormat(selected) === "sse"
   try {
     signal.throwIfAborted()
-    const pending = send(request, attempt).then((response) => {
-      attempt.received(response)
-      return response
-    })
-    let response: Response
     try {
-      response = await abortable(pending, signal)
+      response = await send(request, context, (error) => transportFailures.push(error))
     } catch (error) {
       signal.throwIfAborted()
       if (sse && transportFailures.some((failure) => Object.is(failure, error)))
@@ -183,14 +164,6 @@ async function* connection(
       throw error
     }
     signal.throwIfAborted()
-    // A middleware may return a clone or a replacement. Retire unused branches now,
-    // rather than letting them buffer for the lifetime of a long-running subscription.
-    for (const received of responses) {
-      if (received !== response && received.body !== response.body) {
-        cancelBody(received)
-        responses.delete(received)
-      }
-    }
     if (response.status === 204) return true
     if (!response.ok) {
       const error = new StreamResponseError(
@@ -224,9 +197,7 @@ async function* connection(
     } else yield* readJsonLines(response.body, signal)
     return false
   } finally {
-    finished = true
-    for (const response of responses) cancelBody(response)
-    responses.clear()
+    if (response) cancelBody(response)
   }
 }
 

@@ -301,58 +301,46 @@ A destination error cancels its source unless pipe options disable cancellation.
 
 ## Middleware
 
-Middleware wraps every request made by `fetch`, `result`, and `stream`, including stream reconnections. Use it for authentication, timeouts, retries, or logging. Each function receives a `Request` and `next`, and resolves to a `Response`. Call `next(request)` to continue through the remaining middleware. Code before `next` handles the request; code after it handles the response; a `try`/`catch` around it handles failures.
-
-The first middleware runs outermost. The client's `fetch` option sends the request after the last middleware:
+Middleware wraps HTTP exchanges from all three methods, including SSE reconnections. The chain is fixed when the client is created, with the first middleware outermost. Each function receives `(request, next, context)` and resolves to a `Response`; the client's `fetch` option is the final transport.
 
 ```ts
 import { createClient, defineMiddleware } from "openapi-shape/client"
 import { contract } from "./api"
 
-// A fresh token for every request, set on a copy, out of sight of the middleware around it.
 const auth = defineMiddleware(async (request, next) => {
   const authorized = new Request(request)
   authorized.headers.set("authorization", `Bearer ${await getToken()}`)
   return next(authorized)
 })
-
-// A 10-second timeout for every request.
-const timeout = defineMiddleware((request, next) => {
-  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(10_000)])
-  return next(new Request(request, { signal }))
-})
-
-// Each request's method, URL, status, and time.
-const logger = defineMiddleware(async (request, next) => {
-  const start = performance.now()
+const logger = defineMiddleware(async (request, next, context) => {
   const response = await next(request)
-  console.log(request.method, request.url, response.status, performance.now() - start)
+  console.log(context.kind, context.endpoint, response.status)
   return response
 })
-
-export const api = createClient(contract, {
+const api = createClient(contract, {
   baseURL: "https://api.example.com/v1",
-  middleware: [logger, timeout, auth],
+  middleware: [logger, auth],
 })
 ```
 
-`defineMiddleware()` provides contextual types and returns the same function. `Middleware` is the middleware type; `Fetcher` is the type of both `next` and the client's `fetch` option.
+`defineMiddleware` supplies contextual types and returns the same function. `Middleware` describes a wrapper; `Fetcher` describes `next` and the transport. A wrapper can forward a replacement request, return a response directly, or call `next` repeatedly; each call continues through the remaining chain. Put transport test doubles in `fetch` so middleware still runs.
 
-A middleware may forward a different request, return a response without calling `next`, or call `next` repeatedly. Each call continues through the remaining middleware.
+`MiddlewareContext` is read-only: `endpoint` is the original `"METHOD /path"` template, and `kind` is `"fetch"`, `"result"`, or `"stream"`. It stays unchanged when middleware rewrites a request and retains those values on SSE reconnection. Existing two-argument middleware works unchanged. The kind identifies the call, not whether its response body is finite: `fetch` can also return an indefinite stream.
 
-### Requests, bodies, and retries
+The chain ends when it returns response headers and a body to its caller. Result decoding and stream parsing happen afterward, so their errors are handled by the API caller or stream consumer, outside middleware. This logger observes HTTP responses, not completion of body processing.
 
-- Middleware receives the same `Request` object passed by its caller. In-place changes remain visible to outer middleware, so an outer logger could expose a newly added token. Forward a copy with `new Request(request)` or `new Request(request, init)` to isolate changes. These constructors take over the original body.
-- Bodies can be read only once. For retries, clone the request before the first attempt. For finite responses, a `response.clone()` can be read while returning the original. Avoid `clone().text()` on indefinite streams: it waits for EOF, and teeing a response can buffer unconsumed data. Observe stream response status and headers in middleware around the same request instead of making a separate observation request. Cancel discarded response bodies with `response.body?.cancel()` so their connections can be reused.
-- Preserve `request.signal` when constructing replacement requests so stream cancellation reaches transport and response reading. `new Request(request, init)` preserves it unless `init.signal` replaces it; combine additional signals with `AbortSignal.any` as above.
-- Stream reconnection creates a fresh request and reruns the chain. Retry middleware can add attempts within each connection attempt; those attempts do not count toward the stream's `maxRetries`. Middleware's own thrown errors are fatal to SSE; an actual transport rejection passed through unchanged is eligible for retry.
-- A function that takes only a request also qualifies as middleware and can stop the chain. Put transport test doubles in the `fetch` option so every middleware still runs.
+Use client header defaults for static credentials and middleware for refreshed credentials. A per-call `signal` limits the whole subscription. Client defaults exclude `signal`; sharing one timeout would eventually cancel every request. For a per-attempt timeout, combine signals in middleware:
 
-### Credentials and timeouts
+```ts
+import { defineMiddleware } from "openapi-shape/client"
 
-Put static credentials in the client's `headers` defaults. Use middleware when credentials need to be refreshed for each request.
+export const timeout = defineMiddleware((request, next) => {
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(10_000)])
+  return next(new Request(request, { signal }))
+})
+```
 
-A call's `signal` limits the whole call, including a stream subscription's retries. A timeout created in middleware limits each request that passes through it; for a stream, that timeout also applies while its response body is being read. Client-wide options exclude `signal`: sharing one timeout signal across all requests would cancel every request after it expires.
+That timeout also applies while Fetch reads the response body. For long-lived SSE, choose a timeout that permits the intended connection lifetime.
 
 ## Typed wrappers
 
@@ -365,3 +353,12 @@ The client exports helper types for functions that forward calls. `Endpoints` is
 | `stream` | `StreamEndpoint<Endpoints>` | `StreamArgs<Endpoints, K, M>` | `EndpointStreamItem<Endpoints, K, M>` is the selected parsed item. |
 
 The argument types preserve required parameters and bodies. Constrain a wrapper's endpoint to the key type for its method; a single call cannot take a union of endpoint keys. For streams, `M` extends `StreamMedia<Endpoints, K>` and defaults to all supported media; preserve it in wrappers so `accept` narrows the returned `ReadableStream`. `EndpointMessage<Endpoints, K>` remains the SSE-specific message helper. `StreamOptions` describes media selection and retry settings; `StreamRetryOptions` contains `delay` and `maxRetries`.
+
+## Middleware reference
+
+- Requests are shared with their caller. In-place changes remain visible to outer middleware; forward a `new Request(request, init)` to isolate changes. Request constructors take over the original body.
+- Bodies are single-use. Clone a request before the first attempt if retrying. Read or cancel an unused response before waiting to retry so its connection can be reused.
+- A `response.clone()` can be inspected for finite responses. Avoid `clone().text()` on indefinite streams: it waits for EOF, and unread tee branches can buffer data. Observe status and headers around the actual request instead of making another request.
+- Preserve `request.signal` when replacing a request; combine extra signals with `AbortSignal.any`. SSE retries traverse the full chain; middleware's own thrown errors are fatal, while an unchanged transport rejection is eligible for retry.
+- The client cancels unselected responses passing through the chain, including intermediate replacements and late responses after the chain returns, throws, or is canceled. A selected body shared by another response is retained. Finish response processing before returning; private clones kept inside middleware remain its responsibility, as do reader locks it acquires.
+- A call signal governs dispatch even if middleware replaces a request's signal. A pending exchange rejects with the original abort reason, and late responses are retired. Once a response is delivered, its owner is the `fetch` caller, the result decoder, or the stream session. Retained `next` functions cannot start another send after the call signal aborts.

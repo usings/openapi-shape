@@ -2,9 +2,10 @@ import type { Contract, EndpointContract } from "../shared/contract"
 import { CONTRACT_VERSION } from "../shared/contract"
 import { streamFormat } from "../shared/media"
 import { decodeBody } from "./body"
+import type { Fetcher, Middleware } from "./middleware"
+import { createSender } from "./middleware"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest, normalizeBaseURL } from "./request"
-import type { StreamSender } from "./stream"
 import { stream as subscribe } from "./stream"
 import type {
   Endpoint,
@@ -20,6 +21,8 @@ import type {
 } from "./types"
 
 export type { Contract } from "../shared/contract"
+export type { Fetcher, Middleware, MiddlewareContext } from "./middleware"
+export { defineMiddleware } from "./middleware"
 export type {
   Endpoint,
   EndpointArgs,
@@ -49,22 +52,6 @@ export interface ClientOptions extends Omit<RequestInit, "method" | "body" | "si
   middleware?: readonly Middleware[]
   /** Sends each request, after the last middleware. Default: the global `fetch`. */
   fetch?: Fetcher
-}
-
-/** Sends a request and resolves to its response, as `fetch` does. */
-export type Fetcher = (request: Request) => Promise<Response>
-
-/**
- * Wraps the sending of a request: takes it and `next`, which sends a request on through the rest,
- * and resolves to a response. It may pass on another request, call `next` again, or answer without
- * calling it. The request is the very one the middleware around it passed on, so a change is made
- * to a copy, `new Request(request)`, out of that middleware's sight.
- */
-export type Middleware = (request: Request, next: Fetcher) => Promise<Response>
-
-/** A middleware, typed where it is written; returned as it is. */
-export function defineMiddleware<T extends Middleware>(middleware: T): T {
-  return middleware
 }
 
 /** A typed `fetch` for the generated `Endpoints`: each call names one endpoint, `"METHOD /path"`. */
@@ -132,31 +119,11 @@ export function createClient<Endpoints>(
     headers,
     init,
   }
-  // Called unbound: a browser's `fetch` refuses to be called on another object.
-  // Each step is async, so that what throws inside rejects the `next` around it.
-  const transmit: Fetcher = async (request) => await (transport ?? globalThis.fetch)(request)
-  // The first middleware is the outermost.
-  const through = (sender: Fetcher): Fetcher =>
-    middleware.reduceRight<Fetcher>(
-      (next, wrap) => async (request) => await wrap(request, next),
-      sender,
-    )
-  const send = through(transmit)
-  const sendStream: StreamSender = (request, attempt) =>
-    through(async (outgoing) => {
-      try {
-        const response = await transmit(outgoing)
-        attempt.received(response)
-        return response
-      } catch (error) {
-        attempt.failed(error)
-        throw error
-      }
-    })(request)
+  const send = createSender(middleware, transport)
 
   // Async, so that a request that cannot be built rejects.
   const fetch = async (endpoint: string, call: CallInit = {}): Promise<Response> =>
-    await send(buildRequest(endpoint, call, defaults))
+    await send(buildRequest(endpoint, call, defaults), { endpoint, kind: "fetch" })
 
   // The body is always read, so that the connection is free again.
   const result = async (endpoint: string, call: CallInit = {}): Promise<unknown> => {
@@ -164,7 +131,7 @@ export function createClient<Endpoints>(
       throw new TypeError(`Endpoint "${endpoint}" requires api.stream() or api.fetch()`)
     }
     const request = buildRequest(endpoint, call, defaults)
-    const response = await send(request)
+    const response = await send(request, { endpoint, kind: "result" })
     const body = await decodeBody(response, request.method)
     // A failure's error is never undefined, which is what tells a success.
     const { status } = response
@@ -174,7 +141,7 @@ export function createClient<Endpoints>(
   }
 
   const stream = (endpoint: string, call: CallInit & StreamOptions = {}): ReadableStream<unknown> =>
-    subscribe(endpoint, call, defaults, sendStream)
+    subscribe(endpoint, call, defaults, send)
 
   return { fetch, result, stream } as unknown as Client<Endpoints>
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { Fetcher, StreamMessage } from "../src/client"
+import type { Fetcher, MiddlewareContext, StreamMessage } from "../src/client"
 import { StreamResponseError } from "../src/client"
 import { readEvents } from "../src/client/sse-parser"
 import { bytes, sseClient as client, sseResponse as response } from "./helpers/streams"
@@ -102,10 +102,12 @@ describe("SSE connections", () => {
   it("replays fixed bytes through fresh middleware and resumes only a completed event ID", async () => {
     vi.useFakeTimers()
     const seen: Array<{ body: string; auth: string | null; id: string | null }> = []
+    const contexts: MiddlewareContext[] = []
     let authentication = 0
     const api = client({
       middleware: [
-        (request, next) => {
+        (request, next, context) => {
+          contexts.push(context)
           const authorized = new Request(request)
           authorized.headers.set("authorization", `token-${++authentication}`)
           return next(authorized)
@@ -143,6 +145,10 @@ describe("SSE connections", () => {
     expect(seen).toStrictEqual([
       { body: '{"topic":"original"}', auth: "token-1", id: null },
       { body: '{"topic":"original"}', auth: "token-2", id: encodedId },
+    ])
+    expect(contexts).toStrictEqual([
+      { endpoint: "POST /events/{id}", kind: "stream" },
+      { endpoint: "POST /events/{id}", kind: "stream" },
     ])
     expect(await reader.read()).toMatchObject({ done: true })
     expect(vi.getTimerCount()).toBe(0)

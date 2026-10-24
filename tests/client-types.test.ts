@@ -7,6 +7,7 @@ import type {
   EndpointArgs,
   EndpointData,
   Middleware,
+  MiddlewareContext,
   ResultEndpoint,
   TypedResponse,
 } from "../src/client"
@@ -105,6 +106,13 @@ void function callBaseURLChecks(client: Client<Endpoints>): void {
   void client.result("GET /pets", { baseURL: 42 })
   // @ts-expect-error baseURL does not make path parameters optional
   void client.fetch("GET /pets/{id}", { baseURL: "https://api.test" })
+}
+
+void function middlewareContextChecks(context: MiddlewareContext): void {
+  // @ts-expect-error the call's endpoint is immutable
+  context.endpoint = "GET /changed"
+  // @ts-expect-error the call kind is immutable
+  context.kind = "result"
 }
 
 const jsonResponse = (schema: unknown) => ({
@@ -344,7 +352,13 @@ void api.fetch("GET /ordinary-required", {query: {q: "ok"}})
       expectTypeOf(request).toEqualTypeOf<Request>()
       return next(request)
     })
-    expectTypeOf(auth).toEqualTypeOf<Middleware>()
+    expectTypeOf(auth).toExtend<Middleware>()
+    const contextual = defineMiddleware((request, next, context) => {
+      expectTypeOf(context).toEqualTypeOf<MiddlewareContext>()
+      expectTypeOf(context.kind).toEqualTypeOf<"fetch" | "result" | "stream">()
+      return next(request)
+    })
+    expectTypeOf(contextual).toEqualTypeOf<Middleware>()
     const named = defineMiddleware(Object.assign(auth, { label: "auth" }))
     expectTypeOf(named.label).toEqualTypeOf<string>()
     expect(named).toBe(auth)
