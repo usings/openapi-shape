@@ -1,108 +1,43 @@
 import { BuildContext } from "./build-context"
-import { diagnoseRequestEncodings } from "./content"
 import { Diagnostics } from "./diagnostics"
-import { applyNarrowing } from "./discriminators"
 import type { DocumentSet } from "./documents"
-import type { Declaration, Field, Info, Model, Operation, Type } from "./model"
-import { UNKNOWN, TYPE_LOCATION, childTypes } from "./model"
-import { uniqueName } from "./naming"
+import type { Info, Model } from "./model"
+import { normalizeModel } from "./normalize-model"
 import { isRecord } from "./object"
-import type { Operations } from "./operations"
 import { buildOperations } from "./operations"
+import { discoverReferences } from "./reference-discovery"
 import { SchemaBuilder } from "./schemas"
-import { seal, union } from "./type-algebra"
 
-/**
- * Build the model of an OpenAPI Description. A build that reaches documents not loaded yet asks for
- * them; they are loaded and the build starts over, so that every build sees the same documents from
- * start to end.
- */
+/** Load the reachable reference graph, then compile against its final document identities. */
 export async function buildModel(
   documents: DocumentSet,
 ): Promise<{ model: Model; diagnostics: Diagnostics }> {
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- abort between complete build rounds
-    await documents.reader.checkpoint()
-    const diagnostics = new Diagnostics()
-    // oxlint-disable-next-line no-await-in-loop -- each round builds the documents loaded so far
-    const model = await buildOnce(new BuildContext(documents, diagnostics))
-    if (documents.hasPending) {
-      // oxlint-disable-next-line no-await-in-loop -- each build needs the documents the previous one asked for
-      if (await documents.loadPending()) continue
-      diagnostics.error("unresolved-ref", "References nest too deeply across documents", "#")
-    }
-    return { model, diagnostics }
+  await documents.reader.checkpoint()
+  const discovered = await discoverReferences(documents)
+  documents.finishDiscovery()
+  const diagnostics = new Diagnostics()
+  if (discovered.exhausted) {
+    diagnostics.error("unresolved-ref", "References nest too deeply across documents", "#")
   }
+  const model = await buildResolvedModel(
+    new BuildContext(documents, diagnostics),
+    discovered.repeated,
+  )
+  return { model, diagnostics }
 }
 
-async function buildOnce(context: BuildContext): Promise<Model> {
+async function buildResolvedModel(context: BuildContext, repeated: Set<string>): Promise<Model> {
   const root = context.documents.root(context.documents.entry)
   const entry = isRecord(root.value) ? root.value : {}
-  const schemas = new SchemaBuilder(context)
+  const schemas = new SchemaBuilder(context, repeated)
   schemas.declareComponents()
   await schemas.buildDeclarations()
   const operations = await buildOperations(context, schemas)
   // The schemas operations reference, named while building them.
   await schemas.buildDeclarations()
 
-  // Every declaration is built: analysis may now look into referenced types.
-  await applyDiscriminators(context, schemas, operations)
-  await context.documents.reader.checkpoint()
-  breakDirectCycles(context, schemas)
-  await context.documents.reader.checkpoint()
-  await normalizeTypes(schemas, operations)
-  diagnoseRequestEncodings(context, operations.endpoints)
-  await context.documents.reader.checkpoint()
-  assignInputVariants(context, schemas, operations)
+  await normalizeModel(schemas, operations)
   return { info: readInfo(entry), ...operations, declarations: schemas.declarations }
-}
-
-function allOperations(operations: Operations): Operation[] {
-  return [...operations.endpoints, ...operations.webhooks, ...operations.callbacks]
-}
-
-/** Narrow discriminated alternatives by their values (see `discriminators`). */
-async function applyDiscriminators(
-  context: BuildContext,
-  schemas: SchemaBuilder,
-  operations: Operations,
-): Promise<void> {
-  const report = (message: string, location: string): void =>
-    context.diagnostics.warn("discriminator-mismatch", message, location)
-  await transformAll(schemas, allOperations(operations), (type) =>
-    type.kind === "narrow" ? applyNarrowing(type, report) : type,
-  )
-}
-
-/** With references final, simplify every type again: shapes behind references are known now. */
-async function normalizeTypes(schemas: SchemaBuilder, operations: Operations): Promise<void> {
-  seal(schemas.declarations)
-  await transformAll(schemas, allOperations(operations), (type) => type)
-}
-
-/**
- * Name request-side variants (see `assignInputNames`) for what the client sends: endpoint requests,
- * and the responses to webhooks and callbacks.
- */
-function assignInputVariants(
-  context: BuildContext,
-  schemas: SchemaBuilder,
-  operations: Operations,
-): void {
-  const sent = [
-    ...operations.endpoints.flatMap((op) => requestTypes(op)),
-    ...[...operations.webhooks, ...operations.callbacks].flatMap((op) => responseTypes(op)),
-  ]
-  for (const declaration of assignInputNames(schemas.declarations, sent)) {
-    const at = schemas.stateOf(declaration)?.node
-    if (at && declaration.inputName !== `${declaration.name}Input`) {
-      context.warn(
-        "renamed-schema",
-        `The request-side variant of ${declaration.name} is emitted as ${declaration.inputName} because ${declaration.name}Input is already taken`,
-        at,
-      )
-    }
-  }
 }
 
 function readInfo(entry: Record<string, unknown>): Info {
@@ -119,209 +54,4 @@ function readInfo(entry: Record<string, unknown>): Info {
     if (typeof value === "string" && value.trim() !== "") info[key] = value.trim()
   }
   return info
-}
-
-/**
- * Rebuild every type of the model bottom-up, renormalizing unions and intersections, and passing
- * each node through `finish`.
- */
-async function transformAll(
-  schemas: SchemaBuilder,
-  operations: Operation[],
-  finish: (type: Type) => Type,
-): Promise<void> {
-  const fields = (list: Field[]): Field[] =>
-    list.map((f) => ({ ...f, type: rebuild(f.type, finish, schemas, f.location) }))
-  for (const declaration of schemas.declarations) {
-    const source = schemas.stateOf(declaration)?.node
-    const location = source && schemas.context.documents.locate(source.document, source.pointer)
-    declaration.type = rebuild(declaration.type, finish, schemas, location)
-    const pending = schemas.context.documents.reader.workpoint()
-    // oxlint-disable-next-line no-await-in-loop -- yield between declarations, never inside algebra
-    if (pending) await pending
-  }
-  for (const operation of operations) {
-    operation.params = fields(operation.params)
-    operation.query = fields(operation.query)
-    operation.headers = fields(operation.headers)
-    operation.cookies = fields(operation.cookies)
-    if (operation.querystring) {
-      operation.querystring.type = rebuild(
-        operation.querystring.type,
-        finish,
-        schemas,
-        operation.querystring.location,
-      )
-    }
-    for (const media of operation.body?.content ?? [])
-      media.type = rebuild(media.type, finish, schemas, media.location)
-    for (const response of operation.responses) {
-      for (const media of response.content)
-        media.type = rebuild(media.type, finish, schemas, media.location)
-      response.headers = fields(response.headers)
-    }
-    const pending = schemas.context.documents.reader.workpoint()
-    // oxlint-disable-next-line no-await-in-loop -- yield between complete operations
-    if (pending) await pending
-  }
-}
-
-function rebuild(
-  type: Type,
-  finish: (type: Type) => Type,
-  schemas: SchemaBuilder,
-  location?: string,
-): Type {
-  const again = (t: Type): Type => rebuild(t, finish, schemas, location)
-  switch (type.kind) {
-    case "object": {
-      const out: Type = {
-        ...type,
-        fields: type.fields.map((f) => ({ ...f, type: again(f.type) })),
-      }
-      if (type.additional) out.additional = again(type.additional)
-      if (type.patterns) out.patterns = type.patterns.map((p) => ({ ...p, type: again(p.type) }))
-      return finish(out)
-    }
-    case "array":
-      return finish({ ...type, items: again(type.items) })
-    case "tuple": {
-      const out: Type = { ...type, items: type.items.map(again) }
-      if (type.rest) out.rest = again(type.rest)
-      return finish(out)
-    }
-    case "union":
-      return finish(union(type.members.map(again)))
-    case "intersection":
-      return finish(schemas.intersect(type.members.map(again), type[TYPE_LOCATION] ?? location))
-    case "narrow":
-      return finish({ ...type, type: again(type.type) })
-    default:
-      return finish(type)
-  }
-}
-
-/**
- * A type alias may refer to itself only through object properties or array elements. References
- * that reach back through unions and intersections alone describe a schema that never terminates;
- * such a reference is replaced by the referenced type minus the parts that lead back, which is
- * sound.
- */
-function breakDirectCycles(context: BuildContext, schemas: SchemaBuilder): void {
-  const report = (owner: Declaration, target: Declaration): void => {
-    const at = schemas.stateOf(owner)?.node ?? context.documents.root(context.documents.entry)
-    context.warn(
-      "circular-schema",
-      `${owner.name} and ${target.name} are defined in terms of each other only through allOf/anyOf/oneOf/$ref, which never terminates; inside ${owner.name}, ${target.name} is expanded without the parts that lead back`,
-      at,
-    )
-  }
-  const state = new Map<Declaration, "active" | "done">()
-  const visit = (declaration: Declaration): void => {
-    state.set(declaration, "active")
-    declaration.type = rewrite(declaration.type, declaration)
-    state.set(declaration, "done")
-  }
-  const rewrite = (type: Type, owner: Declaration): Type => {
-    switch (type.kind) {
-      case "ref": {
-        const status = state.get(type.target)
-        if (status === "active") {
-          report(owner, type.target)
-          return rewrite(withoutActive(type.target.type), owner)
-        }
-        if (status === undefined) visit(type.target)
-        return type
-      }
-      case "union":
-        return union(type.members.map((m) => rewrite(m, owner)))
-      case "intersection":
-        return schemas.intersect(
-          type.members.map((m) => rewrite(m, owner)),
-          type[TYPE_LOCATION],
-        )
-      default:
-        return type
-    }
-  }
-  const withoutActive = (type: Type): Type => {
-    switch (type.kind) {
-      case "ref":
-        return state.get(type.target) === "active" ? UNKNOWN : type
-      case "union":
-        return union(type.members.map(withoutActive))
-      case "intersection":
-        return schemas.intersect(type.members.map(withoutActive), type[TYPE_LOCATION])
-      default:
-        return type
-    }
-  }
-  for (const declaration of schemas.declarations) {
-    if (!state.has(declaration)) visit(declaration)
-  }
-}
-
-function requestTypes(op: Operation): Type[] {
-  return [
-    ...[...op.params, ...op.query, ...op.headers, ...op.cookies].map((f) => f.type),
-    ...(op.querystring ? [op.querystring.type] : []),
-    ...(op.body?.content ?? []).map((media) => media.type),
-  ]
-}
-
-function responseTypes(op: Operation): Type[] {
-  return op.responses.flatMap((r) => [
-    ...r.content.map((media) => media.type),
-    ...r.headers.map((f) => f.type),
-  ])
-}
-
-/**
- * Give a request-side name to declarations whose required properties differ between the two sides
- * (readOnly/writeOnly), when something the client sends (`sent`) uses them.
- */
-function assignInputNames(declarations: Declaration[], sent: Type[]): Declaration[] {
-  const differs = new Set<Declaration>()
-  for (let changed = true; changed;) {
-    changed = false
-    for (const declaration of declarations) {
-      if (!differs.has(declaration) && hasOneSidedField(declaration.type, differs, new Set())) {
-        differs.add(declaration)
-        changed = true
-      }
-    }
-  }
-  if (differs.size === 0) return []
-
-  const used = new Set<Declaration>()
-  const mark = (type: Type): void =>
-    forEachRef(type, (target) => {
-      if (!differs.has(target) || used.has(target)) return
-      used.add(target)
-      mark(target.type)
-    })
-  for (const type of sent) mark(type)
-
-  const taken = new Set(declarations.map((d) => d.name))
-  const variants: Declaration[] = []
-  for (const declaration of declarations) {
-    if (!used.has(declaration)) continue
-    declaration.inputName = uniqueName(`${declaration.name}Input`, taken)
-    taken.add(declaration.inputName)
-    variants.push(declaration)
-  }
-  return variants
-}
-
-function hasOneSidedField(type: Type, differs: Set<Declaration>, seen: Set<Type>): boolean {
-  if (seen.has(type)) return false
-  seen.add(type)
-  if (type.kind === "ref") return differs.has(type.target)
-  if (type.kind === "object" && type.fields.some((f) => f.requiredOnly !== undefined)) return true
-  return childTypes(type).some((t) => hasOneSidedField(t, differs, seen))
-}
-
-function forEachRef(type: Type, visit: (target: Declaration) => void): void {
-  if (type.kind === "ref") visit(type.target)
-  for (const child of childTypes(type)) forEachRef(child, visit)
 }

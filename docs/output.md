@@ -1,13 +1,14 @@
 # The generated module
 
-`openapi-shape` generates one TypeScript module per OpenAPI description. It contains operation types (`Endpoints`, plus `Webhooks` and `Callbacks` when present), named schema types in `Schemas`, and the runtime `contract` used by [the client](./client.md).
+`openapi-shape` generates one TypeScript module containing endpoint descriptions, named schemas, incoming webhook and callback types, and the runtime settings used by the client. The file has no imports or runtime dependencies.
 
-The module has no imports or runtime dependencies. Its types describe operations and schemas under the generator's [projection rules and limits](./openapi.md#support-boundaries). The `contract` provides request serialization settings and SSE endpoint markers for the client. Neither contains a runtime schema validator.
+Endpoint types preserve request fields, response status keys, and media types from the description. The client derives call arguments, decoded results, and stream messages from these types. Generation resolves references, projects schemas for their use, and records runtime serialization settings. Neither the generated module nor the client validates schema values at runtime; see [support boundaries](./openapi.md#support-boundaries).
 
 ## Example
 
-This excerpt is generated from [the example description](https://github.com/usings/openapi-shape/blob/main/tests/fixtures/readme.yaml):
+This excerpt comes from [the example description](https://github.com/usings/openapi-shape/blob/main/tests/fixtures/readme.yaml).
 
+<!-- prettier-ignore -->
 ```ts
 // Petstore 1.0.0
 //
@@ -33,101 +34,60 @@ export interface Endpoints {
       "default": { content: { "application/json": Schemas.Error } }
     }
   }
-  "POST /pets": {
-    body: { "application/json": Schemas.NewPet }
-    responses: { "201": { content: { "application/json": Schemas.Pet } } }
-  }
-  "GET /pets/{petId}": {
-    params: { petId: number }
-    responses: {
-      "200": { content: { "application/json": Schemas.Pet } }
-      "404": { content: { "application/json": Schemas.Error } }
-    }
-  }
   // …
 }
 
-export interface Webhooks {
-  "POST pet.created": {
-    headers: { "x-signature": string }
-    body: { "application/json": Schemas.Pet }
-    responses: { "200": { content: { "application/json": { received: number } } } }
-  }
-}
-
-export namespace Schemas {
-  export interface Pet {
-    id: number
-    name: string
-    /** @format date-time */
-    born?: string
-  }
-  // …
-}
-
-/** Request serialization settings, including schema-derived form defaults. */
-const endpoints = {
-  "PATCH /pets/{petId}": { contentType: "application/merge-patch+json" },
-  "POST /upload": {
-    contentType: "multipart/form-data",
-    bodyEncodings: {
-      "multipart/form-data": {
-        file: { contentType: "application/octet-stream" },
-        name: { contentType: "text/plain" },
-      },
-    },
-  },
-  "GET /events": { stream: "sse" },
-} as const
-
+// …
 /** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */
 export const contract: {
   /** The contract's format; `createClient` refuses one it does not read. */
-  readonly version: 4
+  readonly version: 5
   /** Carries `Endpoints` for `createClient` to infer; never set. */
   readonly types?: Endpoints
   readonly endpoints: typeof endpoints
-} = { version: 4, endpoints }
+} = { version: 5, endpoints }
 ```
 
 ## Operations
 
-Operations are keyed by `"METHOD target"`. `Endpoints`, `Webhooks`, and `Callbacks` use the same entry structure, with different targets:
-
-| Interface   | Key                                                       |
-| ----------- | --------------------------------------------------------- |
-| `Endpoints` | `"GET /pets/{petId}"`                                     |
-| `Webhooks`  | `"POST pet.created"` (the webhook name)                   |
-| `Callbacks` | `"POST /subscribe > onEvent > POST {$request.body#/url}"` |
-
-Callback keys combine the parent operation, callback name, and callback method and URL expression. Nested callbacks extend this chain.
-
-Standard method fields produce uppercase names; OpenAPI 3.2's `query` becomes `QUERY`. Keys from `additionalOperations` retain their declared spelling.
+`Endpoints` is keyed by `"METHOD /path"`. It contains operations callable through Fetch. `CONNECT`, `TRACE`, and `TRACK` are excluded. Standard methods are uppercase; custom method keys retain their declared spelling. The key supplies both the method and path template.
 
 ### Entry fields
 
-Fields describe the operation after parameter inheritance and path-template normalization. Absent input groups are omitted; `responses` is always present, even when empty:
+| Member      | Meaning                                                                                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `params`    | Path parameter types.                                                                                                                                            |
+| `query`     | Query parameters, or the whole OpenAPI 3.2 `querystring` schema.                                                                                                 |
+| `headers`   | Declared request header types.                                                                                                                                   |
+| `cookies`   | Declared request cookie types.                                                                                                                                   |
+| `body`      | Request body schemas keyed by media type.                                                                                                                        |
+| `responses` | Responses keyed by their declared status: exact codes, ranges such as `2XX`, or `default`. Each entry contains its declared `headers` and media-keyed `content`. |
 
-| Member      | Type                                                                                                                    |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `params`    | Path parameters, all required, typed by their schemas.                                                                  |
-| `query`     | Query parameters, or the value of the single `in: querystring` parameter; optional when the whole query may be omitted. |
-| `headers`   | Header parameters.                                                                                                      |
-| `cookies`   | Cookie parameters.                                                                                                      |
-| `body`      | Request body, by media type; `body?:` when `required` is not `true`.                                                    |
-| `responses` | By status key (`"200"`, `"4XX"`, `"default"`): `{ headers?, content? }`; `{}` if none.                                  |
+Undeclared request fields are omitted. `body` is required when the request body is required; otherwise it is `body?`. `query` is required when any query parameter is required, or the whole `querystring` is required. Responses without headers or content are represented by `{}`.
 
-Ordinary query parameters produce `query?` when none is required. A whole `querystring` parameter follows its own `required` flag, even when every property in its value is optional. The client reads this outer optionality directly; hand-written endpoint types must use `query?` when the entire query may be omitted.
+These types describe the API. The client adds `RequestInit` options, accepts ready-made bodies, selects a default media type, and makes headers optional per call because defaults or middleware may provide them. Cookies belong to the runtime. Declared `GET` and `HEAD` bodies remain in the description, but the client's call arguments exclude them because Fetch cannot send them.
 
-Each response contains its declared `headers`, typed by their schemas, and a `content` map from media types to [content types](./openapi.md#media-types). A response with neither is `{}`.
+Read a schema directly by status and media type, or use the [client helper types](./client.md#typed-wrappers) for call arguments and decoded data:
 
-Summaries, descriptions, operation IDs, deprecation markers, and external documentation become JSDoc on operation entries, parameters, and responses.
+```ts
+import type { EndpointArgs } from "openapi-shape/client"
+import type { Endpoints } from "./api"
+
+export type CreatePetBody = Endpoints["POST /pets"]["body"]["application/json"]
+export type PetPayload =
+  Endpoints["GET /pets/{petId}"]["responses"][200]["content"]["application/json"]
+export type CreatePetInput = EndpointArgs<Endpoints, "POST /pets">[0]
+```
+
+Status ranges and `default` stay as declared in the generated module. The client applies [status precedence and empty-body rules](./client.md#status-handling) when deriving response types. Streaming media stays in this same `responses` shape. `api.stream()` derives SSE messages and JSON line records from the selected media through `EndpointStreamItem`; see [sequential content](./openapi.md#sequential-content) for whole-content and item schemas.
+
+Operation summaries, IDs, deprecation markers and external documentation become JSDoc. Schema and parameter documentation stays attached to its projected type.
 
 ## Webhooks and callbacks
 
-Webhooks and callbacks reverse the usual direction: the API sends a request and your server returns a response. Their types describe your handlers; they are excluded from the client contract.
+Webhooks and callbacks describe incoming exchanges rather than client calls. They use the same descriptive shape as `Endpoints` and are excluded from the runtime contract.
 
-In these entries, `headers`, `query`, and `body` describe what your server receives, while `responses` describes what it returns:
+Webhook keys use the webhook name, such as `"POST pet.created"`. Callback keys include their parent operation, callback name, and URL expression, such as `"POST /subscribe > onEvent > POST {$request.body#/url}"`. Nested callbacks extend this chain.
 
 ```ts
 import type { Webhooks } from "./api"
@@ -137,23 +97,23 @@ export type PetPayload = PetCreated["body"]["application/json"]
 export type Receipt = PetCreated["responses"]["200"]["content"]["application/json"]
 ```
 
-Use these types when implementing handlers. Assigning a parsed payload to `PetPayload` does not validate it or authenticate its sender; those checks belong to the handler or a separate layer. Declared signature headers appear in `headers`.
+Incoming requests use the response-side schema view; responses you send use the request-side view. These types help write handlers. They do not parse bodies, validate payloads, or authenticate senders.
 
 ## Schemas
 
-Every `components.schemas` entry becomes a declaration in the `Schemas` namespace, in document order. Plain objects become interfaces; other schemas become type aliases.
+Every `components.schemas` entry becomes a declaration in the `Schemas` namespace. Declarations describe JSON values; request and transport variants are emitted where needed. Plain objects become interfaces; other schemas become type aliases.
 
 ### Names and references
 
 Valid declaration names are preserved. Unsupported characters become `_`, and reserved words receive a `_` prefix: `user-id` becomes `user_id`, and `class` becomes `_class`. If names collide, later declarations receive a numeric suffix such as `User_Profile2` and a `renamed-schema` warning.
 
-Schemas in external components, under `$defs`, in standalone schema files, or with an `$id` can also receive names. A component that only references such a schema supplies its name. Other references are inlined on first use and named from their location when reused or recursive.
+Schemas in external components, under `$defs`, in standalone schema files, or with an `$id` can also receive names. A component that only references such a schema supplies its name. Reachable references are discovered before type compilation. Reused and recursive targets receive declarations; every use refers to the same declaration. Targets used once may be inlined.
 
 ### Documentation and formats
 
 JSDoc preserves titles, descriptions, deprecation, and constraints that TypeScript cannot express: `@format`, `@default`, `@minimum`, `@maximum`, `@exclusiveMinimum`, `@exclusiveMaximum`, `@multipleOf`, `@minLength`, `@maxLength`, `@pattern`, `@minItems`, `@maxItems`, `@uniqueItems`, `@minProperties`, `@maxProperties`, `@contentMediaType`, `@contentEncoding`, `@readOnly`, `@writeOnly`, and `@see`.
 
-Formats usually add documentation without changing the type. A non-literal `type: string` schema with `format: binary` produces `Blob`; see [Binary content](./openapi.md#binary-content). A `date-time` remains a `string`, and an `int64` remains a `number`, with JavaScript's precision limits beyond 2^53. Convert these values in application code as needed.
+Formats usually add documentation without changing the type. A `type: string` schema with `format: binary` remains a string in JSON and text inputs. Multipart variants use `Blob` for actual file parts; see [Binary content](./openapi.md#binary-content). A `date-time` remains a `string`, and an `int64` remains a `number`, with JavaScript's precision limits beyond 2^53. Convert these values in application code as needed.
 
 ### Input variants
 
@@ -174,7 +134,7 @@ export interface UserInput {
 }
 ```
 
-Input variants are emitted only when the schema is used in data you send. They propagate to schemas that contain a variant.
+Input variants are emitted only when the schema is used in data you send. They propagate to schemas that contain a variant. A multipart input can also need a `<Name>Multipart` variant, and a referenced file part a `<Name>Binary` variant. These names receive numeric suffixes on collision. Nested JSON parts keep their JSON types.
 
 Annotations work through references and compositions. For example, one `allOf` member can mark a property `readOnly` while another requires it. The request type makes it optional without changing the shared schema or nested properties.
 
@@ -186,32 +146,29 @@ This is OpenAPI 3.0's rule, applied in 3.1+ too ([Following the real API](./open
 
 ## The runtime contract
 
-`createClient(contract)` reads the module's runtime settings and infers its `Endpoints` through the optional `types` field, which is absent at runtime. The contract's `endpoints` map records the settings each operation needs; operations using only client defaults may be omitted.
+`createClient(contract)` infers `Endpoints` through the optional `types` field, which is absent at runtime. Every callable endpoint has an own entry in `contract.endpoints`, including endpoints using default encodings. Unknown endpoints are rejected before transport.
 
-| Entry field                  | Purpose                                                                                                                                                   |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `params`, `query`, `headers` | Parameter encodings: `style`, `explode`, `allowReserved`, or `contentType` for a parameter with `content`.                                                |
-| `querystring`                | Media type of an OpenAPI 3.2 querystring parameter. Form querystrings instead store field encodings under `query`.                                        |
-| `contentType`                | Default request media type when it is not `application/json`, `application/*`, or `*/*`, such as `multipart/form-data` or `application/merge-patch+json`. |
-| `json`                       | Full label of the default JSON media type when its spelling differs from `application/json`, including case or parameters.                                |
-| `bodyEncodings`              | Form encodings keyed by full media type, then field name, including explicit settings and schema-derived defaults.                                        |
-| `stream`                     | `"sse"` for an endpoint with an effective SSE success response, selecting `api.stream()` as its event consumer.                                           |
+| Entry field                  | Purpose                                                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `stream`                     | A readonly array of supported effective success media, preserving full declarations; omitted when none qualifies.              |
+| `params`, `query`, `headers` | Parameter encodings that differ from defaults.                                                                                 |
+| `querystring`                | The media type of a whole query parameter; form querystrings instead use `query` encodings.                                    |
+| `contentType`                | The default request media type, including case and parameters. Absent when no default exists or the method cannot send a body. |
+| `bodyEncodings`              | Form field encodings keyed by full media type, including explicit and schema-derived settings.                                 |
 
-The [client's endpoint rules](./client.md#calls) apply the same classification in types and at runtime. Request media defaults follow the [call input rules](./client.md#what-a-call-takes). `GET` and `HEAD` entries have no `contentType`, `json`, or `bodyEncodings` because Fetch sends those methods without a body.
+Form encodings use the selected media type, including its parameters. An explicit style overrides a field's content type. URL-encoded arrays with `repeat: true` encode each item separately; parameter `content` encodes the whole value. Missing settings use the client's [form field defaults](./client.md#form-field-defaults).
 
-Form encodings use the selected media type, including its parameters. An explicit style overrides a field's content type. For URL-encoded arrays, `repeat: true` encodes each item separately; a parameter's `content` encodes the whole value. Missing settings use the client's [form field defaults](./client.md#form-field-defaults).
+`stream` includes explicit `text/event-stream`, `application/jsonl`, and `application/x-ndjson` declarations, retaining case and parameters. Entries are unique and follow response and media declaration order after applying status precedence. `HEAD`, 204, and 205 do not qualify, and a media declaration still qualifies when its schema is `never`. A registry entry such as `stream: ["text/event-stream", "application/x-ndjson; charset=utf-8"]` makes `accept` required for `api.stream()`. Every endpoint remains callable with `fetch`; endpoints with stream media are excluded from `result`.
 
-Connection settings belong to the client configuration: `baseUrl` selects the server, credentials come from headers or middleware, and the runtime manages cookies. The contract contains metadata, not executable schemas or transport code.
+Connection settings belong to client configuration: `baseUrl` selects the server, credentials come from headers or middleware, and the runtime manages cookies. Method and path come from each endpoint key. The contract stores serialization settings and supported streaming media; it contains no executable schemas or transport code.
 
 ### Format compatibility
 
-The contract format is v4. Its `version` must match the installed client; a mismatch fails to compile at `createClient` and is rejected at runtime.
-
-Generate and check the module with your application's installed package:
+The contract format is v5. The client accepts only its matching format and checks endpoint keys and supported streaming media. Use the package installed in your application to generate and check the module:
 
 ```sh
 pnpm exec openapi-shape ./openapi.yaml -o src/api.ts
 pnpm exec openapi-shape ./openapi.yaml -o src/api.ts --check
 ```
 
-Regenerate after package upgrades and commit the updated module. Changing `version` by hand does not update its metadata. If a mismatch remains, check that the application imports the regenerated file and that generation and runtime resolve the same package version.
+Regenerate after package upgrades and commit the updated file. Editing the version number does not migrate a contract. Keep the generated types and runtime registry together so that call typing and serialization describe the same API.

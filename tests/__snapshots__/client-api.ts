@@ -27,7 +27,7 @@ export interface Endpoints {
     cookies: { session?: string }
     responses: {
       /** Pet */
-      "200": { content: { "application/json": Schemas.Pet; "application/xml": Blob } }
+      "200": { content: { "application/json": Schemas.Pet; "application/xml": string } }
       /** Missing */
       "404": { content: { "application/json": Schemas.Error } }
     }
@@ -55,7 +55,7 @@ export interface Endpoints {
     }
   }
   "POST /upload": {
-    body: { "multipart/form-data": { file: unknown; name?: string }; "application/octet-stream": Blob }
+    body: { "multipart/form-data": { file: unknown; name?: string }; "application/octet-stream": string }
     responses: {
       /** Stored */
       "200": { content: { "application/json": { id?: string } } }
@@ -97,7 +97,7 @@ export interface Endpoints {
     headers: { "X-Range"?: { from?: number } }
     responses: {
       /** File */
-      "200": { content: { "application/octet-stream": Blob } }
+      "200": { content: { "application/octet-stream": string } }
     }
   }
   "GET /events": {
@@ -123,9 +123,14 @@ export namespace Schemas {
   }
 }
 
-/** Request serialization settings, including schema-derived form defaults. */
+/** Compiled endpoint plans for the Fetch client. */
 const endpoints = {
+  "GET /pets": {},
+  "POST /pets": { contentType: "application/json" },
+  "GET /pets/{id}": {},
+  "DELETE /pets/{id}": {},
   "PATCH /pets/{id}": { contentType: "application/merge-patch+json" },
+  "GET /search": {},
   "POST /upload": {
     bodyEncodings: {
       "multipart/form-data": {
@@ -142,6 +147,7 @@ const endpoints = {
       },
     },
   },
+  "GET /health": {},
   "GET /charges": {
     query: {
       created: { style: "deepObject", explode: true },
@@ -164,14 +170,14 @@ const endpoints = {
     params: { names: { style: "label", explode: false } },
     headers: { "X-Range": { style: "simple", explode: true } },
   },
-  "GET /events": { stream: "sse" },
+  "GET /events": { stream: ["text/event-stream"] },
 } as const
 
 /** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */
 export const contract: {
   /** The contract's format; `createClient` refuses one it does not read. */
-  readonly version: 4
+  readonly version: 5
   /** Carries `Endpoints` for `createClient` to infer; never set. */
   readonly types?: Endpoints
   readonly endpoints: typeof endpoints
-} = { version: 4, endpoints }
+} = { version: 5, endpoints }

@@ -50,45 +50,73 @@ type Callable<K> = K extends `${infer Method} ${string}`
     : K
   : K
 
-/** Callable endpoints with an explicitly declared SSE success response. */
+/** Callable endpoints with a supported streaming success response. */
 export type StreamEndpoint<E> = {
-  [K in Endpoint<E>]: [EventContent<OperationOf<E, K>, MethodOf<K>>] extends [never] ? never : K
+  [K in Endpoint<E>]: [StreamContent<OperationOf<E, K>, MethodOf<K>>] extends [never] ? never : K
 }[Endpoint<E>]
 
 /** Endpoints whose bodies result() can read to completion. */
 export type ResultEndpoint<E> = Exclude<Endpoint<E>, StreamEndpoint<E>>
 
-type EventsIn<Shape> = Shape extends { content: infer Content }
+type StreamingEssence = "text/event-stream" | "application/jsonl" | "application/x-ndjson"
+
+type StreamsIn<Shape> = Shape extends { content: infer Content }
   ? {
       // Keep media presence even when its schema allows no values (content is never).
-      [M in keyof Content & string]: Essence<M> extends "text/event-stream"
-        ? { content: Content[M] }
+      [M in keyof Content & string]: Essence<M> extends StreamingEssence
+        ? { media: M; content: Content[M] }
         : never
     }[keyof Content & string]
   : never
 
-// Avoid expanding status ranges for operations that have no event media at all.
-type EventContent<Op extends Operation, Method extends string> = [
-  EventsIn<Op["responses"][keyof Op["responses"]]>,
+// Avoid expanding status ranges for operations that have no streaming media at all.
+type StreamContent<Op extends Operation, Method extends string> = [
+  StreamsIn<Op["responses"][keyof Op["responses"]]>,
 ] extends [never]
   ? never
   : Outcomes<Op, Method> extends infer Outcome
     ? Outcome extends [infer Status extends number, infer Shape]
       ? [Extract<Status, StatusIn<"2">>] extends [never]
         ? never
-        : EventsIn<Shape>
+        : StreamsIn<Shape>
       : never
     : never
 
-/** A single parsed event, narrowed by itemSchema when present; data remains wire text. */
-export type EndpointMessage<E, K extends StreamEndpoint<E>> = MessageOf<
-  EventContent<OperationOf<E, K>, MethodOf<K>>
->
-type MessageOf<Media> = Media extends { content: infer Content }
-  ? Content extends ReadonlyArray<infer Item>
-    ? EventItem<Item>
-    : StreamMessage
+/** Declared streaming response media, including its original spelling and parameters. */
+export type StreamMedia<E, K extends StreamEndpoint<E>> = StreamContent<
+  OperationOf<E, K>,
+  MethodOf<K>
+>["media"]
+
+/** One parsed item of the selected streaming response media. */
+export type EndpointStreamItem<
+  E,
+  K extends StreamEndpoint<E>,
+  M extends StreamMedia<E, K> = StreamMedia<E, K>,
+> = StreamItem<Extract<StreamContent<OperationOf<E, K>, MethodOf<K>>, { media: M }>>
+
+type StreamItem<Media> = Media extends { media: infer M extends string; content: infer Content }
+  ? Essence<M> extends "text/event-stream"
+    ? MessageOf<Content>
+    : Content extends ReadonlyArray<infer Item>
+      ? Item
+      : unknown
   : never
+
+/** A parsed SSE event, narrowed by itemSchema; data remains wire text. */
+export type EndpointMessage<E, K extends StreamEndpoint<E>> = EndpointStreamItem<
+  E,
+  K,
+  EventMedia<StreamMedia<E, K>>
+>
+type EventMedia<M extends string> = M extends unknown
+  ? Essence<M> extends "text/event-stream"
+    ? M
+    : never
+  : never
+
+type MessageOf<Content> =
+  Content extends ReadonlyArray<infer Item> ? EventItem<Item> : StreamMessage
 type EventItem<Item> = Item extends object
   ? StreamMessage & Pick<Item, Extract<keyof Item, keyof StreamMessage>>
   : StreamMessage
@@ -100,17 +128,32 @@ type Replayable<Call> = Call extends unknown
         : Call[P]
     }
   : never
-type StreamInit<E, K extends StreamEndpoint<E>> = Replayable<Init<OperationOf<E, K>, MethodOf<K>>> &
-  StreamOptions<EndpointMessage<E, K>>
+type StreamInit<E, K extends StreamEndpoint<E>, M extends StreamMedia<E, K>> = Replayable<
+  Init<OperationOf<E, K>, MethodOf<K>>
+> & { accept?: M } & StreamSelection<E, K, M>
+type StreamSelection<
+  E,
+  K extends StreamEndpoint<E>,
+  M extends StreamMedia<E, K>,
+> = M extends unknown
+  ? ([Only<StreamMedia<E, K>>] extends [never] ? { accept: M } : { accept?: M }) &
+      (Essence<M> extends "text/event-stream" ? Pick<StreamOptions, "retry"> : { retry?: never })
+  : never
 
-/** Stream arguments preserve the operation's required inputs and exclude one-shot bodies. */
-export type StreamArgs<E, K extends StreamEndpoint<E>> = [K] extends [never]
-  ? [init?: never]
-  : IsUnion<K> extends true
-    ? [init: never]
-    : Empty extends StreamInit<E, K>
-      ? [init?: StreamInit<E, K>]
-      : [init: StreamInit<E, K>]
+/** Stream arguments preserve required inputs, select a media type, and exclude one-shot bodies. */
+// Keep the init tuple outside conditionals so accept can infer the selected media.
+export type StreamArgs<
+  E,
+  K extends StreamEndpoint<E>,
+  M extends StreamMedia<E, K> = StreamMedia<E, K>,
+> =
+  | ([K] extends [never] ? [init?: never] : never)
+  | [init: StreamInit<E, K, M> & (IsUnion<K> extends true ? never : unknown)]
+  | (IsUnion<K> extends true
+      ? never
+      : Empty extends StreamInit<E, K, M>
+        ? [init?: undefined]
+        : never)
 
 /** Per-call input: the operation's parameters and body, and any other `RequestInit` field. */
 type Init<Op extends Operation, Method extends string> = Omit<
@@ -128,63 +171,41 @@ type Init<Op extends Operation, Method extends string> = Omit<
  * required exactly when the operation requires something. A call names one endpoint: a union of
  * them would mix their inputs and responses.
  */
-export type EndpointArgs<Endpoints, K extends Endpoint<Endpoints>> =
-  // An unknown endpoint intersects to never; report it on the endpoint, not init.
-  [K] extends [never]
-    ? [init?: never]
-    : IsUnion<K> extends true
-      ? [init: never]
-      : Empty extends Init<OperationOf<Endpoints, K>, MethodOf<K>>
-        ? [init?: Init<OperationOf<Endpoints, K>, MethodOf<K>>]
-        : [init: Init<OperationOf<Endpoints, K>, MethodOf<K>>]
+export type EndpointArgs<E, K extends Endpoint<E>> = Args<K, Init<OperationOf<E, K>, MethodOf<K>>>
+type Args<K, Input> = [K] extends [never]
+  ? [init?: never]
+  : IsUnion<K> extends true
+    ? [init: never]
+    : Empty extends Input
+      ? [init?: Input]
+      : [init: Input]
 
 /**
  * The data of an endpoint's 2xx responses: what `result` gives as `data` once `error` is
  * `undefined`, for functions that pass calls on and return it.
  */
-export type EndpointData<Endpoints, K extends ResultEndpoint<Endpoints>> = [
-  OpenKeys<Endpoints>,
-] extends [never]
-  ? { [S in SuccessStatus<Endpoints>]: DataAt<Endpoints, S>[K] }[SuccessStatus<Endpoints>]
-  : OpenData<Endpoints, K>[K]
+export type EndpointData<E, K extends ResultEndpoint<E>> = {
+  [S in SuccessStatus<E>]: DataAt<E, S>[K]
+}[SuccessStatus<E>]
 
-// Open maps need the called key to distinguish HEAD from other methods.
-type OpenData<Endpoints, K extends ResultEndpoint<Endpoints>> = {
-  [P in Endpoint<Endpoints> as P]: Extract<
-    CallResult<Endpoints, P, K>,
-    { error?: undefined }
-  >["data"]
-}
-
-/**
- * What `result` resolves to: the call's results, its successes and its failures apart, so that
- * `error === undefined` narrows `data` to {@link EndpointData} also while the endpoint is a type
- * parameter.
- */
-export type EndpointResult<Endpoints, K extends ResultEndpoint<Endpoints>> = [
-  OpenKeys<Endpoints>,
-] extends [never]
-  ? FiniteResult<Endpoints, K>
-  :
-      | Extract<Successes<Endpoints, K>[K], { data: EndpointData<Endpoints, K>; error?: undefined }>
-      | Failures<Endpoints, K>[K]
+/** The decoded result, discriminated by status and by the presence of an error. */
+export type EndpointResult<E, K extends ResultEndpoint<E>> = FiniteResult<E, K>
 
 // Index by status first, then endpoint. The result and EndpointData read the
 // same data table, so generic returns need no comparison or intersection of
 // response bodies. Filter absent statuses inside each endpoint entry: intersecting
 // two large endpoint-key unions makes TypeScript expand their cross product.
-// `never` shares the finite map across calls; open maps still use the called key.
-type SuccessStatus<E> = Successes<E, never>[Endpoint<E>]["status"]
+type SuccessStatus<E> = Successes<E>[Endpoint<E>]["status"]
 type AtStatus<R, S extends number> = R extends { status: infer Status extends number }
   ? S extends Status
     ? R
     : never
   : never
 type DataAt<E, S extends number> = {
-  [P in Endpoint<E> as P]: Extract<AtStatus<Successes<E, never>[P], S>, { data: unknown }>["data"]
+  [P in Endpoint<E> as P]: Extract<AtStatus<Successes<E>[P], S>, { data: unknown }>["data"]
 }
 type JsonAt<E, S extends number> = {
-  [P in Endpoint<E> as P]: AtStatus<Successes<E, never>[P], S> extends {
+  [P in Endpoint<E> as P]: AtStatus<Successes<E>[P], S> extends {
     response: TypedResponse<number, boolean, infer J>
   }
     ? J
@@ -193,7 +214,7 @@ type JsonAt<E, S extends number> = {
 type FiniteResult<E, K extends Endpoint<E>> =
   | {
       [S in SuccessStatus<E>]: {
-        [P in K]: [AtStatus<Successes<E, never>[P], S>] extends [never]
+        [P in K]: [AtStatus<Successes<E>[P], S>] extends [never]
           ? never
           : {
               data: DataAt<E, S>[P]
@@ -203,40 +224,19 @@ type FiniteResult<E, K extends Endpoint<E>> =
             }
       }[K]
     }[SuccessStatus<E>]
-  | Failures<E, never>[K]
+  | Failures<E>[K]
 
-// Mapped over every endpoint with remapped keys (`as`), so that TypeScript does
-// not substitute a type parameter K into `ResultOf`, which `error` could not
-// narrow: K picks from concrete results instead. Over `Endpoint`, K's
-// constraint, so that TypeScript sees K index them.
-// A failure with error: never also fits error?: undefined, but has no data.
-type Successes<Endpoints, K extends Endpoint<Endpoints>> = {
-  [P in Endpoint<Endpoints> as P]: Extract<
-    CallResult<Endpoints, P, K>,
+// Remapped endpoint keys prevent TypeScript from substituting a generic call key
+// into the conditional response calculation before error/status narrowing.
+type Successes<E> = {
+  [P in Endpoint<E> as P]: Extract<
+    ResultOf<OperationOf<E, P>, MethodOf<P>>,
     { data: unknown; error?: undefined }
   >
 }
-
-type Failures<Endpoints, K extends Endpoint<Endpoints>> = {
-  [P in Endpoint<Endpoints> as P]: Exclude<CallResult<Endpoints, P, K>, { error?: undefined }>
+type Failures<E> = {
+  [P in Endpoint<E> as P]: Exclude<ResultOf<OperationOf<E, P>, MethodOf<P>>, { error?: undefined }>
 }
-
-/**
- * The results of a call to endpoint `P`. An index or template key, which an empty object fills,
- * stands for many endpoints: its results are those of the endpoint the call names, `K`, as
- * `ResultOf` gives a concrete call.
- */
-type CallResult<Endpoints, P, K> = ResultOf<
-  OperationOf<Endpoints, CallKey<P, K> & keyof Endpoints>,
-  MethodOf<CallKey<P, K> & string>
->
-
-/** Index and template endpoints need the called key to determine their results. */
-type OpenKeys<Endpoints> = {
-  [P in Endpoint<Endpoints>]: Empty extends Record<P, 1> ? P : never
-}[Endpoint<Endpoints>]
-
-type CallKey<P, K> = Empty extends Record<P & string, 1> ? K : P
 
 type IsUnion<T, All = T> = T extends unknown ? ([All] extends [T] ? false : true) : never
 
@@ -300,10 +300,23 @@ type BodyVariant<Content, Default> = {
 type BodyValue<Content, M extends keyof Content & string> =
   IsEncodable<M> extends true
     ?
-        | (Essence<M> extends "text/*" ? TextOf<Content[M]> : Content[M])
+        | (IsJson<M> extends true
+            ? Content[M]
+            : Essence<M> extends `text/${string}`
+              ? TextOf<Content[M]>
+              : FormValue<Content[M]>)
         | BodyLike
         | (Essence<M> extends "application/x-www-form-urlencoded" ? string : never)
     : BodyLike | string
+
+/** Structured forms encode named fields; arrays and scalar schemas need a ready-made body. */
+type FormValue<T> = unknown extends T
+  ? Record<string, unknown>
+  : T extends readonly unknown[]
+    ? never
+    : T extends object
+      ? T
+      : never
 
 type Essence<M extends string> = Lowercase<M extends `${infer E};${string}` ? Trim<E> : Trim<M>>
 
@@ -332,7 +345,7 @@ type IsEncodable<M extends string> =
 
 type Digit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 
-type ToNumber<S> = S extends `${infer N extends number}` ? N : never
+type ToNumber<S> = S extends number ? S : S extends `${infer N extends number}` ? N : never
 
 /** Every status of a class, such as `"4"`: `400 | 401 | … | 499`. */
 type StatusIn<Class extends string> = ToNumber<`${Class}${Digit}${Digit}`>
@@ -344,7 +357,7 @@ type StatusesOf<K, R> = K extends `${infer Class}XX`
 
 type Declared<R> = StatusesOf<Exclude<keyof R, "default">, R>
 
-type SuccessKey<R> = Extract<keyof R, `2${string}`>
+type SuccessKey<R> = Extract<keyof R, `2${string}` | StatusIn<"2">>
 
 type OkOf<Status> = Status extends StatusIn<"2"> ? true : false
 
@@ -385,8 +398,8 @@ type DefaultShape<Method extends string, R> = ShapeFor<
 >
 
 /** One {@link TypedResponse} per status the operation may answer with. */
-export type ResponseOf<Op extends Operation, Method extends string> =
-  Outcomes<Op, Method> extends infer O
+export type ResponseOf<E, K extends Endpoint<E>> =
+  Outcomes<OperationOf<E, K>, MethodOf<K>> extends infer O
     ? O extends [infer Status extends number, infer Shape]
       ? [Status] extends [never]
         ? never
@@ -433,14 +446,17 @@ type ErrorBody<T> = unknown extends T
  * content, and nothing where it has none, since `json()` rejects.
  */
 type JsonOf<Shape> = Shape extends { content: infer Content }
-  ? [JsonContent<Content>] extends [never]
+  ? [JsonMedia<Content>] extends [never]
     ? unknown
-    : JsonContent<Content>
+    : Content[JsonMedia<Content>]
   : never
 
-/** Apply the same raw-byte and wildcard uncertainty as decoded result bodies. */
-type JsonContent<Content> = {
-  [M in keyof Content & string]: IsJson<M> extends true ? JsonValue<M, Content[M]> : never
+type JsonMedia<Content> = {
+  [M in keyof Content & string]: IsJson<M> extends true
+    ? M
+    : Essence<M> extends "text/*"
+      ? M
+      : never
 }[keyof Content & string]
 
 /**
@@ -453,27 +469,15 @@ type Decoded<Shape> = Shape extends { content: infer Content }
 
 type DecodedAs<M extends string, T> =
   Essence<M> extends "*/*"
-    ? JsonValue<M, T> | string | Blob
+    ? T | string | Blob
     : Essence<M> extends "application/*"
-      ? JsonValue<M, T> | Blob
+      ? T | Blob
       : IsJson<M> extends true
-        ? JsonValue<M, T>
+        ? T
         : Essence<M> extends "text/*"
-          ? JsonValue<M, T> | TextOf<T>
+          ? T | TextOf<T>
           : Essence<M> extends `text/${string}`
             ? TextOf<T>
             : Blob
-
-/**
- * JSON is parsed, never a Blob, whatever the schema says; under a wildcard, raw bytes may come
- * labelled as anything, and are decoded so: `unknown`.
- */
-type JsonValue<M extends string, T> = [Extract<T, Blob>] extends [never]
-  ? T
-  : Essence<M> extends "*/*" | "application/*"
-    ? unknown
-    : [Exclude<T, Blob>] extends [never]
-      ? unknown
-      : Exclude<T, Blob>
 
 type TextOf<T> = T extends string ? T : string

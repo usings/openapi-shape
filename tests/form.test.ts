@@ -2,6 +2,7 @@ import { runInNewContext } from "node:vm"
 import { expect, it } from "vitest"
 import { createClient } from "../src/client"
 import { generate } from "../src/core/index"
+import type { ResultOperation } from "./helpers/contract"
 import { contractOf } from "./helpers/contract"
 import { oas } from "./helpers/generate"
 
@@ -15,11 +16,11 @@ async function generatedClient(document: object) {
   const contract = await contractOf<
     Record<
       string,
-      {
+      ResultOperation<{
         query?: Record<string, unknown>
-        body?: Record<typeof form | `${typeof form};${string}`, unknown>
-        responses: object
-      }
+        body?: unknown
+        contentType?: typeof form | `${typeof form};${string}`
+      }>
     >
   >(code)
   const requests: Request[] = []
@@ -133,12 +134,14 @@ it("encodes cross-realm form objects without treating class instances as records
       },
     }),
   )
-  const body: unknown = runInNewContext("({ filter: { ids: [1, 2] }, when: new Date(0) })")
+  const body: Record<string, unknown> = runInNewContext(
+    "({ filter: { ids: [1, 2] }, when: new Date(0) })",
+  )
   await client.fetch("POST /form", { contentType: form, body })
   expect(await requests[0].text()).toBe(
     "filter[ids][0]=1&filter[ids][1]=2&when=1970-01-01T00%3A00%3A00.000Z",
   )
-  const instance: unknown = runInNewContext(
+  const instance: Record<string, unknown> = runInNewContext(
     'new (class PretendObject { value = "not a record"; get [Symbol.toStringTag]() { return "Object" } })()',
   )
   await expect(client.fetch("POST /form", { contentType: form, body: instance })).rejects.toThrow(

@@ -110,8 +110,8 @@ function sourceUri(source: string | URL): string {
  * The documents of an OpenAPI Description, addressed by URI.
  *
  * References into documents that are not loaded yet resolve to `pending`; `loadPending` fetches
- * them so the caller can build again. Documents are immutable once added, so repeated builds see
- * identical inputs.
+ * them so discovery can advance to its next frontier. Compilation starts only after discovery
+ * reaches closure.
  */
 export class DocumentSet {
   readonly entry: LoadedDocument
@@ -121,6 +121,7 @@ export class DocumentSet {
   private readonly failed = new Map<string, string>()
   private readonly schemaTargets = new Map<LoadedDocument, Set<string>>()
   private rounds = 0
+  private discovering = true
 
   /**
    * Made by {@link loadDocuments}.
@@ -142,9 +143,19 @@ export class DocumentSet {
     return this.pending.size > 0 || this.schemaTargets.size > 0
   }
 
+  /** Compilation must never queue I/O or change resource identities. */
+  finishDiscovery(): void {
+    this.discovering = false
+    for (const uri of this.pending) {
+      this.failed.set(uri, "References nest too deeply across documents")
+    }
+    this.pending.clear()
+    this.schemaTargets.clear()
+  }
+
   /**
-   * Index schema targets or load requested documents between builds. Returns false at the load
-   * limit.
+   * Index schema targets or load the documents requested by the discovery frontier. Returns false
+   * at the load limit.
    */
   async loadPending(): Promise<boolean> {
     if (this.schemaTargets.size > 0) {
@@ -161,7 +172,7 @@ export class DocumentSet {
         }
       }
       this.schemaTargets.clear()
-      // Rebuild before fetching: newly indexed $ids may satisfy earlier requests.
+      // Retry discovery before fetching: newly indexed $ids may satisfy earlier requests.
       this.pending.clear()
       return true
     }
@@ -251,6 +262,12 @@ export class DocumentSet {
     for (const token of parsePointer(pointer) ?? []) {
       at = appendPointer(at, token)
       if (!document.excluded.has(at)) continue
+      if (!this.discovering) {
+        return {
+          kind: "error",
+          message: `schema "${ref}" was not indexed during reference discovery`,
+        }
+      }
       let targets = this.schemaTargets.get(document)
       if (targets === undefined) {
         targets = new Set()
@@ -290,6 +307,12 @@ export class DocumentSet {
       }
       if (!/^(?:https?|file):/i.test(docUri)) {
         return { kind: "error", message: `cannot retrieve "${docUri}"` }
+      }
+      if (!this.discovering) {
+        return {
+          kind: "error",
+          message: `document "${docUri}" was not reached during reference discovery`,
+        }
       }
       this.pending.add(docUri)
       return { kind: "pending" }

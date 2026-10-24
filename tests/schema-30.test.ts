@@ -96,8 +96,8 @@ describe("3.0 keyword set", () => {
     expect(result.diagnostics).toStrictEqual([])
   })
 
-  it("reads format: binary as raw bytes, a Blob, and format: byte as base64 text", async () => {
-    expect(await typeOf({ type: "string", format: "binary" }, "3.0")).toBe("Blob")
+  it("projects binary and base64 schemas as JSON strings", async () => {
+    expect(await typeOf({ type: "string", format: "binary" }, "3.0")).toBe("string")
     expect(await typeOf({ type: "string", format: "byte" }, "3.0")).toBe("string")
   })
 
@@ -265,7 +265,7 @@ describe("readOnly and writeOnly across schemas", () => {
         'import type { Endpoints } from "./file0"',
         ...Object.keys(cases).flatMap((name) => [
           `type ${name}Request = NonNullable<Endpoints["POST /${name}"]["body"]>["application/json"]`,
-          `type ${name}Response = Endpoints["POST /${name}"]["responses"]["200"]["content"]["application/json"]`,
+          `type ${name}Response = Endpoints["POST /${name}"]["responses"][200]["content"]["application/json"]`,
         ]),
         ...["Inline", "Wrapped"].flatMap((name) => [
           `const omitted${name}: ${name}${optional} = {}`,

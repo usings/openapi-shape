@@ -1,6 +1,7 @@
 import { expect, it } from "vitest"
 import { createClient } from "../src/client"
 import { generate } from "../src/core/index"
+import type { ResultOperation } from "./helpers/contract"
 import { contractOf } from "./helpers/contract"
 import { oas } from "./helpers/generate"
 import { typecheck } from "./helpers/tsc"
@@ -48,10 +49,10 @@ it.each(["3.0", "3.1", "3.2"] as const)(
         )
         expect(diagnostics).toStrictEqual([])
         const contract = await contractOf<{
-          "POST /form": {
-            body: Record<typeof form | typeof multipart, typeof body>
-            responses: object
-          }
+          "POST /form": ResultOperation<{
+            body: typeof body
+            contentType?: typeof form | typeof multipart
+          }>
         }>(code)
         const requests: Request[] = []
         const client = createClient(contract, {
@@ -124,8 +125,11 @@ it("keeps explicit styles, serializes content arrays item by item, and treats qu
     ),
   ).toBe("")
   const contract = await contractOf<{
-    "POST /form": { body: Record<typeof form | typeof multipart, typeof body>; responses: object }
-    "GET /query": { query: typeof body; responses: object }
+    "POST /form": ResultOperation<{
+      body: typeof body
+      contentType?: typeof form | typeof multipart
+    }>
+    "GET /query": ResultOperation<{ query: typeof body }>
   }>(code)
   const requests: Request[] = []
   const api = createClient(contract, {
@@ -171,7 +175,7 @@ it("retains schema annotations for defaults and handles prototype-like names as 
   )
   expect(diagnostics).toStrictEqual([])
   const generated = await contractOf<{
-    "POST /form": { body: Record<typeof multipart, Record<string, unknown>>; responses: object }
+    "POST /form": ResultOperation<{ body: Record<string, unknown>; contentType?: typeof multipart }>
   }>(code)
   const requests: Request[] = []
   const api = createClient(generated, {
@@ -311,7 +315,7 @@ it("does not infer a field's default from only the alternatives that explicitly 
     }),
   ).toBe("")
   const generated = await contractOf<{
-    "POST /form": { body: Record<typeof form, { v: string }>; responses: object }
+    "POST /form": ResultOperation<{ body: { v: string }; contentType?: typeof form }>
   }>(code)
   expect(generated.endpoints["POST /form"]?.bodyEncodings).toBeUndefined()
   const sent: string[] = []
@@ -358,7 +362,7 @@ it("treats conditional encoding annotations as unknown and accepts an explicit o
   const explicit = await generate(make({ v: { contentType: "application/octet-stream" } }))
   expect(explicit.diagnostics).toStrictEqual([])
   const generated = await contractOf<{
-    "POST /form": { body: Record<typeof multipart, { v: string }>; responses: object }
+    "POST /form": ResultOperation<{ body: { v: string }; contentType?: typeof multipart }>
   }>(explicit.code)
   const requests: Request[] = []
   const api = createClient(generated, {

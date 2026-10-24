@@ -11,16 +11,105 @@ import type {
   TypedResponse,
 } from "../src/client"
 import { createClient, defineMiddleware } from "../src/client"
-import type { EndpointResult } from "../src/client/types"
 import { generate } from "../src/core/index"
 import type { Endpoints, Schemas } from "./__snapshots__/client-api"
 import { contract } from "./__snapshots__/client-api"
 import { contractOf } from "./helpers/contract"
 import { oas } from "./helpers/generate"
-import { expectPassesTsc, typecheck } from "./helpers/tsc"
+import { typecheck } from "./helpers/tsc"
+
+const jsonResponse = (schema: unknown) => ({
+  description: "Response",
+  content: { "application/json": { schema } },
+})
+
+async function responseApi(responses: Array<Record<string, unknown>>) {
+  const { code, diagnostics } = await generate(
+    oas("3.1", {
+      paths: Object.fromEntries(
+        responses.map((response, i) => [`/${i}`, { get: { responses: response } }]),
+      ),
+    }),
+  )
+  expect(diagnostics).toStrictEqual([])
+  return code
+}
 
 describe("types", () => {
-  it("keeps raw-byte wildcard json results unknown even beside a structured alternative", async () => {
+  it("derives calls and exact status narrowing from flat descriptive operations", async () => {
+    expect(
+      await typecheck({
+        "use.ts": `
+import type { Client, EndpointMessage, ResultEndpoint, StreamEndpoint } from "openapi-shape/client"
+type Json<T> = { content: { "application/json": T } }
+interface Endpoints {
+  "POST /items": {
+    params: { id: string }
+    body: { "application/json": { name: string }; "text/plain": "ready" }
+    responses: {
+      200: Json<{ exact: true }>
+      "2XX": Json<{ ranged: true }>
+      404: Json<{ missing: true }>
+      "4XX": Json<{ failed: true }>
+      default: Json<{ fallback: true }>
+    }
+  }
+  "GET /events": { responses: { 200: { content: { "text/event-stream": ({ event: "added"; data: "hello"; extra: string } | { event: "removed"; data: "bye" })[] } } } }
+  "GET /empty-event": { responses: { 204: { content: { "text/event-stream": string[] } } } }
+  "HEAD /events": { responses: { "2XX": { content: { "text/event-stream": string[] } } } }
+  "GET /failed-event": { responses: { 200: Json<string>; default: { content: { "text/event-stream": string[] } } } }
+  "GET /impossible": { responses: { 200: Json<never> } }
+}
+declare const api: Client<Endpoints>
+void api.result("POST /items", { params: { id: "a" }, body: { name: "a" } })
+void api.result("POST /items", { params: { id: "a" }, contentType: "text/plain", body: "ready" })
+// @ts-expect-error flat params remain required
+void api.result("POST /items", { body: { name: "a" } })
+// @ts-expect-error required body remains required
+void api.result("POST /items", { params: { id: "a" } })
+// @ts-expect-error request media selects its own body shape
+void api.result("POST /items", { params: { id: "a" }, contentType: "text/plain", body: { name: "a" } })
+// @ts-expect-error ordinary results cannot consume an event response
+void api.result("GET /events")
+// @ts-expect-error an empty response has no events
+void api.stream("GET /empty-event")
+// @ts-expect-error HEAD has no events
+void api.stream("HEAD /events")
+// @ts-expect-error failed event media is not a successful stream
+void api.stream("GET /failed-event")
+"GET /events" satisfies StreamEndpoint<Endpoints>
+"GET /empty-event" satisfies ResultEndpoint<Endpoints>
+for await (const message of api.stream("GET /events")) {
+  if (message.event === "added") message.data satisfies "hello"
+  if (message.event === "removed") message.data satisfies "bye"
+  message.id satisfies string
+  // @ts-expect-error only standard SSE fields survive parsing
+  message.extra
+}
+type Message = EndpointMessage<Endpoints, "GET /events">
+const message: Message = { event: "added", data: "hello", id: "1" }
+async function check() {
+  const result = await api.result("POST /items", { params: { id: "a" }, body: { name: "a" } })
+  if (result.status === 200) result.data satisfies { exact: true }
+  if (result.status === 201) result.data satisfies { ranged: true }
+  if (result.status === 204 || result.status === 205) result.data satisfies undefined
+  if (result.status === 404) result.error satisfies { missing: true }
+  if (result.status === 405) result.error satisfies { failed: true }
+  if (result.status === 500) result.error satisfies { fallback: true }
+  if (result.status === 304) result.error satisfies null
+  const response = await api.fetch("POST /items", { params: { id: "a" }, body: { name: "a" } })
+  if (response.status === 200) response.json() satisfies Promise<{ exact: true }>
+  if (response.status === 201) response.json() satisfies Promise<{ ranged: true }>
+  if (response.status === 404) response.json() satisfies Promise<{ missing: true }>
+  const impossible = await api.fetch("GET /impossible")
+  if (impossible.status === 200) impossible.json() satisfies Promise<never>
+}
+`,
+      }),
+    ).toBe("")
+  })
+
+  it("preserves projected string alternatives alongside structured wildcard responses", async () => {
     const { code } = await generate(
       oas("3.1", {
         paths: Object.fromEntries(
@@ -64,13 +153,15 @@ async function use() {
   const response = await api.fetch("GET /mixed0")
   if (response.ok) {
     const data = await response.json()
-    // @ts-expect-error raw bytes under a wildcard can decode to arbitrary JSON
+    data satisfies string | { id: number }
+    // @ts-expect-error a string alternative does not have the object fields
     data.id.toFixed()
   }
   const result = await api.result("GET /mixed1")
   if (result.status === 200) {
     const data = await result.response.json()
-    // @ts-expect-error result.response must preserve the same uncertainty
+    data satisfies string | { id: number }
+    // @ts-expect-error result.response preserves the same string alternative
     data.id.toFixed()
   }
 }
@@ -281,12 +372,11 @@ async function use() {
 
   it("treats 304 as empty across explicit, range, default, and undeclared responses", async () => {
     const responses = [
-      '{ "304": Json<{ message: string }> }',
-      '{ "3XX": Json<any> }',
-      "{ default: Json<never> }",
-      '{ "200": Json<string[]> }',
+      { "304": jsonResponse({ type: "object", properties: { message: { type: "string" } } }) },
+      { "3XX": jsonResponse(true) },
+      { default: jsonResponse(false) },
+      { "200": jsonResponse({ type: "array", items: { type: "string" } }) },
     ]
-    const endpoints = responses.map((shape, i) => `"GET /${i}": { responses: ${shape} }`)
     const calls = responses.map(
       (_, i) => `
   const result${i} = await api.result("GET /${i}")
@@ -302,12 +392,17 @@ async function use() {
   if (response${i}.status === 304) response${i}.json() satisfies Promise<never>
 `,
     )
-    await expectPassesTsc(`
-import type { Client } from "openapi-shape/client"
-type Json<T> = { content: { "application/json": T } }
-declare const api: Client<{ ${endpoints.join("\n")} }>
+    expect(
+      await typecheck({
+        "api.ts": await responseApi(responses),
+        "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const api = createClient(contract)
 async function use() { ${calls.join("\n")} }
-`)
+`,
+      }),
+    ).toBe("")
   })
 
   it("types a middleware where it is written, keeping what it carries", () => {
@@ -327,21 +422,22 @@ async function use() { ${calls.join("\n")} }
 
   it("keeps successes when a declared error body is never", async () => {
     const result = await typecheck({
+      "api.ts": await responseApi([
+        { "200": jsonResponse({ type: "string" }), "404": jsonResponse(false) },
+        { default: jsonResponse(false) },
+      ]),
       "use.ts": `
-import type { Client } from "openapi-shape/client"
-type Json<T> = { content: { "application/json": T } }
-declare const api: Client<{
-  "GET /never-error": { responses: { "200": Json<string>; "404": Json<never> } }
-  "GET /never-default": { responses: { default: Json<never> } }
-}>
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const api = createClient(contract)
 async function use() {
-  const found = await api.result("GET /never-error")
+  const found = await api.result("GET /0")
   if (found.error === undefined) {
     found.data.toUpperCase()
     found.status satisfies 200
     found.response.json() satisfies Promise<string>
   }
-  const impossible = await api.result("GET /never-default")
+  const impossible = await api.result("GET /1")
   if (impossible.status === 204) {
     impossible.data satisfies undefined
     impossible.response.json() satisfies Promise<never>
@@ -355,16 +451,22 @@ async function use() {
 
   it("keeps success data correlated with each status without intersecting sibling bodies", async () => {
     const result = await typecheck({
+      "api.ts": await responseApi([
+        {
+          "200": jsonResponse({ type: "array", items: { type: "string" } }),
+          "206": jsonResponse({ type: "array", items: { type: "number" } }),
+        },
+        {
+          "200": jsonResponse({ type: "array", items: { type: "string" } }),
+          "206": jsonResponse(true),
+        },
+      ]),
       "use.ts": `
-import type { Client } from "openapi-shape/client"
-type Json<T> = { content: { "application/json": T } }
-interface Endpoints {
-  "GET /arrays": { responses: { "200": Json<string[]>; "206": Json<number[]> } }
-  "GET /any": { responses: { "200": Json<string[]>; "206": Json<any> } }
-}
-declare const api: Client<Endpoints>
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const api = createClient(contract)
 async function use() {
-  const { data, error, status } = await api.result("GET /arrays")
+  const { data, error, status } = await api.result("GET /0")
   if (error === undefined) {
     data.find(value => value === 1) satisfies string | number | undefined
     data.map(value => String(value)) satisfies string[]
@@ -379,12 +481,12 @@ async function use() {
     // @ts-expect-error a 206 body contains numbers
     data.push("wrong")
   }
-  const mixed = await api.result("GET /any")
+  const mixed = await api.result("GET /1")
   if (mixed.status === 200) {
     mixed.data.map(value => value.toUpperCase()) satisfies string[]
-    // @ts-expect-error a sibling's any must not erase this body's type
+    // @ts-expect-error a sibling's unknown must not erase this body's type
     mixed.data.push(1)
-    // @ts-expect-error this body is not any
+    // @ts-expect-error this body is not unknown
     const wrong: number = mixed.data
   }
 }
@@ -392,6 +494,148 @@ async function use() {
 `,
     })
     expect(result).toBe("")
+  })
+
+  it("compiles wildcard, binary, HEAD, empty and default response semantics", async () => {
+    const cases = [
+      [
+        "/download",
+        "get",
+        {
+          "200": {
+            description: "bytes",
+            content: { "*/*": { schema: { type: "string", format: "binary" } } },
+          },
+        },
+      ],
+      [
+        "/report",
+        "get",
+        {
+          "200": {
+            description: "report",
+            content: {
+              "*/*": {
+                schema: {
+                  type: "object",
+                  required: ["rows"],
+                  properties: { rows: { type: "number" } },
+                },
+              },
+            },
+          },
+        },
+      ],
+      ["/bytes", "get", { "200": jsonResponse({ type: "string", format: "binary" }) }],
+      ["/pets", "head", { "200": jsonResponse({ type: "array", items: { type: "string" } }) }],
+      [
+        "/pets",
+        "delete",
+        { "204": jsonResponse({ type: "string" }), "default": { description: "empty" } },
+      ],
+      [
+        "/default",
+        "delete",
+        {
+          default: jsonResponse({
+            type: "object",
+            required: ["message"],
+            properties: { message: { type: "string" } },
+          }),
+        },
+      ],
+    ] as const
+    const paths: Record<string, Record<string, unknown>> = {}
+    for (const [path, method, responses] of cases) {
+      paths[path] ??= {}
+      paths[path][method] = { responses }
+    }
+    const { code } = await generate(oas("3.1", { paths }))
+    expect(
+      await typecheck({
+        "api.ts": code,
+        "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const edge = createClient(contract)
+async function check() {
+  const download = await edge.result("GET /download")
+  if (download.error === undefined) {
+    download.data satisfies string | Blob
+    // @ts-expect-error a string or Blob is not the report object
+    download.data.rows
+  }
+  const downloaded = await edge.fetch("GET /download")
+  if (downloaded.ok) {
+    const json = await downloaded.json()
+    json satisfies string
+    // @ts-expect-error the JSON schema declares a string
+    json.rows
+  }
+  const report = await edge.result("GET /report")
+  if (report.error === undefined) report.data satisfies { rows: number } | string | Blob
+  const bytes = await edge.result("GET /bytes")
+  if (bytes.error === undefined) {
+    bytes.data satisfies string
+    // @ts-expect-error binary format still describes a string in JSON
+    bytes.data.rows
+  }
+  const head = await edge.result("HEAD /pets")
+  if (head.error === undefined) head.data satisfies undefined
+  const headed = await edge.fetch("HEAD /pets")
+  if (headed.ok) headed.json() satisfies Promise<never>
+  const removed = await edge.result("DELETE /pets")
+  if (removed.error === undefined) removed.data satisfies undefined
+  const dropping = await edge.fetch("DELETE /default")
+  if (dropping.ok) dropping.json() satisfies Promise<{ message: string }>
+  const dropped = await edge.result("DELETE /default")
+  if (dropped.status === 204) dropped.data satisfies undefined
+  if (dropped.status === 200) dropped.data satisfies { message: string }
+}
+`,
+      }),
+    ).toBe("")
+  })
+
+  it("compiles fetch method restrictions and GET body omission", async () => {
+    const { code } = await generate(
+      oas("3.2", {
+        paths: {
+          "/search": {
+            get: {
+              requestBody: {
+                required: true,
+                content: { "application/json": { schema: { type: "object" } } },
+              },
+              responses: { "200": jsonResponse({ type: "string" }) },
+            },
+          },
+          "/debug": { trace: { responses: { "200": jsonResponse({ type: "string" }) } } },
+          "/tunnel": {
+            additionalOperations: {
+              connect: { responses: { "200": jsonResponse({ type: "string" }) } },
+            },
+          },
+        },
+      }),
+    )
+    expect(
+      await typecheck({
+        "api.ts": code,
+        "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const api = createClient(contract)
+void api.result("GET /search")
+// @ts-expect-error GET does not send a body
+void api.result("GET /search", { body: {} })
+// @ts-expect-error fetch refuses TRACE
+void api.fetch("TRACE /debug")
+// @ts-expect-error fetch refuses CONNECT
+void api.fetch("CONNECT /tunnel")
+`,
+      }),
+    ).toBe("")
   })
 
   it("reports unknown endpoints instead of a missing init argument", async () => {
@@ -497,74 +741,6 @@ void function inputChecks(client: Client<Endpoints>): void {
 }
 
 void function endpointChecks(client: Client<Endpoints>): void {
-  const unusual = createClient<{
-    "GET /search": { body: { "application/json": { q: string } }; responses: object }
-    "TRACE /debug": { responses: object }
-    "connect /tunnel": { responses: object }
-  }>({ version: 4, endpoints: {} })
-  // @ts-expect-error fetch cannot send a body with GET
-  void unusual.result("GET /search", { body: { q: "x" } })
-  void unusual.result("GET /search")
-  // @ts-expect-error fetch refuses TRACE
-  void unusual.fetch("TRACE /debug")
-  // @ts-expect-error and CONNECT, in any case
-  void unusual.fetch("connect /tunnel")
-
-  // Endpoints typed loosely by a record stay callable, also by a `string`.
-  const loose = createClient<
-    Record<
-      string,
-      {
-        body?: { "application/json": object }
-        responses: { "200": { content: { "application/json": number } } }
-      }
-    >
-  >({ version: 4, endpoints: {} })
-  void loose.result("GET /anything")
-  void loose.fetch("POST /x")
-  const anyEndpoint: string = "POST /x"
-  void loose.result(anyEndpoint, { body: {} }).then(({ data, error }) => {
-    if (error === undefined) expectTypeOf(data).toEqualTypeOf<number>()
-  })
-  void loose.result("HEAD /anything").then(({ data }) => {
-    expectTypeOf(data).toEqualTypeOf<undefined>()
-  })
-  // The result alias of an open endpoint map retains the whole called key,
-  // even though actually calling with a union is forbidden below.
-  type OpenResult = EndpointResult<
-    Record<string, { responses: { "200": { content: { "application/json": number } } } }>,
-    "HEAD /anything" | "GET /anything"
-  >
-  expectTypeOf<Extract<OpenResult, { status: 200 }>["data"]>().toEqualTypeOf<number>()
-  const looseEither = Math.random() > 0.5 ? "HEAD /anything" : "GET /anything"
-  // @ts-expect-error a call still names one endpoint
-  void loose.result(looseEither)
-
-  // An index or template key stands for many endpoints: a call gets the results
-  // of the endpoint it names, as an endpoint declared on its own does.
-  interface Json<T> {
-    responses: { "200": { content: { "application/json": T } } }
-  }
-  const patterned = createClient<{
-    [endpoint: `${string} /files/${string}`]: Json<{ size: number }>
-    [endpoint: string]: Json<unknown>
-    "GET /a": Json<{ a: number }>
-  }>({ version: 4, endpoints: {} })
-  // A template's HEAD has no content, as HEAD has.
-  void patterned.result("HEAD /files/x").then(({ data }) => {
-    expectTypeOf(data).toEqualTypeOf<undefined>()
-  })
-  void patterned.result("GET /files/x").then(({ data, error }) => {
-    if (error === undefined) expectTypeOf(data).toEqualTypeOf<{ size: number }>()
-  })
-  // A string index does not hide an endpoint declared beside it.
-  void patterned.result("GET /a").then(({ data, error }) => {
-    if (error === undefined) expectTypeOf(data).toEqualTypeOf<{ a: number }>()
-  })
-  expectTypeOf<
-    EndpointData<typeof patterned extends Client<infer E> ? E : never, "GET /a">
-  >().toEqualTypeOf<{ a: number }>()
-
   // A call names one endpoint: a union would mix their inputs and responses,
   // also of every endpoint at once.
   const every = "GET /pets/{id}" as Endpoint<Endpoints>
@@ -582,7 +758,7 @@ void function clientOptionChecks(): void {
   // @ts-expect-error one signal would cancel every request; a call or the fetch option takes it
   void createClient(contract, { signal: AbortSignal.timeout(10_000) })
   // @ts-expect-error contract entries name declared endpoints
-  void createClient<Endpoints>({ version: 4, endpoints: { "GET /nope": {} } })
+  void createClient<Endpoints>({ version: 5, endpoints: { "GET /nope": {} } })
   // @ts-expect-error an older contract must be regenerated
   void createClient({ ...contract, version: 1 })
   // @ts-expect-error a newer contract must be regenerated with the installed package
@@ -655,49 +831,6 @@ void async function resultTypeChecks(client: Client<Endpoints>): Promise<void> {
   void client.result("GET /events")
 }
 
-void async function responseEdgeChecks(): Promise<void> {
-  const edge = createClient<{
-    "GET /download": { responses: { "200": { content: { "*/*": Blob } } } }
-    "GET /report": { responses: { "200": { content: { "*/*": { rows: number } } } } }
-    "GET /bytes": { responses: { "200": { content: { "application/json": Blob } } } }
-    "HEAD /pets": { responses: { "200": { content: { "application/json": Schemas.Pet[] } } } }
-    "DELETE /pets": {
-      responses: { "204": { content: { "application/json": Schemas.Pet } }; "default": object }
-    }
-    "DELETE /pets/{id}": {
-      params: { id: number }
-      responses: { default: { content: { "application/json": Schemas.Error } } }
-    }
-    "head /x": { responses: { "200": { content: { "application/json": Schemas.Pet } } } }
-  }>({ version: 4, endpoints: {} })
-  // A wildcard's raw bytes may come labelled as anything; JSON is parsed, never a Blob.
-  const download = await edge.result("GET /download")
-  if (download.error === undefined) expectTypeOf(download.data).toEqualTypeOf<unknown>()
-  const downloaded = await edge.fetch("GET /download")
-  if (downloaded.ok) expectTypeOf(await downloaded.json()).toEqualTypeOf<unknown>()
-  const report = await edge.result("GET /report")
-  if (report.error === undefined)
-    expectTypeOf(report.data).toEqualTypeOf<{ rows: number } | string | Blob>()
-  const bytes = await edge.result("GET /bytes")
-  if (bytes.error === undefined) expectTypeOf(bytes.data).toEqualTypeOf<unknown>()
-  // HEAD and 204 responses carry nothing, whatever is declared.
-  const head = await edge.result("HEAD /pets")
-  if (head.error === undefined) expectTypeOf(head.data).toEqualTypeOf<undefined>()
-  const headed = await edge.fetch("HEAD /pets")
-  if (headed.ok) expectTypeOf(await headed.json()).toEqualTypeOf<never>()
-  const removed = await edge.result("DELETE /pets")
-  if (removed.error === undefined) expectTypeOf(removed.data).toEqualTypeOf<undefined>()
-  // `default` alone covers success, too: its 204 has no content, and `json()` keeps the rest.
-  const dropping = await edge.fetch("DELETE /pets/{id}", { params: { id: 1 } })
-  if (dropping.ok) expectTypeOf(await dropping.json()).toEqualTypeOf<Schemas.Error>()
-  const dropped = await edge.result("DELETE /pets/{id}", { params: { id: 1 } })
-  if (dropped.status === 204) expectTypeOf(dropped.data).toEqualTypeOf<undefined>()
-  if (dropped.status === 200) expectTypeOf(dropped.data).toEqualTypeOf<Schemas.Error>()
-  // A method is compared as fetch sends it, uppercase.
-  const lower = await edge.result("head /x")
-  if (lower.error === undefined) expectTypeOf(lower.data).toEqualTypeOf<undefined>()
-}
-
 void async function forwardingChecks(client: Client<Endpoints>): Promise<void> {
   // A function that passes a call on names what it returns of a success by `EndpointData`.
   const dataOf = async <K extends ResultEndpoint<Endpoints>>(
@@ -725,21 +858,55 @@ expectTypeOf<Awaited<ReturnType<Client<Endpoints>["result"]>>>().not.toBeAny()
 
 it("checks 300 heterogeneous endpoints directly and through both generic wrapper forms", async () => {
   const ids = Array.from({ length: 300 }, (_, i) => i)
-  const endpoints = ids.map(
-    (i) => `
-  "GET /resource-${i}": {
-    params: { id: number }
-    responses: {
-      "200": { content: { "application/json": { kind: "resource-${i}"; name: string; detail: { value: ${i}; tags: string[] } }[] } }
-      "206": { content: { "application/json": number[] } }
-      "404": { content: { "application/json": { message: string; code: ${i} } } }
-    }
-  }`,
+  const { code, diagnostics } = await generate(
+    oas("3.1", {
+      paths: Object.fromEntries(
+        ids.map((i) => [
+          `/resource-${i}/{id}`,
+          {
+            get: {
+              parameters: [{ name: "id", in: "path", required: true, schema: { type: "number" } }],
+              responses: {
+                "200": jsonResponse({
+                  type: "array",
+                  items: {
+                    type: "object",
+                    required: ["kind", "name", "detail"],
+                    properties: {
+                      kind: { const: `resource-${i}` },
+                      name: { type: "string" },
+                      detail: {
+                        type: "object",
+                        required: ["value", "tags"],
+                        properties: {
+                          value: { const: i },
+                          tags: { type: "array", items: { type: "string" } },
+                        },
+                      },
+                    },
+                  },
+                }),
+                "206": jsonResponse({ type: "array", items: { type: "number" } }),
+                "404": jsonResponse({
+                  type: "object",
+                  required: ["message", "code"],
+                  properties: {
+                    message: { type: "string" },
+                    code: { const: i },
+                  },
+                }),
+              },
+            },
+          },
+        ]),
+      ),
+    }),
   )
+  expect(diagnostics).toStrictEqual([])
   const calls = ids.map(
     (i) => `
 async function call${i}() {
-  const r${i} = await client.result("GET /resource-${i}", { params: { id: 1 } })
+  const r${i} = await client.result("GET /resource-${i}/{id}", { params: { id: 1 } })
   if (r${i}.status === 200) {
     r${i}.data.map(value => value.detail.value) satisfies ${i}[]
     r${i}.data.find(value => value.kind === "resource-${i}")?.detail.tags satisfies string[] | undefined
@@ -784,17 +951,19 @@ async function checked_${style}<K extends ResultEndpoint<Endpoints>>(
   expect(
     await typecheck(
       {
+        "api.ts": code,
         "use.ts": `
-import type { Client, ResultEndpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
-interface Endpoints { ${endpoints.join("\n")} }
-declare const client: Client<Endpoints>
+import { createClient } from "openapi-shape/client"
+import type { ResultEndpoint, EndpointArgs, EndpointData } from "openapi-shape/client"
+import { contract, type Endpoints } from "./api"
+const client = createClient(contract)
 ${calls.join("\n")}
 ${wrappers.join("\n")}
 async function wrappedCalls() {
-  const first = await checked_whole("GET /resource-0", { params: { id: 1 } })
-  first satisfies Endpoints["GET /resource-0"]["responses"]["200"]["content"]["application/json"] | number[]
-  const last = await checked_destructured("GET /resource-299", { params: { id: 1 } })
-  last satisfies Endpoints["GET /resource-299"]["responses"]["200"]["content"]["application/json"] | number[]
+  const first = await checked_whole("GET /resource-0/{id}", { params: { id: 1 } })
+  first satisfies EndpointData<Endpoints, "GET /resource-0/{id}">
+  const last = await checked_destructured("GET /resource-299/{id}", { params: { id: 1 } })
+  last satisfies EndpointData<Endpoints, "GET /resource-299/{id}">
 }
 `,
       },

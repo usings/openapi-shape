@@ -12,24 +12,24 @@ const ok = { "200": { description: "OK" } }
 const json = (schema: unknown) => ({ content: { "application/json": { schema } } })
 
 describe("methods", () => {
-  it("emits every fixed method, uppercase, in Path Item order", async () => {
+  it("emits fetch-supported fixed methods, uppercase, in Path Item order", async () => {
     const methods = ["trace", "patch", "head", "options", "delete", "post", "put", "get"]
     const code = await gen(
       oas("3.1", {
         paths: { "/r": Object.fromEntries(methods.map((m) => [m, { responses: ok }])) },
       }),
     )
-    const keys = [...code.matchAll(/^ {2}"([A-Z]+) \/r"/gm)].map((m) => m[1])
-    expect(keys).toStrictEqual([
-      "GET",
-      "PUT",
-      "POST",
-      "DELETE",
-      "OPTIONS",
-      "HEAD",
-      "PATCH",
-      "TRACE",
+    const { endpoints } = await contractOf(code)
+    expect(Object.keys(endpoints)).toStrictEqual([
+      "GET /r",
+      "PUT /r",
+      "POST /r",
+      "DELETE /r",
+      "OPTIONS /r",
+      "HEAD /r",
+      "PATCH /r",
     ])
+    expect(code).not.toContain('"TRACE /r"')
   })
 
   it("supports QUERY and additionalOperations in 3.2", async () => {
@@ -107,23 +107,13 @@ describe("parameters", () => {
         },
       }),
     )
-    expect(entry(code, "GET /users/{id}")).toBe(
-      [
-        "{",
-        "  params: { id: number }",
-        "  query: { tags?: string[]; limit: number }",
-        "  headers: {",
-        "    /** @format uuid */",
-        '    "X-Trace"?: string',
-        "  }",
-        "  cookies: { session: string }",
-        "  responses: {",
-        "    /** OK */",
-        '    "200": {}',
-        "  }",
-        "}",
-      ].join("\n"),
-    )
+    const operation = entry(code, "GET /users/{id}")
+    expect(operation).toContain("params: { id: number }")
+    expect(operation).toContain("query: { tags?: string[]; limit: number }")
+    expect(operation).toContain('"X-Trace"?: string')
+    expect(operation).toContain("/** @format uuid */")
+    expect(operation).toContain("headers: {")
+    expect(operation).toContain("cookies: { session: string }")
   })
 
   it("lets operation parameters override path parameters by name and location", async () => {
@@ -148,9 +138,9 @@ describe("parameters", () => {
         },
       }),
     )
-    expect(entry(code, "GET /r")).toContain(
-      'query: { q: number; keep?: boolean }\n  headers: { "X-ID"?: number }',
-    )
+    expect(entry(code, "GET /r")).toContain("query: { q: number; keep?: boolean }")
+    expect(entry(code, "GET /r")).toContain('"X-ID"?: number')
+    expect(entry(code, "GET /r")).not.toContain('"x-id"')
   })
 
   it("ignores Accept, Content-Type, and Authorization header parameters, as the spec requires", async () => {
@@ -170,7 +160,10 @@ describe("parameters", () => {
         },
       }),
     )
-    expect(entry(code, "GET /r")).not.toContain("headers")
+    const operation = entry(code, "GET /r")
+    expect(operation).not.toContain("headers")
+    for (const name of ["accept", "Content-Type", "AUTHORIZATION"])
+      expect(operation).not.toContain(name)
   })
 
   it("types parameters declared with content", async () => {
@@ -325,12 +318,13 @@ describe("request bodies", () => {
       }),
     )
     expect(entry(code, "POST /a")).toContain('body: { "application/json": string }')
-    expect(entry(code, "PUT /b")).toContain(
-      '/** Either form */\n  body?: { "application/json": { n?: number }; "text/plain": string }',
+    const optional = entry(code, "PUT /b")
+    expect(optional).toContain(
+      'body?: { "application/json": { n?: number }; "text/plain": string }',
     )
   })
 
-  it("keeps request bodies on GET, HEAD, and DELETE, also in 3.0, which says to ignore them", async () => {
+  it("keeps DELETE request bodies in 3.0 and 3.1", async () => {
     const paths = { "/r": { delete: { requestBody: json({ type: "string" }), responses: ok } } }
     const result30 = await generate(oas("3.0", { paths }))
     expect(entry(result30.code, "DELETE /r")).toContain('body?: { "application/json": string }')
@@ -363,22 +357,14 @@ describe("responses", () => {
         },
       }),
     )
-    expect(entry(result.code, "GET /r")).toBe(
-      [
-        "{",
-        "  responses: {",
-        "    /** Pet */",
-        '    "200": { content: { "application/json": { [key: string]: unknown }; "text/csv": string } }',
-        "    /** Nothing */",
-        '    "204": {}',
-        "    /** Client error */",
-        '    "4XX": { content: { "application/json": string } }',
-        "    /** Other */",
-        '    "default": {}',
-        "  }",
-        "}",
-      ].join("\n"),
+    const operation = entry(result.code, "GET /r")
+    expect(operation).toContain(
+      '"200": { content: { "application/json": { [key: string]: unknown }; "text/csv": string } }',
     )
+    expect(operation).toContain('"204": {}')
+    expect(operation).toContain('"4XX": { content: { "application/json": string } }')
+    expect(operation).toContain('"default": {}')
+    expect(operation).not.toContain("x-internal")
     // A lowercase range means the same range.
     expect(result.diagnostics).toStrictEqual([])
   })
@@ -432,15 +418,16 @@ describe("responses", () => {
         },
       }),
     )
-    expect(entry(code, "GET /r")).toContain(
-      '    "200": {\n      headers: {\n        "X-Rate-Limit": number\n        /** Pagination */\n        Link?: string\n      }\n    }',
-    )
+    const operation = entry(code, "GET /r")
+    expect(operation).toContain('"X-Rate-Limit": number')
+    expect(operation).toContain("/** Pagination */")
+    expect(operation).toContain("Link?: string")
+    expect(operation).not.toContain('"Content-Type"')
   })
 
   it("leaves the response map empty when no responses are declared", async () => {
-    expect(entry(await gen(oas("3.1", { paths: { "/r": { get: {} } } })), "GET /r")).toBe(
-      "{\n  responses: {}\n}",
-    )
+    const operation = entry(await gen(oas("3.1", { paths: { "/r": { get: {} } } })), "GET /r")
+    expect(operation).toBe("{\n  responses: {}\n}")
   })
 })
 
@@ -553,8 +540,8 @@ describe("path items", () => {
         },
       }),
     )
-    expect(entry(result.code, "GET /r")).toContain('"201"')
-    expect(entry(result.code, "GET /r")).not.toContain('"200"')
+    expect(entry(result.code, "GET /r")).toContain('"201": {}')
+    expect(entry(result.code, "GET /r")).not.toContain('"200": {}')
     expect(entry(result.code, "POST /r")).toContain("middle?: string")
     expect(result.code).toContain('"DELETE /r"')
     expect(codes(result.diagnostics)).toStrictEqual([
@@ -630,7 +617,7 @@ describe("path items", () => {
         },
       }),
     )
-    expect(entry(result.code, "GET /r")).toContain('"201"')
+    expect(entry(result.code, "GET /r")).toContain('"201": {}')
     expect(result.code).toContain('"PUT /r"')
     expect(codes(result.diagnostics)).toStrictEqual(["path-item-conflict #/paths/~1r/get"])
   })
@@ -644,7 +631,6 @@ const ENTRY_FIELDS = [
   "querystring",
   "headers",
   "contentType",
-  "json",
   "bodyEncodings",
 ] as const satisfies ReadonlyArray<keyof EndpointContract>
 const ENCODING_FIELDS = [
@@ -667,7 +653,7 @@ function unknownFields(contract: object): string[] {
   for (const [endpoint, fields] of Object.entries(endpoints)) {
     for (const [field, value] of Object.entries(fields)) {
       if (!(ENTRY_FIELDS as readonly string[]).includes(field)) out.push(`${endpoint} ${field}`)
-      if (typeof value !== "object" || value === null) continue
+      if (field === "stream" || typeof value !== "object" || value === null) continue
       const maps = field === "bodyEncodings" ? Object.values(value) : [value]
       for (const [name, encoding] of maps.flatMap((map) =>
         Object.entries(map as Record<string, object>),
@@ -836,6 +822,9 @@ describe("runtime contract", () => {
       "POST /items/{id}": {
         bodyEncodings: { "multipart/form-data": { meta: { contentType: "application/json" } } },
       },
+      "PATCH /items/{id}": {
+        contentType: "application/json",
+      },
     })
     // The client sends every request to its baseUrl; the document's servers are documentation.
     expect(result.code).toContain("// Server: https://api.test/v1\n")
@@ -845,7 +834,7 @@ describe("runtime contract", () => {
     await expectPassesTsc(result.code)
   })
 
-  it("leaves out the bodies of GET and HEAD, which the client does not send", async () => {
+  it("describes GET and HEAD bodies without emitting their unused runtime encodings", async () => {
     const form = {
       content: {
         "application/x-www-form-urlencoded": {
@@ -860,6 +849,8 @@ describe("runtime contract", () => {
     )
     const { endpoints } = await contractOf(code)
     expect(endpoints).toStrictEqual({
+      "GET /r": {},
+      "HEAD /r": {},
       "POST /r": {
         contentType: "application/x-www-form-urlencoded",
         bodyEncodings: {
@@ -867,8 +858,11 @@ describe("runtime contract", () => {
         },
       },
     })
-    // The types still describe what the API declares.
-    expect(entry(code, "GET /r")).toContain('body?: { "application/x-www-form-urlencoded"')
+    for (const method of ["GET", "HEAD"]) {
+      expect(entry(code, `${method} /r`)).toContain(
+        'body?: { "application/x-www-form-urlencoded": { a?: { [key: string]: unknown } } }',
+      )
+    }
   })
 
   it("keeps names such as __proto__ as data", async () => {

@@ -71,11 +71,11 @@ export const externalForward: [I] extends [E] ? true : false = true
 export const externalBackward: [E] extends [I] ? true : false = true
 // Concrete witnesses keep equivalent but accidentally over-wide results from passing.
 const input: I["body"]["application/json"] = { secret: "s", name: null, location: [1, 2] }
-const output: E["responses"]["200"]["content"]["application/json"] = { id: 1, name: "pet", location: [1, 2] }
+const output: E["responses"][200]["content"]["application/json"] = { id: 1, name: "pet", location: [1, 2] }
 // @ts-expect-error writeOnly secret remains required in a request
 const missingSecret: L["body"]["application/json"] = { id: 1, name: "pet", location: [1, 2] }
 // @ts-expect-error readOnly id remains required in a response
-const missingId: E["responses"]["200"]["content"]["application/json"] = { secret: "s", name: "pet", location: [1, 2] }
+const missingId: E["responses"][200]["content"]["application/json"] = { secret: "s", name: "pet", location: [1, 2] }
 // @ts-expect-error the tuple is closed
 const longLocation: I["body"]["application/json"] = { secret: "s", name: "pet", location: [1, 2, 3] }
 `,

@@ -5,6 +5,8 @@ import type { LoadingOptions } from "./document-reader"
 import { DocumentReader } from "./document-reader"
 import { loadDocuments } from "./documents"
 import { PatternTimeoutError } from "./patterns"
+import { prepareOutput } from "./prepare-output"
+import { assignInputVariants } from "./projection"
 import { renderModule } from "./render-module"
 
 export type { DocumentLoader } from "./document-reader"
@@ -84,9 +86,11 @@ async function run(
   const documents = await loadDocuments(input, options.base, loading, reader)
   if (documents === undefined) throw new GenerateError(loading.list)
   const { model, diagnostics } = await buildModel(documents)
+  assignInputVariants(model, diagnostics)
   if (diagnostics.hasErrors) throw new GenerateError(diagnostics.list)
   await reader.checkpoint()
-  const code = await renderModule(model, () => reader.workpoint())
+  const output = await prepareOutput(model, () => reader.workpoint())
+  const code = await renderModule(output, () => reader.workpoint())
   await reader.checkpoint()
   return { code, diagnostics: diagnostics.list }
 }

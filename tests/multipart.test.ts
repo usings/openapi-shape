@@ -3,6 +3,7 @@ import { expect, it } from "vitest"
 import type { Contract } from "../src/client"
 import { createClient } from "../src/client"
 import { generate } from "../src/core/index"
+import type { ResultOperation } from "./helpers/contract"
 import { contractOf } from "./helpers/contract"
 import type { Version } from "./helpers/generate"
 import { codes, oas } from "./helpers/generate"
@@ -22,13 +23,10 @@ async function generatedClient(content: object) {
   const { code, diagnostics } = await generate(document(content))
   expect(diagnostics).toStrictEqual([])
   const contract = await contractOf<{
-    "POST /upload": {
-      body: Record<
-        typeof multipart | `${typeof multipart};${string}` | typeof form,
-        Record<string, unknown>
-      >
-      responses: object
-    }
+    "POST /upload": ResultOperation<{
+      body: Record<string, unknown> | FormData
+      contentType?: typeof multipart | `${typeof multipart};${string}` | typeof form
+    }>
   }>(code)
   const requests: Request[] = []
   const client = createClient(contract, {
@@ -272,7 +270,7 @@ it.each([
 it("treats any style field of a hand-written contract as style-based, ignoring contentType", async () => {
   const requests: Request[] = []
   const contract = {
-    version: 4,
+    version: 5,
     endpoints: {
       "POST /upload": {
         bodyEncodings: {
@@ -285,7 +283,10 @@ it("treats any style field of a hand-written contract as style-based, ignoring c
       },
     },
   } as Contract<{
-    "POST /upload": { body: Record<typeof multipart, Record<string, unknown>>; responses: object }
+    "POST /upload": ResultOperation<{
+      body: Record<string, unknown>
+      contentType?: typeof multipart
+    }>
   }>
   const client = createClient(contract, {
     baseUrl: "https://api.test",

@@ -55,7 +55,7 @@ describe("values", () => {
     expect(await typeOf(schema)).toBe(expected)
   })
 
-  it("keeps format as documentation, and reads format: binary as raw bytes", async () => {
+  it("keeps formats as documentation and projects binary values as JSON strings", async () => {
     const result = await generate(
       withSchemas("3.1", {
         T: {
@@ -68,7 +68,7 @@ describe("values", () => {
       }),
     )
     expect(declaration(result.code, "T")).toBe(
-      "{\n  /** @format date-time */\n  at?: string\n  /** @format binary */\n  file?: Blob\n}",
+      "{\n  /** @format date-time */\n  at?: string\n  /** @format binary */\n  file?: string\n}",
     )
     expect(result.diagnostics).toStrictEqual([])
   })
@@ -81,7 +81,7 @@ describe("values", () => {
         C: { type: "date" },
       }),
     )
-    expect(declaration(result.code, "A")).toBe("Blob")
+    expect(declaration(result.code, "A")).toBe("string")
     expect(declaration(result.code, "B")).toBe("string | null")
     expect(declaration(result.code, "C")).toBe("unknown")
     expect(codes(result.diagnostics)).toStrictEqual(["invalid-schema #/components/schemas/C/type"])
@@ -719,21 +719,36 @@ describe("robustness", () => {
   })
 
   it("keeps raw bytes from being captured by a schema named Blob", async () => {
-    const code = await gen(
-      withSchemas("3.1", {
-        Blob: { type: "object" },
-        Upload: { type: "object", properties: { data: { $ref: "#/components/schemas/Blob" } } },
-        Event: {
-          type: "object",
-          properties: { file: { contentMediaType: "a/b", type: "string", format: "binary" } },
+    const doc = withSchemas("3.1", {
+      Blob: { type: "object" },
+      Upload: { type: "object", properties: { data: { $ref: "#/components/schemas/Blob" } } },
+      Event: {
+        type: "object",
+        properties: { file: { contentMediaType: "a/b", type: "string", format: "binary" } },
+      },
+    })
+    const code = await gen({
+      ...doc,
+      paths: {
+        "/upload": {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "multipart/form-data": { schema: { $ref: "#/components/schemas/Event" } },
+              },
+            },
+            responses: { "204": { description: "Uploaded" } },
+          },
         },
-      }),
-    )
+      },
+    })
     expect(declaration(code, "Upload")).toContain("data?: Blob")
-    expect(declaration(code, "Event")).toContain("file?: globalThis.Blob")
+    expect(declaration(code, "Event")).toContain("file?: string")
+    expect(declaration(code, "EventMultipart")).toContain("file?: globalThis.Blob")
     await expectPassesTsc(
       code,
-      'import type { Schemas } from "./file0"\nexport const e: Schemas.Event = { file: new Blob() }\n',
+      'import type { Schemas } from "./file0"\nexport const e: Schemas.EventMultipart = { file: new Blob() }\n',
     )
   })
 

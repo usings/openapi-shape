@@ -33,19 +33,22 @@ export interface RequestDefaults {
 
 /** The standard `Request` for a call: its URL, headers, and body, as the contract declares them. */
 export function buildRequest(endpoint: string, init: CallInit, defaults: RequestDefaults): Request {
-  const space = endpoint.indexOf(" ")
-  if (space <= 0) throw new TypeError(`Invalid endpoint "${endpoint}"; expected "METHOD /path"`)
-  const method = endpoint.slice(0, space)
-  const declared = defaults.endpoints[endpoint]
+  const declared = Object.hasOwn(defaults.endpoints, endpoint)
+    ? defaults.endpoints[endpoint]
+    : undefined
+  if (!declared) throw new TypeError(`Unknown endpoint "${endpoint}"; use a generated contract`)
+  const separator = endpoint.indexOf(" ")
+  const method = endpoint.slice(0, separator)
+  const path = endpoint.slice(separator + 1)
   const { params, query, headers: given, body: value, contentType, ...rest } = init
 
-  let url = defaults.prefix + expandPath(endpoint.slice(space + 1), params, declared?.params)
+  let url = defaults.prefix + expandPath(path, params, declared.params)
   if (query !== undefined) url = appendQuery(url, serializeQuery(query, declared))
 
   const headers = new Headers(defaults.headers)
   let body: BodyLike | string | undefined
   if (value !== undefined) {
-    const encoded = encodeBody(value, contentType ?? declared?.contentType, declared)
+    const encoded = encodeBody(value, contentType ?? declared.contentType, declared)
     body = encoded.body
     // Without a label, the body's own type (a Blob's, FormData's boundary) applies.
     if (encoded.contentType === undefined) headers.delete("content-type")
@@ -62,7 +65,7 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
   } else {
     for (const [name, header] of Object.entries(given ?? {})) {
       if (header == null) continue
-      const encoding = normalize(byLowercase(declared?.headers, name), "simple")
+      const encoding = normalize(byLowercase(declared.headers, name), "simple")
       headers.set(
         name,
         encoding.contentType

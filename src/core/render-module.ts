@@ -1,6 +1,6 @@
+import { CONTRACT_VERSION } from "../shared/contract"
 import { indentTail, jsdoc, text } from "./jsdoc"
-import { acceptsJson, classifyMediaType, defaultMediaType, isApplicationJson } from "./media-types"
-import type { Declaration, Field, Info, Media, Model, Operation } from "./model"
+import type { Declaration, Info, Media, Operation, OutputModel, OutputOperation } from "./model"
 import { propertyKey } from "./naming"
 import type { TypeContext } from "./render-types"
 import { block, indexOf, renderFields, renderType } from "./render-types"
@@ -10,25 +10,24 @@ import { block, indexOf, renderFields, renderType } from "./render-types"
  * `contract` for openapi-shape/client.
  */
 export async function renderModule(
-  model: Model,
+  model: OutputModel,
   workpoint?: () => Promise<void> | undefined,
 ): Promise<string> {
   // Inside `Schemas`, a schema named `Blob` would capture raw bytes.
   const shadowed = model.declarations.some((d) => d.name === "Blob" || d.inputName === "Blob")
-  const inside = (side: TypeContext["side"]): TypeContext => ({
-    side,
+  const inside: TypeContext = {
     refPrefix: "",
     blob: shadowed ? "globalThis.Blob" : "Blob",
-  })
+  }
 
   const parts = [header(model.info)]
-  parts.push(await operations("Endpoints", model.endpoints, outside, false, workpoint))
+  parts.push(await operations("Endpoints", model.endpoints, outside, workpoint))
   // The API sends webhook and callback requests, and receives their responses.
   if (model.webhooks.length > 0) {
-    parts.push(await operations("Webhooks", model.webhooks, outside, true, workpoint))
+    parts.push(await operations("Webhooks", model.webhooks, outside, workpoint))
   }
   if (model.callbacks.length > 0) {
-    parts.push(await operations("Callbacks", model.callbacks, outside, true, workpoint))
+    parts.push(await operations("Callbacks", model.callbacks, outside, workpoint))
   }
   if (model.declarations.length > 0)
     parts.push(await schemas(model.declarations, inside, workpoint))
@@ -36,9 +35,7 @@ export async function renderModule(
   return `${parts.join("\n\n")}\n`
 }
 
-function outside(side: TypeContext["side"]): TypeContext {
-  return { side, refPrefix: "Schemas.", blob: "Blob" }
-}
+const outside: TypeContext = { refPrefix: "Schemas.", blob: "Blob" }
 
 function header(info: Info): string {
   const lines: string[] = []
@@ -56,14 +53,13 @@ function header(info: Info): string {
 async function operations(
   name: string,
   list: Operation[],
-  context: (side: TypeContext["side"]) => TypeContext,
-  incoming: boolean,
+  context: TypeContext,
   workpoint?: () => Promise<void> | undefined,
 ): Promise<string> {
   const entries: string[] = []
   for (const operation of list) {
-    const request = context(incoming ? "response" : "request")
-    const response = context(incoming ? "request" : "response")
+    const request = context
+    const response = context
     const members: string[] = []
     if (operation.params.length > 0)
       members.push(`params: ${renderFields(operation.params, undefined, request)}`)
@@ -117,15 +113,12 @@ function contentMap(content: Media[], context: TypeContext): string {
 
 async function schemas(
   declarations: Declaration[],
-  context: (side: TypeContext["side"]) => TypeContext,
+  context: TypeContext,
   workpoint?: () => Promise<void> | undefined,
 ): Promise<string> {
   const rendered: string[] = []
   for (const declaration of declarations) {
-    rendered.push(declare(declaration.name, declaration, context("response")))
-    if (declaration.inputName !== undefined) {
-      rendered.push(declare(declaration.inputName, declaration, context("request")))
-    }
+    rendered.push(declare(declaration.name, declaration, context))
     const pending = workpoint?.()
     // oxlint-disable-next-line no-await-in-loop -- yield between independent declarations
     if (pending) await pending
@@ -143,24 +136,19 @@ function declare(name: string, declaration: Declaration, context: TypeContext): 
   return `${annotations}export type ${name} = ${renderType(type, context)}`
 }
 
-/** The format version written here must agree with openapi-shape/client's `Contract`. */
-const CONTRACT_VERSION = 4
-
 /**
  * How requests go over the wire, for `openapi-shape/client`: each endpoint's serialization and
  * default media type, where they differ from OpenAPI's defaults.
  */
 async function contract(
-  endpoints: Operation[],
+  endpoints: OutputOperation[],
   workpoint?: () => Promise<void> | undefined,
 ): Promise<string> {
   const entries: string[] = []
   for (const operation of endpoints) {
-    const entry = contractEntry(operation)
-    if (entry) {
-      const head = `${literalKey(operation.key)}: `
-      entries.push(`  ${head}${literal(entry, "  ", 2 + head.length)},`)
-    }
+    const entry = operation.contract
+    const head = `${literalKey(operation.key)}: `
+    entries.push(`  ${head}${literal(entry, "  ", 2 + head.length)},`)
     const pending = workpoint?.()
     // oxlint-disable-next-line no-await-in-loop -- yield between independent endpoint encodings
     if (pending) await pending
@@ -169,7 +157,7 @@ async function contract(
   // Typed here, not by openapi-shape/client, so that the module imports nothing:
   // createClient checks it, `version` above all, and infers `Endpoints` from `types`.
   return [
-    "/** Request serialization settings, including schema-derived form defaults. */",
+    "/** Compiled endpoint plans for the Fetch client. */",
     `const endpoints = ${value} as const`,
     "",
     "/** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */",
@@ -181,58 +169,6 @@ async function contract(
     "  readonly endpoints: typeof endpoints",
     `} = { version: ${CONTRACT_VERSION}, endpoints }`,
   ].join("\n")
-}
-
-function contractEntry(operation: Operation): Record<string, unknown> | undefined {
-  // The client sends no body with GET or HEAD, as fetch cannot.
-  const method = operation.key.slice(0, operation.key.indexOf(" ")).toUpperCase()
-  const content = method === "GET" || method === "HEAD" ? [] : (operation.body?.content ?? [])
-  const fallback = defaultMediaType(content.map((media) => media.mediaType))
-  const entry: Record<string, unknown> = {
-    stream: supportsEvents(operation) ? "sse" : undefined,
-    params: fieldEncodings(operation.params),
-    query: fieldEncodings(operation.query) ?? operation.querystring?.encoding,
-    querystring: operation.querystring?.mediaType,
-    headers: fieldEncodings(operation.headers),
-    // Sent when the call names no media type, for any body, where it is not JSON.
-    contentType: fallback !== undefined && !acceptsJson(fallback) ? fallback : undefined,
-    // The label of the JSON the client encodes then, where it is not plain application/json.
-    json:
-      fallback !== undefined && isApplicationJson(fallback) && fallback !== "application/json"
-        ? fallback
-        : undefined,
-    // Keep each form variant's encodings attached to its full media type.
-    bodyEncodings: content.some((media) => media.encoding)
-      ? Object.fromEntries(
-          content.flatMap((media) => (media.encoding ? [[media.mediaType, media.encoding]] : [])),
-        )
-      : undefined,
-  }
-  for (const key of Object.keys(entry)) if (entry[key] === undefined) delete entry[key]
-  return Object.keys(entry).length > 0 ? entry : undefined
-}
-
-/** Match the client's success statuses: exact before range, default only without a success. */
-function supportsEvents(operation: Operation): boolean {
-  const method = operation.key.split(" ", 1)[0].toUpperCase()
-  if (["HEAD", "CONNECT", "TRACE", "TRACK"].includes(method)) return false
-  const responses = new Map(operation.responses.map((response) => [response.status, response]))
-  const hasSuccess = [...responses.keys()].some((status) => /^2(?:\d\d|XX)$/.test(status))
-  for (let status = 200; status < 300; status++) {
-    if (status === 204 || status === 205) continue
-    const response =
-      responses.get(String(status)) ??
-      responses.get("2XX") ??
-      (hasSuccess ? undefined : responses.get("default"))
-    if (response?.content.some((media) => classifyMediaType(media.mediaType) === "events"))
-      return true
-  }
-  return false
-}
-
-function fieldEncodings(fields: Field[]): Record<string, unknown> | undefined {
-  const entries = fields.flatMap((f) => (f.encoding ? [[f.name, f.encoding]] : []))
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined
 }
 
 const WIDTH = 100

@@ -1,13 +1,15 @@
 import type { BuildContext } from "./build-context"
 import { identity } from "./document-nodes"
 import type { DocumentNode } from "./documents"
+import { encodingOf } from "./encoding"
+import type { Encoding } from "./model"
 import { isRecord } from "./object"
 
 /**
  * Record every root alternative before choosing defaults. A missing named property or an opaque
  * schema is unknown evidence, never permission to select a different alternative's content type.
  */
-export function formContentTypes(
+function formContentTypes(
   context: BuildContext,
   node: DocumentNode,
 ): Map<string, string | undefined> {
@@ -54,11 +56,13 @@ function defaultFormContentType(
 ): string | undefined {
   const alternatives = combine(nodes.map((node) => variants(context, node, seen)))
   if (alternatives === undefined || alternatives.length === 0) return undefined
-  const media = new Set(alternatives.map((sources) => contentType(context, sources, item, seen)))
+  const media = new Set(
+    alternatives.map((sources) => inferredContentType(context, sources, item, seen)),
+  )
   return media.size === 1 ? [...media][0] : undefined
 }
 
-function contentType(
+function inferredContentType(
   context: BuildContext,
   sources: DocumentNode[],
   item: boolean,
@@ -175,4 +179,116 @@ function references(context: BuildContext, node: DocumentNode): DocumentNode[] {
     const resolved = context.documents.resolveSchema(ref[keyword], node)
     return resolved.kind === "found" ? [resolved.node] : []
   })
+}
+
+// The styles a form field serializes in, applied to multipart fields too.
+const FIELD_STYLES = new Set(["form", "spaceDelimited", "pipeDelimited", "deepObject"])
+
+/** Explicit encodings and schema-derived defaults for each named form property. */
+export function formEncoding(
+  context: BuildContext,
+  media: DocumentNode,
+  multipart: boolean,
+): Record<string, Encoding> | undefined {
+  if (multipart) unapplied(context, media, ["prefixEncoding", "itemEncoding"])
+  const node = context.documents.child(media, "encoding")
+  const configured = isRecord(node.value) ? node.value : {}
+  const entries = new Map<string, Encoding>()
+  const styled = new Set<string>()
+  for (const [property, value] of Object.entries(configured)) {
+    if (!isRecord(value)) continue
+    if (
+      (!multipart || media.document.version !== "3.0") &&
+      ("style" in value || "explode" in value || "allowReserved" in value)
+    )
+      styled.add(property)
+    const spec = multipart
+      ? partEncoding(context, context.documents.child(node, property), value)
+      : encodingOf(value, "form", true)
+    if (spec) entries.set(property, spec)
+  }
+  for (const [name, contentType] of formContentTypes(
+    context,
+    context.documents.child(media, "schema"),
+  )) {
+    if (styled.has(name) || entries.get(name)?.contentType !== undefined) continue
+    if (contentType === undefined) {
+      context.warn(
+        "ignored-field",
+        `Cannot determine one default contentType for form field "${name}"; specify encoding.contentType or an explicit style`,
+        media,
+        "schema",
+      )
+      continue
+    }
+    entries.set(name, { contentType })
+  }
+  if (!multipart) {
+    for (const spec of entries.values()) if (spec.contentType !== undefined) spec.repeat = true
+  }
+  return entries.size > 0 ? Object.fromEntries(entries) : undefined
+}
+
+/**
+ * A multipart field's encoding, without what FormData cannot send. An explicit style is kept even
+ * at its default, since it overrides `contentType`.
+ */
+function partEncoding(
+  context: BuildContext,
+  at: DocumentNode,
+  value: Record<string, unknown>,
+): Encoding | undefined {
+  const nested = ["encoding", "prefixEncoding", "itemEncoding"]
+  // A Content-Type header "SHALL be ignored" here; the field's contentType sets it.
+  const headers =
+    isRecord(value.headers) &&
+    Object.keys(value.headers).some((name) => name.toLowerCase() !== "content-type")
+  unapplied(context, at, headers ? ["headers", ...nested] : nested)
+  // OpenAPI 3.0 applies style, explode, and allowReserved to URL-encoded forms only.
+  const styled = at.document.version !== "3.0"
+  if (styled && typeof value.style === "string" && !FIELD_STYLES.has(value.style)) {
+    context.warn(
+      "ignored-field",
+      `Multipart style "${value.style}" is not supported; supply an already encoded body`,
+      at,
+      "style",
+    )
+    return undefined
+  }
+  const spec = encodingOf(styled ? value : { contentType: value.contentType }, "form", true, true)
+  if (spec?.contentType !== undefined && !isConcreteMediaType(spec.contentType)) {
+    context.warn(
+      "ignored-field",
+      "Multipart contentType must name one concrete media type for automatic encoding; use a Blob with the selected type or FormData",
+      at,
+      "contentType",
+    )
+    delete spec.contentType
+  }
+  return spec && Object.keys(spec).length > 0 ? spec : undefined
+}
+
+/** Report the fields of `node` among `keys`, which FormData cannot send. */
+function unapplied(context: BuildContext, node: DocumentNode, keys: string[]): void {
+  if (!isRecord(node.value)) return
+  for (const key of keys) {
+    if (key in node.value) {
+      context.warn(
+        "ignored-field",
+        `Multipart ${key} is not applied; supply an already encoded body for this configuration`,
+        node,
+        key,
+      )
+    }
+  }
+}
+
+/** One media type without wildcards, not a list (a comma inside a quoted parameter aside). */
+function isConcreteMediaType(mediaType: string): boolean {
+  const essence = mediaType.split(";", 1)[0]
+  return (
+    essence.includes("/") &&
+    !essence.includes("*") &&
+    !mediaType.replaceAll(/"(?:[^"\\]|\\.)*"/g, "").includes(",")
+  )
 }

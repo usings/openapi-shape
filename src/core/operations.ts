@@ -1,38 +1,20 @@
-import { mergeAnnotations, objectAnnotations, schemaAnnotations } from "./annotations"
+import { objectAnnotations } from "./annotations"
 import type { BuildContext } from "./build-context"
-import { typeOfContent } from "./content"
+import { typeOfContent } from "./content-types"
 import { identity } from "./document-nodes"
 import type { DocumentNode } from "./documents"
-import { formContentTypes } from "./form-encoding"
+import { formEncoding } from "./form-encoding"
 import { classifyMediaType, isFormData } from "./media-types"
-import type { Body, Annotations, Encoding, Field, Media, Operation, Response, Type } from "./model"
-import { UNKNOWN } from "./model"
+import type { Body, Media, Operation, Response } from "./model"
 import { isRecord } from "./object"
-import type { Resolved } from "./references"
+import { ParameterBuilder } from "./parameters"
 import { resolveObject } from "./references"
 import type { SchemaBuilder } from "./schemas"
 import { union } from "./type-algebra"
 
 const METHODS_30 = ["get", "put", "post", "delete", "options", "head", "patch", "trace"]
 const METHODS_32 = [...METHODS_30, "query"]
-const LOCATIONS = new Set(["path", "query", "header", "cookie"])
-// "SHALL be ignored" (all versions, Parameter Object `name`).
-const IGNORED_HEADERS = new Set(["accept", "content-type", "authorization"])
-
 type Kind = "endpoint" | "webhook" | "callback"
-type Location = "path" | "query" | "header" | "cookie"
-/** The locations the client sends parameters in, and so encodes them for. */
-type Sent = Exclude<Location, "cookie">
-
-const DEFAULT_STYLE: Record<Sent, string> = {
-  path: "simple",
-  query: "form",
-  header: "simple",
-}
-// `deepObject` is defined for explode: true only.
-const EXPLODED_BY_DEFAULT = new Set(["form", "cookie", "deepObject"])
-// The styles a form field serializes in, which the client applies to multipart fields too.
-const FIELD_STYLES = new Set(["form", "spaceDelimited", "pipeDelimited", "deepObject"])
 
 export interface Operations {
   endpoints: Operation[]
@@ -73,11 +55,15 @@ export async function buildOperations(
 }
 
 class OperationBuilder {
+  private readonly parameterBuilder: ParameterBuilder
+
   constructor(
     private readonly context: BuildContext,
     private readonly schemas: SchemaBuilder,
     private readonly out: Operations,
-  ) {}
+  ) {
+    this.parameterBuilder = new ParameterBuilder(context, schemas)
+  }
 
   pathItem(
     node: DocumentNode,
@@ -176,11 +162,14 @@ class OperationBuilder {
     const op = node.value
     if (!isRecord(op)) return
     const key = `${keyPrefix}${method} ${label}`
-    const params = this.parameters(shared, this.context.documents.child(node, "parameters"))
+    const params = this.parameterBuilder.parameters(
+      shared,
+      this.context.documents.child(node, "parameters"),
+    )
 
     const operation: Operation = {
       key,
-      params: this.pathParams(params.path, kind, label, node),
+      params: this.parameterBuilder.pathParams(params.path, kind, label, node),
       query: params.query,
       headers: params.header,
       cookies: params.cookie,
@@ -244,205 +233,6 @@ class OperationBuilder {
     }
   }
 
-  private parameters(shared: DocumentNode | undefined, own: DocumentNode) {
-    const byKey = new Map<string, { at: Resolved; value: Record<string, unknown> }>()
-    for (const list of [shared, own]) {
-      if (list === undefined || !Array.isArray(list.value)) continue
-      const local = new Set<string>()
-      list.value.forEach((_, i) => {
-        const at = resolveObject(this.context, this.context.documents.child(list, i))
-        if (at === undefined) return
-        const value = at.node.value
-        if (!isRecord(value) || typeof value.name !== "string" || typeof value.in !== "string") {
-          this.context.warn(
-            "invalid-parameter",
-            'A parameter needs string "name" and "in" fields',
-            at.node,
-          )
-          return
-        }
-        // `in: querystring` is 3.2's, applied in earlier versions too.
-        const location = value.in
-        if (!LOCATIONS.has(location) && location !== "querystring") {
-          this.context.warn(
-            "invalid-parameter",
-            `Unknown parameter location "${location}"`,
-            at.node,
-            "in",
-          )
-          return
-        }
-        if (location === "header" && IGNORED_HEADERS.has(value.name.toLowerCase())) return
-        // Header names are case-insensitive; other parameter names are not.
-        const key = `${location}:${location === "header" ? value.name.toLowerCase() : value.name}`
-        if (local.has(key)) {
-          this.context.warn(
-            "invalid-parameter",
-            `Duplicate ${location} parameter "${value.name}"`,
-            at.node,
-          )
-        }
-        local.add(key)
-        byKey.set(key, { at, value })
-      })
-    }
-
-    const out = {
-      path: [] as Field[],
-      query: [] as Field[],
-      header: [] as Field[],
-      cookie: [] as Field[],
-      querystring: undefined as Operation["querystring"],
-    }
-    for (const { at, value } of byKey.values()) {
-      const field = this.parameterField(at, value)
-      const location = value.in as string
-      if (location === "querystring") {
-        if (out.querystring) {
-          this.context.warn(
-            "invalid-parameter",
-            "Only one querystring parameter is allowed",
-            at.node,
-          )
-          continue
-        }
-        out.querystring = { type: field.type, required: field.required, location: field.location }
-        if (field.annotations) out.querystring.annotations = field.annotations
-        const [mediaType] = isRecord(value.content) ? Object.keys(value.content) : []
-        if (mediaType !== undefined && classifyMediaType(mediaType) !== "form") {
-          out.querystring.mediaType = mediaType
-        } else if (mediaType !== undefined) {
-          // Form fields serialize like query parameters, by their Encoding Objects.
-          const media = resolveObject(
-            this.context,
-            this.context.documents.child(at.node, "content", mediaType),
-          )
-          const encoding = media && this.formEncoding(media.node, false)
-          if (encoding) out.querystring.encoding = encoding
-        }
-      } else {
-        // Cookies are the runtime's to send, so their encodings go unused.
-        const encoding =
-          location === "cookie" ? undefined : encodingOf(value, DEFAULT_STYLE[location as Sent])
-        if (encoding) field.encoding = encoding
-        out[location as Location].push(field)
-      }
-    }
-    if (out.querystring && out.query.length > 0) {
-      this.context.warn(
-        "invalid-parameter",
-        "A querystring parameter cannot be combined with query parameters; the query parameters are ignored",
-        own,
-      )
-      out.query = []
-    }
-    return out
-  }
-
-  private parameterField(at: Resolved, value: Record<string, unknown>): Field {
-    const node = at.node
-    const field: Field = {
-      name: value.name as string,
-      type: this.valueType(node, value, "parameter"),
-      required: value.in === "path" || value.required === true,
-      location: this.context.documents.locate(node.document, node.pointer),
-    }
-    if (value.in === "path" && value.required !== true) {
-      this.context.warn(
-        "invalid-parameter",
-        'Path parameters must have "required: true"; treated as required',
-        node,
-      )
-    }
-    const annotations = this.valueAnnotations(at, value)
-    if (annotations) field.annotations = annotations
-    return field
-  }
-
-  /** Type of a Parameter or Header Object: its `schema`, or its single `content` entry. */
-  private valueType(node: DocumentNode, value: Record<string, unknown>, what: string): Type {
-    const hasSchema = "schema" in value
-    const content = isRecord(value.content) ? Object.keys(value.content) : []
-    if (hasSchema && content.length > 0) {
-      this.context.warn(
-        "invalid-parameter",
-        `A ${what} cannot have both "schema" and "content"; "schema" is used`,
-        node,
-      )
-    }
-    if (hasSchema) return this.schemas.type(this.context.documents.child(node, "schema"))
-    if (content.length > 0) {
-      if (content.length > 1) {
-        this.context.warn(
-          "invalid-parameter",
-          `A ${what}'s "content" must have exactly one entry; the first is used`,
-          node,
-          "content",
-        )
-      }
-      const media = resolveObject(
-        this.context,
-        this.context.documents.child(node, "content", content[0]),
-      )
-      return media === undefined
-        ? UNKNOWN
-        : // The 3.2 querystring is the whole query, encoded like a request body.
-          typeOfContent(this.schemas, media.node, content[0], value.in !== "querystring")
-    }
-    this.context.warn("invalid-parameter", `A ${what} needs "schema" or "content"`, node)
-    return UNKNOWN
-  }
-
-  private valueAnnotations(at: Resolved, value: Record<string, unknown>): Annotations | undefined {
-    const own = objectAnnotations({
-      ...value,
-      summary: undefined,
-      description: at.description ?? value.description,
-    })
-    return mergeAnnotations(
-      own,
-      "schema" in value
-        ? schemaAnnotations(this.context.documents.child(at.node, "schema"))
-        : undefined,
-    )
-  }
-
-  /** Path parameters must match the path template one-to-one (endpoints only). */
-  private pathParams(declared: Field[], kind: Kind, label: string, node: DocumentNode): Field[] {
-    if (kind === "callback") return declared
-    if (kind === "webhook") {
-      if (declared.length > 0) {
-        this.context.warn(
-          "path-parameter-mismatch",
-          "Webhooks have no path template; path parameters are ignored",
-          node,
-        )
-      }
-      return []
-    }
-    const template = [...label.matchAll(/\{([^{}]+)\}/g)].map((m) => m[1])
-    const out = declared.filter((field) => {
-      if (template.includes(field.name)) return true
-      this.context.warn(
-        "path-parameter-mismatch",
-        `Path parameter "${field.name}" does not appear in ${label} and is ignored`,
-        node,
-      )
-      return false
-    })
-    for (const name of template) {
-      if (out.some((field) => field.name === name)) continue
-      this.context.warn(
-        "path-parameter-mismatch",
-        `{${name}} in ${label} has no path parameter; it is typed as string`,
-        node,
-      )
-      out.push({ name, type: { kind: "string" }, required: true })
-    }
-    // Template order reads naturally and matches the URL.
-    return out.toSorted((a, b) => template.indexOf(a.name) - template.indexOf(b.name))
-  }
-
   private body(node: DocumentNode): Body | undefined {
     const resolved = resolveObject(this.context, node)
     if (resolved === undefined || !isRecord(resolved.node.value)) return undefined
@@ -470,105 +260,11 @@ class OperationBuilder {
       // The client encodes multipart fields only for requests, and only named ones (form-data).
       const multipart = request && isFormData(mediaType)
       if (multipart || (request && classifyMediaType(mediaType) === "form")) {
-        const encoding = this.formEncoding(media.node, multipart)
+        const encoding = formEncoding(this.context, media.node, multipart)
         if (encoding) out.encoding = encoding
       }
       return [out]
     })
-  }
-
-  /** Explicit encodings and schema-derived defaults for each named form property. */
-  private formEncoding(
-    media: DocumentNode,
-    multipart: boolean,
-  ): Record<string, Encoding> | undefined {
-    if (multipart) this.unapplied(media, ["prefixEncoding", "itemEncoding"])
-    const node = this.context.documents.child(media, "encoding")
-    const configured = isRecord(node.value) ? node.value : {}
-    const entries = new Map<string, Encoding>()
-    const styled = new Set<string>()
-    for (const [property, value] of Object.entries(configured)) {
-      if (!isRecord(value)) continue
-      if (
-        (!multipart || media.document.version !== "3.0") &&
-        ("style" in value || "explode" in value || "allowReserved" in value)
-      )
-        styled.add(property)
-      const spec = multipart
-        ? this.partEncoding(this.context.documents.child(node, property), value)
-        : encodingOf(value, "form", true)
-      if (spec) entries.set(property, spec)
-    }
-    for (const [name, contentType] of formContentTypes(
-      this.context,
-      this.context.documents.child(media, "schema"),
-    )) {
-      if (styled.has(name) || entries.get(name)?.contentType !== undefined) continue
-      if (contentType === undefined) {
-        this.context.warn(
-          "ignored-field",
-          `Cannot determine one default contentType for form field "${name}"; specify encoding.contentType or an explicit style`,
-          media,
-          "schema",
-        )
-        continue
-      }
-      entries.set(name, { contentType })
-    }
-    if (!multipart) {
-      for (const spec of entries.values()) if (spec.contentType !== undefined) spec.repeat = true
-    }
-    return entries.size > 0 ? Object.fromEntries(entries) : undefined
-  }
-
-  /**
-   * A multipart field's encoding, without what FormData cannot send. An explicit style is kept even
-   * at its default, since it overrides `contentType`.
-   */
-  private partEncoding(at: DocumentNode, value: Record<string, unknown>): Encoding | undefined {
-    const nested = ["encoding", "prefixEncoding", "itemEncoding"]
-    // A Content-Type header "SHALL be ignored" here; the field's contentType sets it.
-    const headers =
-      isRecord(value.headers) &&
-      Object.keys(value.headers).some((name) => name.toLowerCase() !== "content-type")
-    this.unapplied(at, headers ? ["headers", ...nested] : nested)
-    // OpenAPI 3.0 applies style, explode, and allowReserved to URL-encoded forms only.
-    const styled = at.document.version !== "3.0"
-    if (styled && typeof value.style === "string" && !FIELD_STYLES.has(value.style)) {
-      this.context.warn(
-        "ignored-field",
-        `Multipart style "${value.style}" is not supported; supply an already encoded body`,
-        at,
-        "style",
-      )
-      return undefined
-    }
-    const spec = encodingOf(styled ? value : { contentType: value.contentType }, "form", true, true)
-    if (spec?.contentType !== undefined && !isConcreteMediaType(spec.contentType)) {
-      this.context.warn(
-        "ignored-field",
-        "Multipart contentType must name one concrete media type for automatic encoding; use a Blob with the selected type or FormData",
-        at,
-        "contentType",
-      )
-      delete spec.contentType
-    }
-    return spec && Object.keys(spec).length > 0 ? spec : undefined
-  }
-
-  /** Report the fields of `node` among `keys`, which FormData cannot send. */
-  private unapplied(node: DocumentNode, keys: string[]): void {
-    if (!isRecord(node.value)) return
-    for (const key of keys) {
-      if (key in node.value) {
-        this.context.warn(
-          "ignored-field",
-          `Multipart ${key} is not applied; supply an already encoded body for this configuration`,
-          node,
-          key,
-        )
-      }
-    }
   }
 
   private responses(node: DocumentNode): Response[] {
@@ -583,7 +279,9 @@ class OperationBuilder {
       const response: Response = {
         status,
         content: this.content(this.context.documents.child(resolved.node, "content")),
-        headers: this.responseHeaders(this.context.documents.child(resolved.node, "headers")),
+        headers: this.parameterBuilder.responseHeaders(
+          this.context.documents.child(resolved.node, "headers"),
+        ),
       }
       const annotations = objectAnnotations({
         summary: resolved.summary ?? value.summary,
@@ -617,77 +315,4 @@ class OperationBuilder {
     )
     return key
   }
-
-  private responseHeaders(node: DocumentNode): Field[] {
-    if (!isRecord(node.value)) return []
-    const fields: Field[] = []
-    for (const name of Object.keys(node.value)) {
-      // "If a response header is defined with the name "Content-Type", it SHALL be ignored."
-      if (name.toLowerCase() === "content-type") continue
-      const at = resolveObject(this.context, this.context.documents.child(node, name))
-      if (at === undefined || !isRecord(at.node.value)) continue
-      const value = at.node.value
-      const field: Field = {
-        name,
-        type: this.valueType(at.node, value, "header"),
-        required: value.required === true,
-      }
-      const annotations = this.valueAnnotations(at, value)
-      if (annotations) field.annotations = annotations
-      fields.push(field)
-    }
-    return fields
-  }
-}
-
-/** One media type without wildcards, not a list (a comma inside a quoted parameter aside). */
-function isConcreteMediaType(mediaType: string): boolean {
-  const essence = mediaType.split(";", 1)[0]
-  return (
-    essence.includes("/") &&
-    !essence.includes("*") &&
-    !mediaType.replaceAll(/"(?:[^"\\]|\\.)*"/g, "").includes(",")
-  )
-}
-
-/**
- * A parameter's or Encoding Object's serialization, where it differs from the default: then always
- * with its style and explode, so it reads on its own.
- */
-function encodingOf(
-  value: Record<string, unknown>,
-  defaultStyle: string,
-  /** For an Encoding Object of a form body. */
-  field = false,
-  multipart = false,
-): Encoding | undefined {
-  // A parameter with `content` is serialized as that media type; style does not apply.
-  if (!field && isRecord(value.content)) {
-    const [mediaType] = Object.keys(value.content)
-    return mediaType === undefined ? undefined : { contentType: mediaType }
-  }
-  const out: Encoding = {}
-  const style = typeof value.style === "string" ? value.style : defaultStyle
-  const explode =
-    typeof value.explode === "boolean" ? value.explode : EXPLODED_BY_DEFAULT.has(style)
-  const allowReserved = value.allowReserved === true
-  if (
-    (multipart && ("style" in value || "explode" in value || "allowReserved" in value)) ||
-    style !== defaultStyle ||
-    explode !== EXPLODED_BY_DEFAULT.has(defaultStyle) ||
-    allowReserved
-  ) {
-    out.style = style
-    out.explode = explode
-    if (allowReserved) out.allowReserved = true
-  }
-  // A form field's contentType applies unless style, explode, or allowReserved says otherwise.
-  if (
-    field &&
-    typeof value.contentType === "string" &&
-    !("style" in value || "explode" in value || "allowReserved" in value)
-  ) {
-    out.contentType = value.contentType
-  }
-  return Object.keys(out).length > 0 ? out : undefined
 }

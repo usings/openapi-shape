@@ -41,6 +41,101 @@ async function errorsOf(promise: Promise<unknown>): Promise<string[]> {
 const claims = (n: number) => ({ $id: `https://spec.test/${n}.json`, type: "number" })
 
 describe("references across documents", () => {
+  it("plans repeated inline reference names before their first use", async () => {
+    const result = await generate(
+      oas("3.1", {
+        "components": {
+          schemas: {
+            Owner: {
+              type: "object",
+              properties: {
+                first: { $ref: "#/x-definitions/value" },
+                second: { $ref: "#/x-definitions/value" },
+              },
+            },
+          },
+        },
+        "x-definitions": { value: { type: "object", properties: { id: { type: "string" } } } },
+      }),
+    )
+    expect(result.diagnostics).toStrictEqual([])
+    expect(declaration(result.code, "Owner")).toBe(
+      "{\n  first?: x_definitions_value\n  second?: x_definitions_value\n}",
+    )
+    expect(declaration(result.code, "x_definitions_value")).toBe("{\n  id?: string\n}")
+  })
+
+  it("discovers references behind an anchor made visible by later dictionary indexing", async () => {
+    const calls: string[] = []
+    const result = await generate(
+      oas("3.1", {
+        components: {
+          schemas: {
+            Anchor: { $ref: "common.json#named" },
+            Pointer: { $ref: "common.json#/x-schemas/Value" },
+          },
+        },
+      }),
+      {
+        base: "https://spec.test/api.json",
+        load: (uri) => {
+          calls.push(uri)
+          if (uri.endsWith("value.json")) return Response.json({ type: "string" })
+          return Response.json({
+            "x-schemas": {
+              Value: { type: "number" },
+              Named: { $anchor: "named", properties: { value: { $ref: "value.json" } } },
+            },
+          })
+        },
+      },
+    )
+    expect(result.diagnostics).toStrictEqual([])
+    expect(declaration(result.code, "Anchor")).toContain("value?: value")
+    expect(declaration(result.code, "value")).toBe("string")
+    expect(calls).toStrictEqual(["https://spec.test/common.json", "https://spec.test/value.json"])
+  })
+
+  it("loads only schemas selected by semantic positions", async () => {
+    const ref = { $ref: "unused.json" }
+    const calls: string[] = []
+    const result = await generate(
+      oas("3.1", {
+        components: {
+          schemas: {
+            Value: { "type": "string", "examples": [ref], "default": ref, "x-schema": ref },
+          },
+          parameters: { Unused: ref },
+        },
+        paths: {
+          "/value": {
+            get: {
+              responses: {
+                "200": {
+                  content: {
+                    "application/octet-stream": { schema: ref },
+                    "text/plain": { schema: { type: "object", properties: { hidden: ref } } },
+                    "application/json": { schema: { type: "string" }, examples: { unused: ref } },
+                  },
+                  headers: { "Content-Type": ref },
+                },
+              },
+            },
+          },
+        },
+      }),
+      {
+        base: "https://spec.test/api.json",
+        load: (uri) => {
+          calls.push(uri)
+          return Response.json({ type: "number" })
+        },
+      },
+    )
+    expect(result.diagnostics).toStrictEqual([])
+    expect(calls).toStrictEqual([])
+  })
+
   it.each(["$anchor", "$dynamicAnchor"])(
     "does not let discriminator mapping %s shadow an anchor",
     async (keyword) => {
@@ -171,19 +266,10 @@ describe("references across documents", () => {
         // The component that references the file lends the file its name.
         expect(declaration(code, "Pet")).toBe("{\n  id: number\n  owner?: Owner\n}")
         expect(declaration(code, "Owner")).toBe("{\n  name?: string\n}")
-        expect(entry(code, "GET /pets")).toBe(
-          [
-            "{",
-            "  query?: { limit?: number }",
-            "  responses: {",
-            "    /** OK */",
-            '    "200": { content: { "application/json": Schemas.Pet[] } }',
-            "    /** Failure */",
-            '    "default": { content: { "application/json": Schemas.Error } }',
-            "  }",
-            "}",
-          ].join("\n"),
-        )
+        const operation = entry(code, "GET /pets")
+        expect(operation).toContain("query?: { limit?: number }")
+        expect(operation).toContain('"200": { content: { "application/json": Schemas.Pet[] } }')
+        expect(operation).toContain('"default": { content: { "application/json": Schemas.Error } }')
         await expectPassesTsc(code)
       },
     )

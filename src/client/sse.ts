@@ -12,6 +12,13 @@ export interface EventState {
   retry: number
 }
 
+/** Only a failed body read is eligible for reconnect; parser errors keep their own identity. */
+export class StreamReadError extends Error {
+  constructor(override readonly cause: unknown) {
+    super("Failed to read the SSE response", { cause })
+  }
+}
+
 /**
  * Parse incrementally, keeping at most the current chunk, line, and event in memory.
  *
@@ -39,8 +46,13 @@ export async function* readEvents(
   try {
     while (true) {
       signal.throwIfAborted()
-      // oxlint-disable-next-line no-await-in-loop -- stream reads are ordered
-      const chunk = await reader.read()
+      let chunk: Awaited<ReturnType<typeof reader.read>>
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- stream reads are ordered
+        chunk = await reader.read()
+      } catch (error) {
+        throw new StreamReadError(error)
+      }
       signal.throwIfAborted()
       if (chunk.done) return // An unterminated event is never dispatched.
       const text = decoder.decode(chunk.value, { stream: true })

@@ -1,6 +1,8 @@
+import type { EndpointContract } from "../shared/contract"
+
 /**
- * The model: every operation and named type of an OpenAPI Description, with all OpenAPI and JSON
- * Schema semantics already applied. Renderers only choose syntax.
+ * The resolved schema and operation graph. Compilation projects schemas for each exchange and
+ * records endpoint serialization settings before rendering.
  */
 export interface Model {
   info: Info
@@ -11,9 +13,18 @@ export interface Model {
   declarations: Declaration[]
 }
 
+/** Projected model ready for TypeScript output. */
+export interface OutputModel extends Omit<Model, "endpoints"> {
+  endpoints: OutputOperation[]
+}
+
+export interface OutputOperation extends Operation {
+  contract: EndpointContract
+}
+
 /** How a value is serialized, where it differs from OpenAPI's default for its location. */
 export interface Encoding {
-  /** Apply contentType separately to array items in a named form field (contract version 2). */
+  /** Apply contentType separately to array items in a named form field. */
   repeat?: boolean
   style?: string
   explode?: boolean
@@ -103,6 +114,10 @@ export interface Field {
 }
 
 export interface Declaration {
+  /** Source location for diagnostics during output projection; never rendered. */
+  location?: string
+  /** The reference graph has finished defining this declaration. */
+  complete?: true
   /** Identifier inside the `Schemas` namespace. */
   name: string
   /** Name of the request-side variant, when it differs (see {@link Side}). */

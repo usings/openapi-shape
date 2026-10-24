@@ -1,20 +1,21 @@
+import { streamFormat } from "../shared/media"
 import { decodeBody } from "./body"
 import type { Contract, EndpointContract } from "./contract"
 import { CONTRACT_VERSION } from "./contract"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest } from "./request"
-import type { StreamOptions } from "./stream"
+import type { StreamOptions, StreamSender } from "./stream"
 import { stream as subscribe } from "./stream"
 import type {
   Endpoint,
   EndpointArgs,
   EndpointResult,
-  MethodOf,
-  OperationOf,
   ResponseOf,
   ResultEndpoint,
   StreamArgs,
   StreamEndpoint,
+  StreamMedia,
+  EndpointStreamItem,
 } from "./types"
 
 export type { Contract } from "./contract"
@@ -23,13 +24,15 @@ export type {
   EndpointArgs,
   EndpointData,
   EndpointMessage,
+  EndpointStreamItem,
   ResultEndpoint,
   StreamArgs,
   StreamEndpoint,
+  StreamMedia,
   TypedResponse,
 } from "./types"
-export type { StreamMessage, StreamOptions } from "./stream"
-export { StreamResponseError } from "./stream"
+export type { StreamMessage, StreamOptions, StreamRetryOptions } from "./stream"
+export { StreamParseError, StreamResponseError } from "./stream"
 
 /**
  * Defaults for every request: any `RequestInit` field but `signal`, which every request would share
@@ -68,9 +71,7 @@ export interface Client<Endpoints> {
   fetch<K extends string>(
     endpoint: K & Endpoint<Endpoints>,
     ...init: EndpointArgs<Endpoints, K & Endpoint<Endpoints>>
-  ): Promise<
-    ResponseOf<OperationOf<Endpoints, K & Endpoint<Endpoints>>, MethodOf<K & Endpoint<Endpoints>>>
-  >
+  ): Promise<ResponseOf<Endpoints, K & Endpoint<Endpoints>>>
   /**
    * Send the request and read its body, decoded: `data` for a 2xx status, `error` for any other
    * (`null` when there is none), never both; `status` narrows them by status.
@@ -79,11 +80,14 @@ export interface Client<Endpoints> {
     endpoint: K & ResultEndpoint<Endpoints>,
     ...init: EndpointArgs<Endpoints, K & ResultEndpoint<Endpoints>>
   ): Promise<EndpointResult<Endpoints, K & ResultEndpoint<Endpoints>>>
-  /** Consume SSE events until EOF or cancellation; reconnect on transient failures. */
-  stream<K extends string>(
-    endpoint: K & StreamEndpoint<Endpoints>,
-    ...init: StreamArgs<Endpoints, K & StreamEndpoint<Endpoints>>
-  ): Promise<void>
+  /** Read typed SSE messages or JSON records on demand; SSE may reconnect within the same stream. */
+  stream<
+    K extends StreamEndpoint<Endpoints>,
+    const M extends StreamMedia<Endpoints, K> = StreamMedia<Endpoints, K>,
+  >(
+    endpoint: K,
+    ...init: StreamArgs<Endpoints, K, M>
+  ): ReadableStream<EndpointStreamItem<Endpoints, K, M>>
 }
 
 /** Create a typed `fetch` from a generated module's `contract`. */
@@ -94,11 +98,27 @@ export function createClient<Endpoints>(
   if (
     contract?.version !== CONTRACT_VERSION ||
     contract.endpoints === null ||
-    typeof contract.endpoints !== "object"
+    typeof contract.endpoints !== "object" ||
+    Array.isArray(contract.endpoints)
   ) {
-    throw new TypeError(
-      `createClient takes a generated contract of format ${CONTRACT_VERSION} as its first argument; regenerate the module with this version of openapi-shape`,
+    throw new TypeError(`regenerate the module with this version of openapi-shape`)
+  }
+  for (const [endpoint, plan] of Object.entries(contract.endpoints)) {
+    if (
+      plan === null ||
+      typeof plan !== "object" ||
+      Array.isArray(plan) ||
+      !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+ \//.test(endpoint) ||
+      ("stream" in plan &&
+        plan.stream !== undefined &&
+        (!Array.isArray(plan.stream) ||
+          plan.stream.length === 0 ||
+          ![...plan.stream].every(
+            (media: unknown) => typeof media === "string" && streamFormat(media) !== undefined,
+          ) ||
+          new Set(plan.stream).size !== plan.stream.length))
     )
+      throw new TypeError(`Invalid plan for endpoint "${endpoint}"; regenerate the contract`)
   }
   const { baseUrl, middleware = [], fetch: transport, headers, ...init } = options
   const prefix = baseUrl === undefined ? "" : String(baseUrl).replace(/\/+$/, "")
@@ -114,10 +134,23 @@ export function createClient<Endpoints>(
   // Each step is async, so that what throws inside rejects the `next` around it.
   const transmit: Fetcher = async (request) => await (transport ?? globalThis.fetch)(request)
   // The first middleware is the outermost.
-  const send = middleware.reduceRight<Fetcher>(
-    (next, wrap) => async (request) => await wrap(request, next),
-    transmit,
-  )
+  const through = (sender: Fetcher): Fetcher =>
+    middleware.reduceRight<Fetcher>(
+      (next, wrap) => async (request) => await wrap(request, next),
+      sender,
+    )
+  const send = through(transmit)
+  const sendStream: StreamSender = (request, attempt) =>
+    through(async (outgoing) => {
+      try {
+        const response = await transmit(outgoing)
+        attempt.received(response)
+        return response
+      } catch (error) {
+        attempt.failed(error)
+        throw error
+      }
+    })(request)
 
   // Async, so that a request that cannot be built rejects.
   const fetch = async (endpoint: string, call: CallInit = {}): Promise<Response> =>
@@ -125,7 +158,7 @@ export function createClient<Endpoints>(
 
   // The body is always read, so that the connection is free again.
   const result = async (endpoint: string, call: CallInit = {}): Promise<unknown> => {
-    if (defaults.endpoints[endpoint]?.stream === "sse") {
+    if (Object.hasOwn(defaults.endpoints, endpoint) && defaults.endpoints[endpoint]?.stream) {
       throw new TypeError(`Endpoint "${endpoint}" requires api.stream() or api.fetch()`)
     }
     const request = buildRequest(endpoint, call, defaults)
@@ -138,9 +171,8 @@ export function createClient<Endpoints>(
       : { data: undefined, error: body ?? null, status, response }
   }
 
-  const stream = async (endpoint: string, call: CallInit & StreamOptions = {}): Promise<void> => {
-    await subscribe(endpoint, call, defaults, send)
-  }
+  const stream = (endpoint: string, call: CallInit & StreamOptions = {}): ReadableStream<unknown> =>
+    subscribe(endpoint, call, defaults, sendStream)
 
   return { fetch, result, stream } as unknown as Client<Endpoints>
 }

@@ -19,7 +19,6 @@ export type DiagnosticCode =
   | "discriminator-mismatch"
   | "renamed-schema"
   | "schema-precision-loss"
-  | "unsupported-request-encoding"
   // warnings: something not valid
   | "invalid-schema"
   | "invalid-parameter"

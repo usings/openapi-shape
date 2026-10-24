@@ -4,7 +4,7 @@ The generator supports OpenAPI 3.0, 3.1, and 3.2. This page describes how descri
 
 ## Support boundaries
 
-OpenAPI and JSON Schema define the contract. The generator produces TypeScript types and runtime client settings, not runtime validation or proof of authenticity.
+OpenAPI and JSON Schema define the contract. The generator produces TypeScript types and runtime serialization settings, not runtime validation or proof of authenticity.
 
 The types follow the supported features, [compatibility rules](#following-the-real-api), and [approximations](#approximations) on this page. Incorrect types within that scope are generator defects. Use the source contract for validation; successful generation does not certify that the document fully conforms to either specification.
 
@@ -19,7 +19,7 @@ The types follow the supported features, [compatibility rules](#following-the-re
 
 ### References
 
-References resolve against the document location, OpenAPI 3.2's `$self`, or the nearest schema `$id` in 3.1+. Targets may use JSON Pointers or `$anchor` names in any document. If multiple documents claim the same URI, the first referenced document keeps it, along with the anchors under that URI.
+The generator discovers semantically reachable references before compiling types. Examples, extensions, and unused non-schema components do not trigger document loading. References resolve against the document location, OpenAPI 3.2's `$self`, or the nearest schema `$id` in 3.1+. Targets may use JSON Pointers or `$anchor` names in any document. If multiple documents claim the same URI, the first referenced document keeps it, along with the anchors under that URI.
 
 An `$id` or anchor inside an extension (`x-…`), instance data (`example`, `examples`, `default`, `const`, `enum`), a Link, or discriminator metadata is ignored: it claims no URI, and references inside it resolve against the base outside it. Discriminator mapping keys are payload values, including keys named `$id`, `$anchor`, or `$dynamicAnchor`.
 
@@ -49,34 +49,43 @@ Each `patternProperties` match, including compiling its pattern, has a 100 ms ex
 - **Parameters:** Path Item and operation parameters are merged by name and location; the operation wins on conflicts. Header names are case-insensitive. Parameter types come from `schema` or the single `content` entry.
 - **Ignored headers:** header parameters named `Accept`, `Content-Type`, or `Authorization`, and response headers named `Content-Type`, are ignored as required by OpenAPI.
 - **Path templates:** undeclared template variables become `string` parameters. Parameters absent from the template are dropped. Both cases produce diagnostics.
-- **Request bodies:** bodies on `GET`, `HEAD`, and `DELETE` remain in `Endpoints`. The client cannot send a body with `GET` or `HEAD` because `fetch` does not allow it. Its callable endpoint types also exclude `CONNECT`, `TRACE`, and `TRACK`; those operations can still appear in generated types.
+- **Fetch capabilities:** `Endpoints` excludes `CONNECT`, `TRACE`, and `TRACK`. Client call arguments exclude bodies on `GET` and `HEAD`; `DELETE` bodies are supported. Incoming webhook and callback descriptions retain their declared bodies.
 - **Servers:** root servers are listed in the module header. Path and operation servers produce an `ignored-field` warning. Configure a separate client for operations that need a different `baseUrl`.
 
 ## Media types
 
-Each request or response `content` entry maps its media type to a TypeScript type in `Endpoints`. These types describe the content for clients and parsers; [client methods](./client.md#calls) determine how it is read at runtime.
+The generated [endpoint types](./output.md#operations) retain media-keyed schemas. The client derives request inputs and decoded response types according to the media type; runtime serialization settings record media defaults and form encodings.
 
-| Media type                                                                                        | Type                                                            |
-| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| JSON: `…/json`, `…+json`, and the wildcards `*/*` and `application/*`                             | Its schema (`unknown` without one)                              |
-| `application/x-www-form-urlencoded`, `multipart/*`                                                | Its schema                                                      |
-| Sequences with `itemSchema`: `text/event-stream` and JSON sequences                               | An array of its items                                           |
-| JSON sequences: `application/jsonl`, `application/x-ndjson`, `application/json-seq`, `…+json-seq` | An array of `itemSchema` items, or of `schema` read as the item |
-| Other `text/*`, including `text/event-stream` without `itemSchema`                                | `string`, or the schema's type when it says which strings       |
-| The range `text/*`, which also covers JSON such as `text/json`                                    | The schema's type when it says which strings, else `unknown`    |
-| Anything else: binary, XML, YAML, vendor types                                                    | `Blob`                                                          |
+| Media type                               | Structured request input                                    | Decoded response                |
+| ---------------------------------------- | ----------------------------------------------------------- | ------------------------------- |
+| JSON: `…/json`, `…+json`                 | JSON projection of the schema                               | JSON projection of the schema   |
+| `application/x-www-form-urlencoded`      | Form object or encoded string                               | `Blob`                          |
+| `multipart/form-data`                    | Object with file-part projections                           | `Blob`                          |
+| Other `text/*`                           | String, narrowed to declared string literals where possible | String, with the same narrowing |
+| Binary, XML, YAML, other multipart types | Ready body or encoded string                                | `Blob`                          |
+
+Without a schema, JSON values are `unknown`. `application/*` and `*/*` allow JSON encoding; their decoded types also include `Blob`, and `*/*` includes text. `text/*` can include JSON such as `text/json`, so its decoded type is `unknown` unless the declaration narrows it to strings. A ready body bypasses structured encoding; see [request bodies](./client.md#request-bodies).
 
 ### Sequential content
 
-For SSE and JSON sequences, `itemSchema` describes one item and the generated content type is an array of those items. The array represents the sequence's type; a client can process each item as it arrives. For JSON sequences without `itemSchema`, the generator reads `schema` as the item schema.
+`api.stream()` returns a native `ReadableStream` for effective successful responses explicitly declaring `text/event-stream`, `application/jsonl`, or `application/x-ndjson`. Media recognition ignores case and parameters; the call's `accept` selects an exact full declaration when more than one is supported. Wildcards and error-only declarations do not qualify. See [streams](./client.md#streams) for demand, cancellation, and SSE reconnection.
 
-An SSE item is the parsed event: `data`, `event`, and `id` are strings, and `retry` is a number. JSON embedded in `data` can be described with `contentMediaType` and `contentSchema`, but the field remains a string. `api.stream()` infers the standard event fields from `itemSchema`; application code handles any further decoding. See [SSE events](./client.md#events).
+SSE messages have string `data`, `event`, and `id`, plus optional numeric `retry`. `itemSchema` narrows these standard fields; custom properties are not added by the parser. Without `itemSchema`, messages use `StreamMessage`. JSON in `data` remains text, even when described with `contentMediaType` and `contentSchema`.
+
+JSON line streams parse each UTF-8 line as one JSON value, including scalars and `null`. Their `schema` describes the complete sequence content: an array schema with item type `T` generates `T[]`, and `EndpointStreamItem` extracts `T`. `itemSchema` instead describes one item and takes precedence, so an array-valued `itemSchema` generates nested arrays and streams an array per record. References follow the same rules. Without either field, content is `unknown[]` and each stream item is `unknown`. A scalar `schema` is a whole-content schema and yields an `unknown` stream item; it is never implicitly wrapped as an item schema. Runtime parsing does not validate these types.
+
+These sequence schema rules also apply to `application/json-seq` and `…+json-seq`, which have no automatic stream decoder. Use `fetch` to process their response bytes; `result` reads them as a `Blob`. All sequential request media still require encoded text or a ready body: the client does not encode arrays into JSON lines, JSON sequences, or SSE.
 
 ### Binary content
 
-For a `type: string` schema without `const` or `enum`, `format: binary` or a binary `contentMediaType` without `contentEncoding` produces `Blob`. Legacy `type: file` also produces `Blob`. In multipart content, these values represent file parts. A non-JSON text media type instead projects them as strings, and the range `text/*` as `unknown`. A binary media type itself produces `Blob`, even without a schema.
+A non-literal `type: string` with `format: binary` or a binary `contentMediaType` without `contentEncoding` records a binary annotation. Legacy `type: file` is handled the same way. Projection depends on where the value is sent or read:
 
-Encoding Objects do not change generated types. See [request bodies](./client.md#request-bodies) for how the client encodes them.
+- Named JSON schemas, JSON bodies, parameters, and form text fields use strings. No base64 conversion is inferred.
+- Multipart file parts and arrays of file parts use `Blob`. Objects and nested arrays inside parts are encoded as JSON and use strings for binary annotations. An explicit serialization style also selects the text projection.
+- Binary response media decode to `Blob` regardless of schema annotations.
+- A complete request body can be supplied already encoded as a `Blob`, buffer, `FormData`, or other supported ready body.
+
+Encoding Objects choose the multipart field projection as well as its serialization. See [form field defaults](./client.md#form-field-defaults).
 
 ## Schemas
 
@@ -86,7 +95,7 @@ Encoding Objects do not change generated types. See [request bodies](./client.md
 | `false`, `not: {}`, `not: true`, empty `enum` | `never`                                                                                                                                        |
 | `type`, including type arrays                 | `string`, `number` (also for `integer`), `boolean`, `null`, arrays, objects, or their union                                                    |
 | `const`, `enum`                               | Literal types, including object and array literals; values outside `type` are dropped                                                          |
-| `format`                                      | The original type plus `@format`; binary string schemas produce `Blob` as described above; `byte` remains text                                 |
+| `format`                                      | The original type plus `@format`; binary annotations are projected by transport as described above; `byte` remains text                        |
 | `items`, `prefixItems`                        | `T[]` or a tuple. Elements beyond `minItems` are optional; `items: false` closes the tuple. Recursive tuples use labels when needed to compile |
 | `properties`, `required`                      | Required or optional properties. Undeclared required properties use `patternProperties`, `additionalProperties`, or `unknown`                  |
 | `additionalProperties`, `patternProperties`   | An index signature, widened to admit the declared properties                                                                                   |
@@ -117,19 +126,19 @@ Some descriptions express clear API behavior in ways their declared OpenAPI vers
 
 ### Binary and nullable values
 
-- **Binary values:** legacy `type: file` and strings declared as raw bytes become `Blob`, so upload and download types represent files. In 3.1+, the specification normally describes raw bytes without a `type`.
+- **Binary annotations:** legacy `type: file` and binary string annotations select file-part types in multipart requests. They remain strings in JSON and text projections.
 - **Nullability:** `nullable: true` admits `null` wherever it appears, including beside `$ref`, `enum`, and composition keywords. For example, `{ nullable: true, allOf: [Pet] }` becomes `Pet | null`. OpenAPI 3.0.3+ limits nullability to a sibling `type` that `enum`, composition, or `$ref` does not override. The generator applies it in 3.1+ too, where `nullable` is no longer defined.
 
 ### Operations and status codes
 
-- **Request bodies:** bodies declared on `GET`, `HEAD`, and `DELETE` are retained, despite OpenAPI 3.0's instruction to ignore them. Real APIs use these declarations, including delete options; the client still cannot send bodies with `GET` or `HEAD`.
+- **Request bodies:** descriptions may contain bodies on `GET`, `HEAD`, and `DELETE` in OpenAPI 3.0. `DELETE` bodies are callable; Fetch request inputs omit `GET` and `HEAD` bodies.
 - **Status ranges:** lowercase ranges such as `2xx` are treated as `2XX` and merged with equivalent uppercase entries.
 
 ### References and keywords
 
 - **Reference siblings:** keywords beside a schema `$ref` are applied in 3.0 as in 3.1+, intersecting the target with the sibling constraints.
 - **Extended schema keywords:** `const`, `prefixItems`, `patternProperties`, `if`/`then`/`else`, `additionalItems`, array or boolean `items`, `type: "null"`, type arrays, boolean schemas, and binary `contentMediaType` are applied in 3.0 too.
-- **Later operation fields:** `webhooks` is applied in 3.0; `query`, `additionalOperations`, `in: querystring`, and `itemSchema` are applied before 3.2. A JSON sequence's `schema` describes each item when `itemSchema` is absent.
+- **Later operation fields:** `webhooks` is applied in 3.0; `query`, `additionalOperations`, `in: querystring`, and `itemSchema` are applied before 3.2. Sequence `schema` describes complete content; `itemSchema` describes each item.
 - **Read/write annotations:** required `readOnly` and `writeOnly` properties retain OpenAPI 3.0's directional requiredness in 3.1+, even though those fields are annotations there. See [Input variants](./output.md#input-variants).
 
 ## Approximations
@@ -141,7 +150,7 @@ TypeScript cannot express every schema rule. The generator usually widens types 
 - **Shape keywords imply a shape.** Object keywords such as `properties` and `required` imply an object; `items` and `prefixItems` imply an array. JSON Schema also allows other value types when `type` is absent. An explicit different type takes precedence in an intersection; mixed cases follow the [complexity limits](#complexity-limits).
 - **Extra object properties are approximate.** Named properties alone do not create an index signature, so TypeScript may reject extra properties in object literals. Objects without named properties use an index signature: the additional/pattern property types, or `unknown` by default. Pattern types apply to all extra keys, and index signatures widen to admit named properties.
 - **Dynamic references are static.** `$dynamicRef` resolves as `$ref`.
-- **Raw bytes remain `Blob`.** Types preserve file declarations even in locations that require text. The client rejects a `Blob` inside JSON or text parameters, and generation reports `unsupported-request-encoding`. Use a textual schema, such as base64, or an already encoded body where supported. Whole `Blob` bodies and ordinary multipart file parts work normally.
+- **Transport projection.** A schema's JSON type differs from a multipart file-part input or a binary response. Use client helper types for call inputs and decoded data; a named schema alone does not describe every transport.
 
 Two additional narrowings come from outside JSON Schema:
 

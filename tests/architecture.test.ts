@@ -4,37 +4,51 @@ import ts from "typescript"
 import { expect, it } from "vitest"
 
 // What each part of src/ may import. The generator is a pipeline, load → build
-// → render, around the model; the client ships alone, so it imports nothing
-// outside itself, and nothing in the generator imports it.
+// → render, around the model. The generator and client share only the dependency-free
+// shared contracts and media utilities; neither imports the other.
 const SRC = join(import.meta.dirname, "..", "src")
 // Core modules are flat on disk; their responsibilities still define the boundaries.
 const CORE_PARTS: Record<string, string[]> = {
   entry: ["index"],
   load: ["documents", "document-reader", "document-nodes"],
   model: ["model", "type-algebra", "directions"],
+  output: ["prepare-output", "projection"],
+  discovery: ["reference-discovery"],
+  source: ["build-context", "references", "schema-rules", "annotations"],
   build: [
+    "normalize-model",
+    "parameters",
+    "encoding",
     "build",
-    "build-context",
-    "references",
     "discriminators",
     "form-encoding",
     "operations",
-    "content",
+    "content-types",
     "schemas",
-    "annotations",
   ],
   render: ["render-types", "render-module", "jsdoc"],
   shared: ["media-types", "patterns", "object", "naming", "diagnostics", "json-pointer"],
 }
 const MAY_IMPORT: Record<string, string[]> = {
-  "core/entry": ["core/load", "core/build", "core/render", "core/shared"],
+  "core/entry": ["core/load", "core/build", "core/output", "core/render", "core/shared"],
   "cli": ["cli", "core/entry"],
-  "client": ["client"],
-  "core/shared": ["core/shared"],
+  "client": ["client", "shared"],
+  "shared": ["shared"],
+  "core/shared": ["core/shared", "shared"],
   "core/load": ["core/load", "core/shared"],
-  "core/model": ["core/model", "core/shared"],
-  "core/build": ["core/build", "core/load", "core/model", "core/shared"],
-  "core/render": ["core/render", "core/model", "core/shared"],
+  "core/model": ["core/model", "core/shared", "shared"],
+  "core/source": ["core/source", "core/load", "core/model", "core/shared"],
+  "core/discovery": ["core/discovery", "core/source", "core/load", "core/shared"],
+  "core/build": [
+    "core/build",
+    "core/source",
+    "core/discovery",
+    "core/load",
+    "core/model",
+    "core/shared",
+  ],
+  "core/output": ["core/output", "core/model", "core/shared", "shared"],
+  "core/render": ["core/render", "core/model", "core/shared", "shared"],
 }
 // Only these reach files, the network, or packages.
 const MAY_IMPORT_PACKAGES = new Set(["cli", "core/load"])

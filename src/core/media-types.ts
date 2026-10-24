@@ -1,3 +1,5 @@
+import { mediaTypeEssence } from "../shared/media"
+
 /**
  * What content of a media type carries, which decides its type:
  *
@@ -12,15 +14,6 @@
  * - `binary`: anything else: raw bytes.
  */
 type MediaClass = "json" | "events" | "sequence" | "text" | "form" | "multipart" | "binary"
-
-/** Lowercased `type/subtype` without parameters. */
-function mediaTypeEssence(mediaType: string): string {
-  // Only spaces and tabs surround it (RFC 9110, OWS), as the client's types trim them.
-  return mediaType
-    .split(";", 1)[0]
-    .replaceAll(/^[ \t]+|[ \t]+$/g, "")
-    .toLowerCase()
-}
 
 export function classifyMediaType(mediaType: string): MediaClass {
   const essence = mediaTypeEssence(mediaType)
@@ -37,7 +30,7 @@ export function classifyMediaType(mediaType: string): MediaClass {
 /**
  * The media type a request body is sent as when the call names none: the declared
  * `application/json` one, parameters and all, where one alone is; else the only one declared; else
- * none. The client's types apply the same rule (`DefaultMediaType` in src/client/types.ts).
+ * none. The client types use the same rule for the optional contentType argument.
  */
 export function defaultMediaType(mediaTypes: string[]): string | undefined {
   const json = mediaTypes.filter((m) => isApplicationJson(m))

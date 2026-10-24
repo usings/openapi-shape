@@ -12,7 +12,7 @@ export function union(members: Type[]): Type {
   }
   if (
     flat.some((t) => t.kind === "unknown") &&
-    !flat.some((t) => hasDirections(t, (d) => sealed.has(d)))
+    !flat.some((t) => hasDirections(t, (d) => d.complete === true))
   ) {
     return flat.some((t) => t.kind === "unknown" && t.widened) ? WIDENED_UNKNOWN : UNKNOWN
   }
@@ -43,14 +43,20 @@ interface IntersectionContext {
 
 /** Normalized intersection: flattened, scalar conflicts resolved, plain objects merged. */
 export function intersect(members: Type[], context?: IntersectionContext): Type {
-  return intersectScoped(members, context, true)
+  return intersectScoped(
+    members,
+    { ...context, referenceDepth: 0, budget: { distribution: 16, combinations: 10_000 } },
+    true,
+  )
 }
 
-function intersectScoped(
-  members: Type[],
-  context: IntersectionContext | undefined,
-  directions: boolean,
-): Type {
+/** All recursive work shares its caller's limits, never another calculation's traversal state. */
+interface CalculationContext extends IntersectionContext {
+  referenceDepth: number
+  budget: { distribution: number; combinations: number }
+}
+
+function intersectScoped(members: Type[], context: CalculationContext, directions: boolean): Type {
   const flat: Type[] = []
   for (const member of members) {
     if (member.kind === "intersection") flat.push(...member.members)
@@ -62,8 +68,8 @@ function intersectScoped(
   if (directions) {
     const scopes = directionScopes(
       out,
-      (declaration) => sealed.has(declaration),
-      (reason) => context?.onWiden?.(context.location, reason),
+      (declaration) => declaration.complete === true,
+      (reason) => context.onWiden?.(context.location, reason),
     )
     if (scopes.length > 1)
       return union(scopes.map((scope) => intersectScoped(scope, context, false)))
@@ -75,8 +81,8 @@ function intersectScoped(
   // (soundly) until it fits.
   for (;;) {
     const sizes = out.map((t) => expansions(t))
-    if (sizes.reduce((n, size) => n * size, 1) <= MAX_COMBINATIONS) break
-    context?.onWiden?.(context.location)
+    if (sizes.reduce((n, size) => n * size, 1) <= context.budget.combinations) break
+    context.onWiden?.(context.location)
     const largest = sizes.indexOf(Math.max(...sizes))
     // A union of objects widens to any object, which keeps its properties allowed.
     // Retain widening through enclosing compositions until implied shapes have yielded to it.
@@ -86,7 +92,7 @@ function intersectScoped(
         : retainDirections(
             shapeOf(t) === "object" ? OPEN_OBJECT : WIDENED_UNKNOWN,
             t,
-            (declaration) => sealed.has(declaration),
+            (declaration) => declaration.complete === true,
           ),
     )
   }
@@ -95,7 +101,7 @@ function intersectScoped(
   // one level deep: below, alternatives would multiply level by level, and a
   // recursive union would never end.
   const implied = out.some((t) => isImplied(t))
-  if (implied && lookingThrough) {
+  if (implied && context.referenceDepth > 0) {
     // Deeper, where the union could be looked through and mixes objects with
     // other values, which the implied shape would shut out, the type widens
     // to either side instead.
@@ -103,78 +109,71 @@ function intersectScoped(
       const behind = t.kind === "ref" ? unionBehind(t) : undefined
       return (
         behind !== undefined &&
-        behind.members.length <= MAX_DISTRIBUTION &&
+        behind.members.length <= context.budget.distribution &&
         shapeOf(t) === undefined
       )
     })
     if (opaque.length > 0) {
-      context?.onWiden?.(
+      context.onWiden?.(
         context.location,
         "Nested mixed references exceed the one-level distribution boundary; implied shape constraints are widened to retain other value types",
       )
       return union([
-        intersect(
+        intersectScoped(
           out.filter((t) => !opaque.includes(t)),
           context,
+          true,
         ),
         ...opaque,
       ])
     }
   }
   let lookedThrough = false
-  if (implied && !lookingThrough) {
+  if (implied && context.referenceDepth === 0) {
     out = out.map((t) => {
       const behind = t.kind === "ref" ? unionBehind(t) : undefined
-      if (!behind || behind.members.length > MAX_DISTRIBUTION) return t
+      if (!behind || behind.members.length > context.budget.distribution) return t
       lookedThrough = true
       return behind
     })
   }
   if (!lookedThrough) return simplify(out, implied, context)
-  lookingThrough = true
-  try {
-    return simplify(out, implied, context)
-  } finally {
-    lookingThrough = false
-  }
+  return simplify(out, implied, { ...context, referenceDepth: context.referenceDepth + 1 })
 }
 
-/** Whether an enclosing `intersect` is distributing a union it looked through a reference for. */
-let lookingThrough = false
-
-function simplify(members: Type[], implied: boolean, context?: IntersectionContext): Type {
+function simplify(members: Type[], implied: boolean, context: CalculationContext): Type {
   let out = members
 
   // `{ a?, b? } & ({ a } | { b })` reads better as `{ a, b? } | { a?, b }`, as long
   // as the alternatives stay few.
-  const alternatives = out.filter((t) => isDistributable(t, implied))
+  const alternatives = out.filter((t) => isDistributable(t, implied, context.budget.distribution))
   const product = alternatives.reduce((n, t) => n * (t.kind === "union" ? t.members.length : 1), 1)
   if (
     alternatives.length > 0 &&
-    product <= MAX_DISTRIBUTION &&
+    product <= context.budget.distribution &&
     out.some(
       (t) =>
-        !isDistributable(t, implied) &&
+        !isDistributable(t, implied, context.budget.distribution) &&
         (shapeOf(t) !== undefined || t.kind === "object" || isArrayLike(t)),
     )
   ) {
     const first = alternatives[0] as Extract<Type, { kind: "union" }>
     const rest = out.filter((t) => t !== first)
-    return union(first.members.map((member) => intersect([...rest, member], context)))
+    return union(first.members.map((member) => intersectScoped([...rest, member], context, true)))
   }
 
   // Type-specific keywords without `type` constrain only their own type.
   const shapes = out.map((t) => shapeOf(t))
   // Unexpanded constraints may admit other shapes, whether they are unions,
   // intersections, or references to a widened type. Infer their rendered shape
-  // without requiring a particular composition structure. Defer unsealed refs.
+  // without requiring a particular composition structure. Defer unfinished refs.
   const opaqueShapes =
     implied && shapes.every((shape) => shape === undefined)
       ? out
           .filter(
             (t) =>
               !isImplied(t) &&
-              (t.kind !== "ref" || sealed.has(t.target)) &&
+              (t.kind !== "ref" || t.target.complete === true) &&
               (t.kind !== "unknown" || t.widened),
           )
           .map((t) => shapeOf(t, new Map(), true))
@@ -192,7 +191,7 @@ function simplify(members: Type[], implied: boolean, context?: IntersectionConte
         (definiteNonArray && isArrayLike(t) && t.inferred),
     )
   ) {
-    context?.onWiden?.(
+    context.onWiden?.(
       context.location,
       "An unexpanded mixed constraint may accept other value types; implied object or array constraints are omitted at this intersection. Add an explicit type if the contract intends to restrict the shape",
     )
@@ -201,7 +200,7 @@ function simplify(members: Type[], implied: boolean, context?: IntersectionConte
     .map((t) =>
       (definiteNonObject && t.kind === "object" && t.inferred) ||
       (definiteNonArray && isArrayLike(t) && t.inferred)
-        ? retainDirections(UNKNOWN, t, (declaration) => sealed.has(declaration))
+        ? retainDirections(UNKNOWN, t, (declaration) => declaration.complete === true)
         : t,
     )
     .filter((t) => t.kind !== "unknown" || t.directions)
@@ -226,9 +225,10 @@ function simplify(members: Type[], implied: boolean, context?: IntersectionConte
 
   const arrays = out.filter((t) => t.kind === "array")
   if (arrays.length > 1) {
-    const items = intersect(
+    const items = intersectScoped(
       arrays.map((t) => (t.kind === "array" ? t.items : UNKNOWN)),
       context,
+      true,
     )
     const inferred = arrays.every((t) => t.kind === "array" && t.inferred)
     out = replaceAll(out, (t) => t.kind === "array", [
@@ -243,7 +243,7 @@ function simplify(members: Type[], implied: boolean, context?: IntersectionConte
   return {
     kind: "intersection",
     members: out,
-    ...(context?.location ? { [TYPE_LOCATION]: context.location } : {}),
+    ...(context.location ? { [TYPE_LOCATION]: context.location } : {}),
   }
 }
 
@@ -297,25 +297,22 @@ function canonicalJson(value: unknown): string {
 }
 
 /** Structural identity of a type; declarations compare by identity. */
-function typeKey(type: Type): string {
+function typeKey(type: Type, declarations = new Map<Declaration, number>()): string {
   // Documentation does not affect identity; declarations compare by reference.
   return JSON.stringify(type, (key, value: unknown) =>
     key === "annotations"
       ? undefined
       : key === "target"
-        ? `#${declarationId(value as Declaration)}`
+        ? `#${declarationId(value as Declaration, declarations)}`
         : value,
   )
 }
 
-const declarationIds = new WeakMap<Declaration, number>()
-let nextDeclarationId = 0
-function declarationId(declaration: Declaration): number {
-  let id = declarationIds.get(declaration)
-  if (id === undefined) {
-    id = nextDeclarationId++
-    declarationIds.set(declaration, id)
-  }
+function declarationId(declaration: Declaration, ids: Map<Declaration, number>): number {
+  const existing = ids.get(declaration)
+  if (existing !== undefined) return existing
+  const id = ids.size
+  ids.set(declaration, id)
   return id
 }
 
@@ -329,8 +326,9 @@ function toLiteral(value: unknown): Literal {
 
 function dedupe(types: Type[]): Type[] {
   const seen = new Set<string>()
+  const declarations = new Map<Declaration, number>()
   return types.filter((t) => {
-    const key = typeKey(t)
+    const key = typeKey(t, declarations)
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -348,7 +346,7 @@ function replaceAll(types: Type[], match: (t: Type) => boolean, replacement: Typ
   return rest
 }
 
-type ScalarKind = "null" | "boolean" | "string" | "number" | "binary"
+type ScalarKind = "null" | "boolean" | "string" | "number"
 
 function scalarKind(type: Type): ScalarKind | undefined {
   switch (type.kind) {
@@ -356,8 +354,9 @@ function scalarKind(type: Type): ScalarKind | undefined {
     case "boolean":
     case "string":
     case "number":
-    case "binary":
       return type.kind
+    case "binary":
+      return "string"
     case "literal": {
       const value = type.value
       if (value === null) return "null"
@@ -379,19 +378,6 @@ function isScalar(type: Type): boolean {
 const OPEN_OBJECT: Type = { kind: "object", fields: [], additional: UNKNOWN }
 const WIDENED_UNKNOWN: Type = { kind: "unknown", widened: true }
 
-const MAX_DISTRIBUTION = 16
-const MAX_COMBINATIONS = 10_000
-
-/**
- * Declarations whose types are final. References are opaque while declarations are still being
- * built, so that simplification cannot depend on the order in which they are built.
- */
-const sealed = new WeakSet<Declaration>()
-
-export function seal(declarations: Declaration[]): void {
-  for (const declaration of declarations) sealed.add(declaration)
-}
-
 type Shape = "object" | "array" | ScalarKind
 
 /** The JSON type every value of `type` has, when there is exactly one. */
@@ -411,7 +397,7 @@ function shapeOf(
       if (typeof type.value === "object" && type.value !== null) return "object"
       return scalarKind(type)
     case "ref": {
-      if (!sealed.has(type.target)) return undefined
+      if (type.target.complete !== true) return undefined
       // Each declaration once per call; one that leads back to itself is open.
       if (known.has(type.target)) return known.get(type.target)
       known.set(type.target, undefined)
@@ -461,10 +447,10 @@ function isBareObject(type: Type): boolean {
  * A union whose members an intersection can simplify with: objects, arrays, literals, scalars; and
  * references, where an implied shape must give way to them.
  */
-function isDistributable(type: Type, references: boolean): boolean {
+function isDistributable(type: Type, references: boolean, limit: number): boolean {
   return (
     type.kind === "union" &&
-    type.members.length <= MAX_DISTRIBUTION &&
+    type.members.length <= limit &&
     type.members.every(
       (m) =>
         m.kind === "object" ||
@@ -477,8 +463,9 @@ function isDistributable(type: Type, references: boolean): boolean {
 }
 
 /**
- * How many alternatives TypeScript expands a type into, through references to sealed declarations;
- * each declaration is counted once per call, and a reference back into itself counts as one.
+ * How many alternatives TypeScript expands a type into, through references to complete
+ * declarations; each declaration is counted once per call, and a reference back into itself counts
+ * as one.
  */
 function expansions(type: Type, counted = new Map<Declaration, number>()): number {
   switch (type.kind) {
@@ -487,7 +474,7 @@ function expansions(type: Type, counted = new Map<Declaration, number>()): numbe
     case "intersection":
       return type.members.reduce((n, m) => n * expansions(m, counted), 1)
     case "ref": {
-      if (!sealed.has(type.target)) return 1
+      if (type.target.complete !== true) return 1
       const known = counted.get(type.target)
       if (known !== undefined) return known
       counted.set(type.target, 1)
@@ -500,13 +487,14 @@ function expansions(type: Type, counted = new Map<Declaration, number>()): numbe
   }
 }
 
-/** The union a type is, directly or through references to sealed declarations. */
+/** The union a type is, directly or through references to complete declarations. */
 function unionBehind(
   type: Type,
   seen = new Set<Declaration>(),
 ): Extract<Type, { kind: "union" }> | undefined {
   if (type.kind === "union") return type
-  if (type.kind !== "ref" || !sealed.has(type.target) || seen.has(type.target)) return undefined
+  if (type.kind !== "ref" || type.target.complete !== true || seen.has(type.target))
+    return undefined
   seen.add(type.target)
   return unionBehind(type.target.type, seen)
 }
@@ -535,9 +523,9 @@ function intersectScalars(scalars: Type[]): Type {
 function intersectTwoScalars(a: Type, b: Type): Type {
   const kindA = scalarKind(a)
   const kindB = scalarKind(b)
-  // OpenAPI 3.0 `format: binary` refines `type: string`.
-  if (kindA === "binary" && (kindB === "binary" || b.kind === "string")) return a
-  if (kindB === "binary" && a.kind === "string") return b
+  // Binary is a string annotation; retain it unless a literal narrows the value.
+  if (a.kind === "binary" && (b.kind === "binary" || b.kind === "string")) return a
+  if (b.kind === "binary" && a.kind === "string") return b
   if (kindA !== kindB) return NEVER
   if (a.kind === "literal" && b.kind === "literal") {
     return typeKey(a) === typeKey(b) ? a : NEVER
@@ -547,7 +535,7 @@ function intersectTwoScalars(a: Type, b: Type): Type {
   return a
 }
 
-function mergeObjects(objects: Type[], context?: IntersectionContext): Type {
+function mergeObjects(objects: Type[], context: CalculationContext): Type {
   const members = objects.filter((t): t is Extract<Type, { kind: "object" }> => t.kind === "object")
   const merged = new Map<string, { types: Type[]; field: Field; sides: Field[] }>()
   for (const object of members) {
@@ -573,14 +561,14 @@ function mergeObjects(objects: Type[], context?: IntersectionContext): Type {
     }
     fields.push({
       ...entry.field,
-      type: intersect(entry.types, context),
+      type: intersectScoped(entry.types, context, true),
       ...requiredness(entry.sides),
       direction: combinedDirection(entry.sides),
     })
   }
   const out: Type = { kind: "object", fields }
   const additional = members.flatMap((t) => (t.additional ? [t.additional] : []))
-  if (additional.length > 0) out.additional = intersect(additional, context)
+  if (additional.length > 0) out.additional = intersectScoped(additional, context, true)
   const patterns = members.flatMap((t) => t.patterns ?? [])
   if (patterns.length > 0) out.patterns = patterns
   if (members.every((t) => t.inferred)) out.inferred = true

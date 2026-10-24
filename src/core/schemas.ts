@@ -4,64 +4,17 @@ import { narrowDiscriminated, parentDiscriminators } from "./discriminators"
 import { componentNameOf, identity } from "./document-nodes"
 import type { DocumentNode } from "./documents"
 import { parsePointer } from "./json-pointer"
-import { classifyMediaType } from "./media-types"
 import type { Declaration, Field, Type } from "./model"
 import { NEVER, NULL, UNKNOWN } from "./model"
 import { toIdentifier, uniqueName } from "./naming"
 import { isRecord } from "./object"
 import { matchesPattern } from "./patterns"
 import { referencesOf } from "./references"
+import { aliasReference, describesRawBytes } from "./schema-rules"
 import { includesJson, intersect, isJsonValue, isOfType, literal, union } from "./type-algebra"
-
-/** Keywords that change a schema's type. */
-const TYPE_KEYWORDS = new Set([
-  "type",
-  "enum",
-  "const",
-  "format",
-  "nullable",
-  "properties",
-  "required",
-  "additionalProperties",
-  "patternProperties",
-  "items",
-  "prefixItems",
-  "additionalItems",
-  "allOf",
-  "anyOf",
-  "oneOf",
-  "not",
-  "if",
-  "then",
-  "else",
-  "discriminator",
-  "readOnly",
-  "writeOnly",
-  "$ref",
-  "$dynamicRef",
-])
 
 const OBJECT_KEYWORDS = ["properties", "patternProperties", "additionalProperties", "required"]
 const ARRAY_KEYWORDS = ["items", "prefixItems"]
-
-/**
- * Whether a schema describes raw bytes: a `format: binary` string, a string of a binary
- * `contentMediaType` without `contentEncoding`, or Swagger's `type: file`.
- */
-export function describesRawBytes(node: DocumentNode): boolean {
-  const schema = node.value
-  if (!isRecord(schema)) return false
-  if (schema.type === "file") return true
-  const strings =
-    schema.type === "string" || (Array.isArray(schema.type) && schema.type.includes("string"))
-  if (!strings) return false
-  if (schema.format === "binary") return true
-  return (
-    typeof schema.contentMediaType === "string" &&
-    schema.contentEncoding === undefined &&
-    classifyMediaType(schema.contentMediaType) === "binary"
-  )
-}
 
 interface DeclarationState {
   decl: Declaration
@@ -94,10 +47,13 @@ export class SchemaBuilder {
   private readonly queue: DeclarationState[] = []
   private readonly taken = new Set<string>()
   private readonly inlining = new Set<string>()
-  /** Referenced schemas inlined once, by identity: a second reference names them. */
+  /** Inline types are memoized after declaration planning, so later uses keep the same shape. */
   private readonly inlined = new Map<string, Type>()
 
-  constructor(readonly context: BuildContext) {}
+  constructor(
+    readonly context: BuildContext,
+    private readonly repeated = new Set<string>(),
+  ) {}
 
   /** Declare every `components.schemas` entry of the entry document, in order. */
   declareComponents(): void {
@@ -132,6 +88,7 @@ export class SchemaBuilder {
         type = parentDiscriminators(this, state.node, state.componentName, type, selfIds)
       }
       state.decl.type = type
+      state.decl.location = this.context.documents.locate(state.node.document, state.node.pointer)
       const annotations =
         (state.origin && schemaAnnotations(state.origin)) ?? schemaAnnotations(state.node)
       if (annotations) state.decl.annotations = annotations
@@ -181,11 +138,9 @@ export class SchemaBuilder {
 
   /** Follow references that carry no other type keywords; `undefined` when `node` is not one. */
   aliasTarget(node: DocumentNode, seen = new Set<string>()): DocumentNode | undefined {
-    const schema = node.value
-    const references = referencesOf(schema)
-    if (!isRecord(schema) || references.length !== 1) return undefined
-    const [[keyword, ref]] = references
-    if (Object.keys(schema).some((k) => k !== keyword && TYPE_KEYWORDS.has(k))) return undefined
+    const reference = aliasReference(node)
+    if (reference === undefined) return undefined
+    const [, ref] = reference
     const resolution = this.context.documents.resolveSchema(ref, node)
     if (resolution.kind !== "found") return undefined
     const id = identity(resolution.node)
@@ -441,21 +396,17 @@ export class SchemaBuilder {
       const state = this.declare(target, definition, componentNameOf(target))
       return { kind: "ref", target: state.decl }
     }
+    if (this.repeated.has(id)) {
+      return { kind: "ref", target: this.declare(target, inlineName(target)).decl }
+    }
     if (this.inlining.has(id)) {
       // Recursion through an inline schema: give it a name so it can refer to itself.
       const state = this.declare(target, inlineName(target))
       this.queue.splice(this.queue.indexOf(state), 1)
       return { kind: "ref", target: state.decl }
     }
-    // A schema referenced again is named, so that output grows with the input
-    // rather than with the number of paths through it.
     const inlined = this.inlined.get(id)
-    if (inlined !== undefined) {
-      const state = this.declare(target, inlineName(target))
-      this.queue.splice(this.queue.indexOf(state), 1)
-      state.decl.type = inlined
-      return { kind: "ref", target: state.decl }
-    }
+    if (inlined !== undefined) return inlined
     this.inlining.add(id)
     const type = this.type(target)
     this.inlining.delete(id)
@@ -479,7 +430,11 @@ export class SchemaBuilder {
       )
     }
     this.taken.add(unique)
-    const decl: Declaration = { name: unique, type: UNKNOWN }
+    const decl: Declaration = {
+      name: unique,
+      type: UNKNOWN,
+      location: this.context.documents.locate(node.document, node.pointer),
+    }
     const state: DeclarationState = { decl, node, componentName }
     this.byIdentity.set(identity(node), state)
     this.states.set(decl, state)

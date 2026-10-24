@@ -18,7 +18,7 @@ type Read = "json" | "text" | "blob"
  */
 type Write = "value" | "string" | "ready"
 
-const MEDIA: Array<[mediaType: string, read: Read, write: Write]> = [
+const MEDIA: Array<[mediaType: string, read: Read, write: Write, stream?: "sse" | "ndjson"]> = [
   ["application/json", "json", "value"],
   ["application/problem+json", "json", "value"],
   ["APPLICATION/Problem+JSON; p=*", "json", "value"],
@@ -26,10 +26,13 @@ const MEDIA: Array<[mediaType: string, read: Read, write: Write]> = [
   ["text/plain", "text", "string"],
   ["TEXT/PLAIN; charset=utf-8", "text", "string"],
   ["text/csv", "text", "string"],
-  ["text/event-stream", "text", "ready"],
+  ["text/event-stream", "text", "ready", "sse"],
   ["application/x-www-form-urlencoded", "blob", "value"],
   ["multipart/form-data", "blob", "value"],
-  ["application/jsonl", "blob", "ready"],
+  ["application/jsonl", "json", "ready", "ndjson"],
+  ["APPLICATION/X-NDJSON; charset=utf-8", "json", "ready", "ndjson"],
+  ["application/json-seq", "blob", "ready"],
+  ["application/example+json-seq", "blob", "ready"],
   ["application/xml", "blob", "ready"],
   ["application/octet-stream", "blob", "ready"],
   ["image/png", "blob", "ready"],
@@ -38,8 +41,10 @@ const MEDIA: Array<[mediaType: string, read: Read, write: Write]> = [
 const schema = { type: "object", properties: { a: { type: "string" } } }
 const description = oas("3.1", {
   paths: Object.fromEntries(
-    MEDIA.map(([mediaType], i) => {
-      const content = { [mediaType]: { schema } }
+    MEDIA.map(([mediaType, , , stream], i) => {
+      const content = {
+        [mediaType]: { schema: stream === "ndjson" ? { type: "array", items: schema } : schema },
+      }
       return [
         `/m${i}`,
         {
@@ -60,12 +65,12 @@ const VALUE: Record<Write, string> = { value: '{ a: "x" }', string: '"x"', ready
 describe("media types", () => {
   it("are typed as the client reads and writes them", async () => {
     const code = await gen(description)
-    const checks = MEDIA.flatMap(([mediaType, read, write], i) => [
-      ...(mediaType === "text/event-stream"
+    const checks = MEDIA.flatMap(([, read, write, stream], i) => [
+      ...(stream
         ? [
-            `  // @ts-expect-error SSE is consumed with stream`,
+            `  // @ts-expect-error sequential responses are consumed with stream`,
             `  await api.result("GET /m${i}")`,
-            `  await api.stream("GET /m${i}", { onMessage(event) { const t: Equal<typeof event.data, string> = true; void t } })`,
+            `  for await (const item of api.stream("GET /m${i}")) { const t: Equal<typeof ${stream === "sse" ? "item.data" : "item"}, ${READ_TYPE[read]}> = true; void t }`,
           ]
         : [
             `  const r${i} = await api.result("GET /m${i}")`,
@@ -92,7 +97,7 @@ describe("media types", () => {
     const contract = await contractOf(code)
     // What the client did with each: how it read the response, and what it labelled a request.
     const observed: Array<[string, string, string]> = []
-    for (const [i, [mediaType, , write]] of MEDIA.entries()) {
+    for (const [i, [mediaType, , write, stream]] of MEDIA.entries()) {
       const sent: Request[] = []
       const api = createClient(contract, {
         baseUrl: "https://x.test",
@@ -100,21 +105,19 @@ describe("media types", () => {
           sent.push(request)
           const read = MEDIA[i][1]
           const headers = { "content-type": mediaType }
-          const body = mediaType === "text/event-stream" ? "data: x\n\n" : BODY[read]
+          const body = stream === "sse" ? "data: x\n\n" : BODY[read]
           return Promise.resolve(new Response(body, { status: 200, headers }))
         },
       })
       let data: unknown
-      if (mediaType === "text/event-stream") {
-        // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-        await api.stream(
+      if (stream) {
+        // oxlint-disable-next-line no-await-in-loop -- consume each independent finite stream
+        for await (const item of api.stream(
           `GET /m${i}` as never,
-          {
-            onMessage: (event: { data: string }) => {
-              data = event.data
-            },
-          } as never,
-        )
+          (stream === "sse" ? { retry: false } : {}) as never,
+        )) {
+          data = stream === "sse" ? (item as { data: string }).data : item
+        }
       } else {
         // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
         const result = await api.result(`GET /m${i}`)
@@ -260,7 +263,7 @@ describe("the default media type", () => {
     expect(sent.at(-1)?.headers.get("content-type")).toBe(mediaType)
   })
 
-  it("labels the JSON the client encodes, and leaves a ready-made body its own type", async () => {
+  it("labels encoded and ready bodies with the compiled default media type", async () => {
     const content = { "application/json;charset=UTF-8": {}, "application/octet-stream": {} }
     const upload = { post: { requestBody: { required: true, content }, responses: { "204": {} } } }
     const { api, sent } = await recording(oas("3.1", { paths: { "/upload": upload } }))
@@ -270,7 +273,7 @@ describe("the default media type", () => {
       await api.fetch("POST /upload", { body } as never)
       labels.push(sent.at(-1)?.headers.get("content-type") ?? null)
     }
-    expect(labels).toStrictEqual(["application/json;charset=UTF-8", "image/png", null])
+    expect(labels).toStrictEqual(Array(3).fill("application/json;charset=UTF-8"))
   })
 })
 

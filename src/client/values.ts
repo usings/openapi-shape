@@ -1,22 +1,4 @@
-/** Lowercased `type/subtype` without parameters. */
-export function mediaTypeEssence(mediaType: string): string {
-  // Only spaces and tabs surround it (RFC 9110, OWS), as the client's types trim them.
-  const parameters = mediaType.indexOf(";")
-  return (parameters === -1 ? mediaType : mediaType.slice(0, parameters))
-    .replaceAll(/^[ \t]+|[ \t]+$/g, "")
-    .toLowerCase()
-}
-
-/** `…/json` and `…/…+json`, from an already normalized essence. */
-export function isJsonEssence(essence: string): boolean {
-  const subtype = essence.split("/", 2)[1] ?? ""
-  return subtype === "json" || subtype.endsWith("+json")
-}
-
-/** The wildcards that take JSON, as the client's default. */
-export function isJsonWildcardEssence(essence: string): boolean {
-  return essence === "*/*" || essence === "application/*"
-}
+export { isJsonEssence, isJsonWildcardEssence, mediaTypeEssence } from "../shared/media"
 
 /** A value as text: parameters, headers, and form fields. */
 export function scalar(value: unknown): string {

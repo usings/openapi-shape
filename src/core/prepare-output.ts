@@ -1,0 +1,126 @@
+import type { EndpointContract } from "../shared/contract"
+import { streamFormat } from "../shared/media"
+import { classifyMediaType, defaultMediaType } from "./media-types"
+import type { Field, Model, Operation, OutputModel, OutputOperation, Side } from "./model"
+import { Projection } from "./projection"
+
+/** Project schemas for each exchange and record the settings needed by the Fetch client. */
+export async function prepareOutput(
+  model: Model,
+  workpoint?: () => Promise<void> | undefined,
+): Promise<OutputModel> {
+  const projection = new Projection(model.declarations)
+  const endpoints: OutputOperation[] = []
+  for (const operation of model.endpoints) {
+    if (!["CONNECT", "TRACE", "TRACK"].includes(methodOf(operation).toUpperCase()))
+      endpoints.push({
+        ...project(operation, projection, "request"),
+        contract: endpointContract(operation),
+      })
+    const pending = workpoint?.()
+    // oxlint-disable-next-line no-await-in-loop -- yield between independent operations
+    if (pending) await pending
+  }
+  const webhooks = model.webhooks.map((op) => project(op, projection, "response"))
+  const callbacks = model.callbacks.map((op) => project(op, projection, "response"))
+  return { ...model, endpoints, webhooks, callbacks, declarations: projection.declarations }
+}
+
+function project(op: Operation, projection: Projection, sent: Side): Operation {
+  const received = sent === "request" ? "response" : "request"
+  return {
+    ...op,
+    params: op.params.map((f) => projection.field(f, sent)),
+    query: op.query.map((f) => projection.field(f, sent)),
+    headers: op.headers.map((f) => projection.field(f, sent)),
+    cookies: op.cookies.map((f) => projection.field(f, sent)),
+    ...(op.querystring
+      ? {
+          querystring: {
+            ...op.querystring,
+            type: projection.type(op.querystring.type, sent),
+          },
+        }
+      : {}),
+    ...(op.body
+      ? {
+          body: {
+            ...op.body,
+            content: op.body.content.map((m) => ({
+              ...m,
+              type:
+                sent === "request" && classifyMediaType(m.mediaType) === "multipart"
+                  ? projection.multipart(m.type, m.encoding)
+                  : projection.type(m.type, sent),
+            })),
+          },
+        }
+      : {}),
+    responses: op.responses.map((r) => ({
+      ...r,
+      headers: r.headers.map((f) => projection.field(f, received)),
+      content: r.content.map((m) => ({ ...m, type: projection.type(m.type, received) })),
+    })),
+  }
+}
+
+function endpointContract(op: Operation): EndpointContract {
+  const content = ["GET", "HEAD"].includes(methodOf(op).toUpperCase())
+    ? []
+    : (op.body?.content ?? [])
+  const fallback = defaultMediaType(content.map((m) => m.mediaType))
+  const params = fieldEncodings(op.params)
+  const query = fieldEncodings(op.query) ?? op.querystring?.encoding
+  const headers = fieldEncodings(op.headers)
+  const stream = streamMedia(op)
+  return {
+    ...(stream.length > 0 ? { stream } : {}),
+    ...(params ? { params } : {}),
+    ...(query ? { query } : {}),
+    ...(op.querystring?.mediaType ? { querystring: op.querystring.mediaType } : {}),
+    ...(headers ? { headers } : {}),
+    ...(fallback ? { contentType: fallback } : {}),
+    ...(content.some((m) => m.encoding)
+      ? {
+          bodyEncodings: Object.fromEntries(
+            content.flatMap((m) => (m.encoding ? [[m.mediaType, m.encoding]] : [])),
+          ),
+        }
+      : {}),
+  }
+}
+
+/** Match exact statuses before ranges, and use default for success only without a declared 2xx. */
+function streamMedia(op: Operation): string[] {
+  if (methodOf(op).toUpperCase() === "HEAD") return []
+  const responses = new Map(op.responses.map((r) => [r.status, r]))
+  const hasSuccess = op.responses.some((r) => /^2(?:\d\d|XX)$/.test(r.status))
+  const effective = new Set<Operation["responses"][number]>()
+  for (let status = 200; status < 300; status++) {
+    if (status === 204 || status === 205) continue
+    const response =
+      responses.get(String(status)) ??
+      responses.get("2XX") ??
+      (hasSuccess ? undefined : responses.get("default"))
+    if (response) effective.add(response)
+  }
+  return [
+    ...new Set(
+      op.responses.flatMap((response) =>
+        effective.has(response)
+          ? response.content.flatMap((m) => (streamFormat(m.mediaType) ? [m.mediaType] : []))
+          : [],
+      ),
+    ),
+  ]
+}
+
+function methodOf(op: Operation): string {
+  return op.key.slice(0, op.key.indexOf(" "))
+}
+function fieldEncodings(
+  fields: Field[],
+): Record<string, NonNullable<Field["encoding"]>> | undefined {
+  const entries = fields.flatMap((f) => (f.encoding ? [[f.name, f.encoding] as const] : []))
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}

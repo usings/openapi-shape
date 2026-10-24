@@ -1,8 +1,41 @@
 import { describe, expect, it } from "vitest"
-import { generate } from "../src/core/index"
+import { GenerateError, generate } from "../src/core/index"
 import { declaration, oas, withSchemas } from "./helpers/generate"
 
-const binary = { type: "string", format: "binary" }
+it("retains input variant naming warnings when another schema prevents generation", async () => {
+  const failure: unknown = await generate(
+    oas("3.1", {
+      components: {
+        schemas: {
+          User: {
+            type: "object",
+            required: ["id"],
+            properties: { id: { type: "string", readOnly: true } },
+          },
+          UserInput: {},
+          Broken: { $ref: "#/components/schemas/Missing" },
+        },
+      },
+      paths: {
+        "/users": {
+          post: {
+            requestBody: {
+              content: { "application/json": { schema: { $ref: "#/components/schemas/User" } } },
+            },
+            responses: { "204": {} },
+          },
+        },
+      },
+    }),
+  ).catch((error: unknown) => error)
+  expect(failure).toBeInstanceOf(GenerateError)
+  if (!(failure instanceof GenerateError)) throw failure
+  expect(failure.diagnostics.map(({ code, location }) => ({ code, location }))).toStrictEqual([
+    { code: "unresolved-ref", location: "#/components/schemas/Broken/$ref" },
+    { code: "renamed-schema", location: "#/components/schemas/User" },
+  ])
+})
+
 const object = (properties: Record<string, unknown>): Record<string, unknown> => ({
   type: "object",
   properties,
@@ -11,28 +44,10 @@ const alternatives = (property: string, count: number): Record<string, unknown> 
   anyOf: Array.from({ length: count }, (_, value) => object({ [property]: { const: value } })),
 })
 
-function request(mediaType: string, schema: unknown, encoding?: object): Record<string, unknown> {
-  return oas("3.1", {
-    paths: {
-      "/upload": {
-        post: {
-          requestBody: { content: { [mediaType]: { schema, ...(encoding ? { encoding } : {}) } } },
-          responses: { "204": { description: "Done" } },
-        },
-      },
-    },
-  })
-}
-
 const intersectingDocument = (count: number) =>
   withSchemas("3.1", {
     T: { allOf: [alternatives("left", count), alternatives("right", 100)] },
   })
-
-const encodingWarnings = async (doc: object) => {
-  const { diagnostics } = await generate(doc)
-  return diagnostics.filter((d) => d.code === "unsupported-request-encoding")
-}
 
 describe("schema precision diagnostics", () => {
   it("reports inline widening once at its schema and preserves the existing wider output", async () => {
@@ -136,163 +151,5 @@ describe("schema precision diagnostics", () => {
         location: "#/components/schemas/T",
       },
     ])
-  })
-})
-
-describe("unsupported Blob request diagnostics", () => {
-  it.each(["application/json", "application/x-www-form-urlencoded"])(
-    "warns about nested Blob values in %s without changing their types",
-    async (mediaType) => {
-      const { code, diagnostics } = await generate(request(mediaType, object({ file: binary })))
-      expect(diagnostics.filter((d) => d.code === "unsupported-request-encoding")).toMatchObject([
-        {
-          severity: "warning",
-          location: `#/paths/~1upload/post/requestBody/content/${mediaType.replaceAll("/", "~1")}`,
-          message: expect.stringContaining("nested Blob"),
-        },
-      ])
-      expect(code).toContain("file?: Blob")
-    },
-  )
-
-  it("warns for parameter schemas, JSON content, and the whole querystring", async () => {
-    const { diagnostics } = await generate(
-      oas("3.2", {
-        paths: {
-          "/upload/{file}": {
-            get: {
-              parameters: [
-                { name: "file", in: "path", required: true, schema: binary },
-                {
-                  name: "x-file",
-                  in: "header",
-                  content: { "application/json": { schema: object({ file: binary }) } },
-                },
-                {
-                  name: "all",
-                  in: "querystring",
-                  content: {
-                    "application/x-www-form-urlencoded": { schema: object({ file: binary }) },
-                  },
-                },
-              ],
-              responses: { "204": { description: "Done" } },
-            },
-          },
-          "/query": {
-            get: {
-              parameters: [{ name: "file", in: "query", schema: binary }],
-              responses: { "204": { description: "Done" } },
-            },
-          },
-        },
-      }),
-    )
-    const warnings = diagnostics.filter((d) => d.code === "unsupported-request-encoding")
-    expect(warnings.map((d) => d.location)).toStrictEqual([
-      "#/paths/~1upload~1{file}/get/parameters/0",
-      "#/paths/~1upload~1{file}/get/parameters/1",
-      "#/paths/~1upload~1{file}/get/parameters/2",
-      "#/paths/~1query/get/parameters/0",
-    ])
-    expect(warnings.every((d) => d.message.includes("encode the bytes"))).toBe(true)
-  })
-
-  it.each(["GET", "HEAD", "CONNECT", "TRACE", "TRACK"])(
-    "does not suggest body encoding for %s, which cannot send a body",
-    async (method) => {
-      const operation = {
-        requestBody: { content: { "application/json": { schema: object({ file: binary }) } } },
-        responses: { "204": { description: "Done" } },
-      }
-      const path = ["CONNECT", "TRACK"].includes(method)
-        ? { additionalOperations: { [method]: operation } }
-        : { [method.toLowerCase()]: operation }
-      expect(await encodingWarnings(oas("3.2", { paths: { "/upload": path } }))).toStrictEqual([])
-    },
-  )
-
-  it("follows recursive aliases, arrays, and additional properties", async () => {
-    const doc = request("application/json", { $ref: "#/components/schemas/Node" })
-    doc.components = {
-      schemas: {
-        Node: {
-          ...object({ next: { $ref: "#/components/schemas/Node" } }),
-          additionalProperties: { type: "array", items: binary },
-        },
-      },
-    }
-    expect(await encodingWarnings(doc)).toHaveLength(1)
-  })
-
-  it.each([
-    "application/json",
-    "application/x-www-form-urlencoded",
-    "multipart/form-data",
-    "application/octet-stream",
-  ])("allows ready Blob bodies for %s", async (media) => {
-    expect(await encodingWarnings(request(media, binary))).toStrictEqual([])
-  })
-
-  it("allows raw multipart files, including arrays and aliases", async () => {
-    const doc = request(
-      "multipart/form-data",
-      object({
-        file: { $ref: "#/components/schemas/File" },
-        files: { type: "array", items: { $ref: "#/components/schemas/File" } },
-      }),
-      { file: { contentType: "application/json" } },
-    )
-    doc.components = { schemas: { File: binary } }
-    expect(await encodingWarnings(doc)).toStrictEqual([])
-  })
-
-  it.each([
-    [object({ nested: object({ file: binary }) }), undefined],
-    [object({ files: { type: "array", items: { type: "array", items: binary } } }), undefined],
-    [object({ file: binary }), { file: { style: "form" } }],
-  ])(
-    "warns for multipart binary values that require text serialization",
-    async (schema, encoding) => {
-      expect(
-        await encodingWarnings(request("multipart/form-data", schema, encoding)),
-      ).toMatchObject([
-        {
-          message: expect.stringContaining("ready FormData"),
-        },
-      ])
-    },
-  )
-
-  it("does not warn about response-only Blob schemas or encoded text bytes", async () => {
-    expect(
-      await encodingWarnings(
-        oas("3.1", {
-          components: { schemas: { File: binary } },
-          paths: {
-            "/download": {
-              get: {
-                responses: {
-                  "200": {
-                    description: "File",
-                    content: { "application/json": { schema: object({ file: binary }) } },
-                  },
-                },
-              },
-            },
-          },
-        }),
-      ),
-    ).toStrictEqual([])
-    expect(
-      await encodingWarnings(
-        request(
-          "application/json",
-          object({
-            file: { type: "string", contentEncoding: "base64", contentMediaType: "image/png" },
-          }),
-        ),
-      ),
-    ).toStrictEqual([])
   })
 })

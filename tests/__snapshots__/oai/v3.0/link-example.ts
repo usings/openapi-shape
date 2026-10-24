@@ -73,14 +73,21 @@ export namespace Schemas {
   }
 }
 
-/** Request serialization settings, including schema-derived form defaults. */
-const endpoints = {} as const
+/** Compiled endpoint plans for the Fetch client. */
+const endpoints = {
+  "GET /2.0/users/{username}": {},
+  "GET /2.0/repositories/{username}": {},
+  "GET /2.0/repositories/{username}/{slug}": {},
+  "GET /2.0/repositories/{username}/{slug}/pullrequests": {},
+  "GET /2.0/repositories/{username}/{slug}/pullrequests/{pid}": {},
+  "POST /2.0/repositories/{username}/{slug}/pullrequests/{pid}/merge": {},
+} as const
 
 /** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */
 export const contract: {
   /** The contract's format; `createClient` refuses one it does not read. */
-  readonly version: 4
+  readonly version: 5
   /** Carries `Endpoints` for `createClient` to infer; never set. */
   readonly types?: Endpoints
   readonly endpoints: typeof endpoints
-} = { version: 4, endpoints }
+} = { version: 5, endpoints }

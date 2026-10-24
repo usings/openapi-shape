@@ -34,9 +34,7 @@ export function encodeBody(
     return { body: ready, contentType: own ? undefined : label }
   }
   if (isJsonEssence(essence) || isJsonWildcardEssence(essence)) {
-    // Labelled as the call names it, else as the operation declares its JSON.
-    const declaredJson = contentType === undefined ? declared?.json : undefined
-    return { body: toJson(body), contentType: label ?? declaredJson ?? "application/json" }
+    return { body: toJson(body), contentType: label ?? "application/json" }
   }
   const encodings = declared?.bodyEncodings
   const encoding = encodings && Object.hasOwn(encodings, type) ? encodings[type] : undefined

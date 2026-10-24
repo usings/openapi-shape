@@ -1,11 +1,10 @@
 import { indentTail, jsdoc } from "./jsdoc"
-import type { Field, Literal, Type, Side } from "./model"
+import type { Field, Literal, Type } from "./model"
 import { UNDEFINED, UNKNOWN } from "./model"
 import { propertyKey } from "./naming"
 import { union } from "./type-algebra"
 
 export interface TypeContext {
-  side: Side
   /** Prefix for declaration references: `Schemas.` outside the namespace, `""` inside. */
   refPrefix: string
   /** The global `Blob`, as named where a declaration may shadow it. */
@@ -46,8 +45,7 @@ export function renderFields(
   multiline = false,
 ): string {
   const lines = fields.map((field) => {
-    const optional =
-      !field.required || (field.requiredOnly !== undefined && field.requiredOnly !== context.side)
+    const optional = !field.required
     return `${jsdoc(field.annotations)}${propertyKey(field.name)}${optional ? "?" : ""}: ${renderType(field.type, context)}`
   })
   if (index !== undefined)
@@ -78,8 +76,7 @@ function render(type: Type, context: TypeContext): Rendered {
     case "literal":
       return atom(renderLiteral(type.value))
     case "ref": {
-      const name =
-        context.side === "request" ? (type.target.inputName ?? type.target.name) : type.target.name
+      const name = type.target.name
       return atom(`${context.refPrefix}${name}`)
     }
     case "array":

@@ -1,6 +1,6 @@
 # Client
 
-`openapi-shape/client` provides three ways to consume an API response: decoded results, server-sent events, and a typed `Response`. Each uses [the generated contract](./output.md#the-runtime-contract) for request serialization and endpoint types, with shared request defaults and middleware. The client has no dependencies and runs on standard Fetch API globals.
+`openapi-shape/client` provides three ways to consume an API response: decoded results, typed Web Streams, and a typed `Response`. Each uses [the generated contract](./output.md#the-runtime-contract) for API types and serialization settings, with shared request defaults and middleware. The client has no dependencies and runs on standard Fetch API globals.
 
 The client serializes requests and decodes responses; it does not validate their schemas. If the schema says `{ id: number }` but the server returns `{"id":"wrong"}`, the JSON is still returned with the declared static type. Validate data separately when needed. See [type guarantees and limits](./openapi.md#support-boundaries).
 
@@ -41,17 +41,17 @@ if (error === undefined) {
 
 Choose a method according to the response you need:
 
-| Method                        | Endpoints              | Return value                                                                            |
-| ----------------------------- | ---------------------- | --------------------------------------------------------------------------------------- |
-| `api.result(endpoint, init?)` | Non-SSE endpoints      | A promise of `{ data, error, status, response }` after reading and decoding the body.   |
-| `api.stream(endpoint, init?)` | SSE endpoints          | A promise of `void` when the subscription completes; events arrive through `onMessage`. |
-| `api.fetch(endpoint, init?)`  | All callable endpoints | A promise of the `Response`, typed by status, with its body unread.                     |
+| Method                        | Endpoints               | Return value                                                                                  |
+| ----------------------------- | ----------------------- | --------------------------------------------------------------------------------------------- |
+| `api.result(endpoint, init?)` | Non-streaming endpoints | A promise of `{ data, error, status, response }` after reading and decoding the body.         |
+| `api.stream(endpoint, init?)` | Streaming endpoints     | A native `ReadableStream` of typed SSE messages or JSON line records, returned synchronously. |
+| `api.fetch(endpoint, init?)`  | All callable endpoints  | A promise of the `Response`, typed by status, with its body unread.                           |
 
-An SSE endpoint has a successful response that explicitly declares `text/event-stream`, ignoring media type case and parameters. The [status rules](#status-handling) determine which response declaration applies; `HEAD` and bodyless statuses do not qualify. Wildcards such as `text/*` and SSE declared only for an error do not classify an endpoint as SSE.
+A streaming endpoint has an effective successful response explicitly declaring `text/event-stream`, `application/jsonl`, or `application/x-ndjson`, ignoring media type case and parameters. The [status rules](#status-handling) determine which response declaration applies; `HEAD` and bodyless statuses do not qualify. Wildcards such as `text/*` and media declared only for an error do not classify an endpoint as streaming. A declaration qualifies even when its schema allows no values.
 
-`result` and `stream` accept separate endpoint sets, checked by TypeScript and at runtime. An endpoint offering both JSON and SSE belongs to `stream`; use `fetch` to select and read its JSON representation. For JSON sequences, downloads, and other formats you want to process incrementally, use `fetch` and read `response.body`.
+`result` and `stream` accept separate endpoint sets, checked by TypeScript and at runtime. An endpoint offering both JSON and a supported stream belongs to `stream`; use `fetch` to select and read its JSON representation. `fetch` works with every callable endpoint, including downloads and unsupported sequence formats such as `application/json-seq` and `…+json-seq`.
 
-All calls take the operation's typed inputs and per-call request options. `stream` also accepts [lifecycle callbacks](#lifecycle). Request construction errors, such as missing path parameters, reject the returned promise. `result` and `fetch` resolve for every HTTP status and reject on transport or middleware failures; `result` also rejects on decoding errors. The stream's [connection policy](#reconnection) determines which failures retry.
+All calls take the operation's typed inputs and per-call request options. `stream` also takes a media selection and SSE retry settings. `result` and `fetch` reject their promises on request construction, transport, or middleware failures; they resolve for every HTTP status. `result` also rejects on decoding errors. Stream construction is lazy: request errors surface through stream consumption, and its [connection policy](#reconnection) determines which failures retry.
 
 ## Requests
 
@@ -59,7 +59,7 @@ All calls take the operation's typed inputs and per-call request options. `strea
 
 The second argument combines request options such as `signal`, `cache`, and `keepalive` with the operation's typed inputs below. The endpoint determines `method`; the client types `headers` and `body` from the operation.
 
-This argument is required when `params`, `query`, or `body` is required. Declared headers are optional per call because defaults or middleware may provide them. Unknown endpoints and methods forbidden by Fetch (`CONNECT`, `TRACE`, `TRACK`) produce compile errors on the endpoint argument.
+This argument is required when `params`, `query`, or `body` is required. Declared headers are optional per call because defaults or middleware may provide them. Unknown endpoints produce compile errors and are rejected at runtime before transport. Methods forbidden by Fetch (`CONNECT`, `TRACE`, `TRACK`) are excluded from the generated endpoint map.
 
 | Field         | Rule                                                                                                                                                                                                                                                            |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -69,7 +69,7 @@ This argument is required when `params`, `query`, or `body` is required. Declare
 | `body`        | Required when the request body is required. Not taken with `GET` or `HEAD`, which `fetch` cannot send a body with.                                                                                                                                              |
 | `contentType` | The declared media type of `body`. Optional when there is a default: the sole `application/json` entry, including media type parameters, or otherwise the sole declared media type.                                                                             |
 
-Cookie parameters appear in `Endpoints`, but client calls have no cookie input. Browsers manage cookies; other runtimes can send a `cookie` header.
+Client calls have no cookie input. Browsers manage cookies; other runtimes can send a `cookie` header.
 
 ### Request bodies
 
@@ -83,13 +83,15 @@ The media type determines which body values the client accepts and how it sends 
 | Other `text/*`, except `text/event-stream`       | A string                                | As given                                                                                   |
 | Anything else                                    | A `Blob`, buffer, stream, or string     | As given                                                                                   |
 
+Schema strings remain strings in JSON, parameters, and text-encoded fields. Multipart variants use `Blob` for file parts and arrays of files; object parts, nested arrays, and styled fields use their textual projection. The client does not convert bytes to base64.
+
 Ready bodies such as `Blob`, `FormData`, `URLSearchParams`, and buffers use their own bytes. `FormData` and `URLSearchParams` set their own content type. `fetch` and `result` also accept Web and Node.js streams, sent with half duplex.
 
-Other ready bodies use the selected media type or the generated [`contentType` default](./output.md#the-runtime-contract). An `application/json` default does not relabel them, even when it has parameters. Without a label, a `Blob` uses its own type. Wildcards such as `image/*` do not label a body.
+Other ready bodies use the selected media type or the generated [`contentType` default](./output.md#the-runtime-contract), including `application/json` and its parameters. Without a concrete label, a `Blob` uses its own type. Wildcards such as `image/*` do not label a body.
 
 Only `multipart/form-data` is encoded automatically. For other multipart types, provide an encoded body with its content type and boundary.
 
-`stream` buffers the encoded request body once and reuses those bytes across connection attempts. It accepts JSON, text, forms, blobs, and buffers, and rejects `ReadableStream` and async iterable bodies because they cannot be replayed. A retried POST can repeat an operation; use a server protocol that supports resumption or deduplication where needed.
+On first demand, `stream` builds the request and buffers its encoded body once. SSE reconnections reuse those bytes, including a stable multipart boundary. It accepts JSON, text, forms, blobs, and buffers, and rejects `ReadableStream` and async iterable request bodies. Request fields and body inputs are fixed for that subscription after first demand. A retried POST can repeat an operation. The client provides no exactly-once guarantee; use a server protocol that supports resumption or deduplication where needed. JSON line streams make one managed attempt and never replay automatically.
 
 ### Form field defaults
 
@@ -139,7 +141,7 @@ Path values that create an empty segment, `.` or `..` are rejected because URL n
 
 ### Status handling
 
-Response types and SSE endpoint selection follow the operation's declared statuses:
+Response types and streaming endpoint selection follow the operation's declared statuses:
 
 - A range such as `4XX` stands for each of its statuses not declared on their own.
 - If any 2xx status is declared, the types assume successful responses use one of those statuses. `default` covers all other statuses, including 2xx statuses when none are declared.
@@ -180,7 +182,7 @@ if (error === undefined) {
 
 `data` is the union of decoded bodies for successful statuses; `error` covers the others. Without a declared `default`, undeclared error statuses keep `error` as broad as `{} | null` until a status check narrows it.
 
-The server chooses the response media type. A response declared as both JSON and XML therefore produces `Schemas.Pet | Blob`. For a schema `T`, `application/*` produces `T | Blob`, and `*/*` produces `T | string | Blob`. `text/*` also covers JSON such as `text/json`, so it produces `unknown` unless its schema says which strings. Narrow these unions before accessing schema properties. Raw bytes declared under these wildcards produce `unknown`, since the actual content type determines decoding. Use `api.fetch()` and `blob()` for downloads.
+The server chooses the response media type. A response declared as both JSON and XML therefore produces `Schemas.Pet | Blob`. For a schema `T`, `application/*` produces `T | Blob`, and `*/*` produces `T | string | Blob`. `text/*` also covers JSON such as `text/json`, so it produces `unknown` unless its schema says which strings. Narrow these unions before accessing schema properties. Binary string annotations project to strings for JSON; wildcard results also include the text or `Blob` alternatives their media range permits. Use `api.fetch()` and `blob()` for downloads.
 
 ### Typed responses
 
@@ -203,66 +205,97 @@ if (response.ok) {
 
 ## Streams
 
-`api.stream()` consumes an SSE response one event at a time. Its promise represents the subscription, including any reconnections, and resolves when the server finishes normally or responds with 204.
+`api.stream()` returns a native `ReadableStream<Item>` synchronously. Consume it with `for await`, `getReader()`, `pipeThrough()`, or `pipeTo()`. The client owns parsing and SSE reconnection; application processing belongs to the consumer.
 
 ```ts
 const controller = new AbortController()
-await api.stream("GET /events", {
-  signal: controller.signal,
-  onMessage(event) {
+try {
+  for await (const event of api.stream("GET /events", {
+    signal: controller.signal,
+    retry: false,
+  })) {
     console.log(event.event, event.data)
-  },
-})
+  }
+} finally {
+  controller.abort()
+}
 ```
 
-### Events
+This example reads one SSE connection. Omit `retry: false` to reconnect after EOF. For a long-lived subscription, also call `controller.abort()` from the application's shutdown or unsubscribe handler. Errors during iteration throw at the consuming loop; its `finally` still runs.
+
+### Media selection
+
+When the endpoint declares one supported streaming media type, `accept` is optional. With multiple supported media types, supply the exact full declaration, including its spelling and parameters, such as `accept: "application/x-ndjson; charset=utf-8"`. This selection narrows the item type. `StreamMedia<Endpoints, K>` lists valid selections and `EndpointStreamItem<Endpoints, K, M>` gives the corresponding item type.
+
+The stream sets `Accept` to the selected declaration, overriding any Accept header in defaults or call headers. A successful response must have a matching media type essence (case and parameters are ignored for this check) and an unused, unlocked body. A refused status or invalid response raises `StreamResponseError`; its `response` retains status and headers after its body is canceled. HTTP 204 closes the stream without reading a body.
+
+### Demand and memory
+
+The first read or pipe demand builds the request, snapshots its inputs and encoded body, and starts transport. Creating the stream or merely acquiring a reader does not fetch. Mutations before first demand affect the request; after that point, the subscription keeps the same request inputs across SSE attempts.
+
+The stream uses a high water mark of zero and adds no application event queue. Each demand parses the next record; a slow consumer pauses parsing and later response reads. This does not bound total memory: one record, an already received transport chunk, and the buffered replay request body can each be arbitrarily large. The runtime and transport may buffer additional bytes independently.
+
+### SSE messages
 
 The client parses UTF-8 chunks and SSE fields into messages with these properties:
 
-| Property | Value                                                          |
-| -------- | -------------------------------------------------------------- |
-| `data`   | String formed by joining the event's data lines with newlines. |
-| `event`  | Event name, or `"message"` when none is given.                 |
-| `id`     | Current event cursor. An empty `id:` clears it.                |
-| `retry`  | Optional numeric reconnection interval supplied in the event.  |
+| Property | Value                                                                 |
+| -------- | --------------------------------------------------------------------- |
+| `data`   | String formed by joining the event's data lines with newlines.        |
+| `event`  | Event name, or `"message"` when none is given.                        |
+| `id`     | Current event cursor. An empty `id:` clears it.                       |
+| `retry`  | Optional reconnection interval in milliseconds supplied in the event. |
 
-`onMessage` receives named events as well as default events. Comments and blocks without data do not produce messages. An incomplete event at EOF is discarded.
+Named and default events are both emitted. Comments and blocks without data emit no message. An incomplete event at EOF is discarded. The resume ID commits only when its block completes, including blocks without data; incomplete blocks cannot advance it. IDs are sent as UTF-8 in `Last-Event-ID` on reconnection, and an empty ID removes that header.
 
-The operation's `itemSchema` narrows the standard message fields, including literal event names and unions. Without it, messages use `StreamMessage`. Additional schema properties are not synthesized. `data` remains text even when it contains JSON; parse it in your handler according to your protocol. See [sequential content types](./openapi.md#sequential-content) for how the schema describes an event.
+The operation's `itemSchema` narrows standard message fields, including literal event names and unions. Without it, messages use `StreamMessage`. Additional schema properties are not synthesized. `data` remains text even when it contains JSON; parse it according to your protocol. See [sequential content](./openapi.md#sequential-content) for schema rules.
 
-### Lifecycle
+### JSON line records
 
-Callbacks run in order and may return promises. The client awaits each handler before delivering another event, so asynchronous processing applies backpressure.
+`application/jsonl` and `application/x-ndjson` emit one parsed JSON value per UTF-8 line. Objects, arrays, strings, numbers, booleans, and `null` are allowed. LF and CRLF delimit records, and a valid final record without a trailing newline is emitted before EOF closes the stream.
 
-| Callback             | When it runs                                                                  |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `onOpen(response)`   | After validating each successful SSE connection, before reading events.       |
-| `onMessage(message)` | For each complete event containing data.                                      |
-| `onClose()`          | At normal EOF or on a 204 response.                                           |
-| `onError(error)`     | After a connection, reading, or callback failure, to decide whether to retry. |
+Blank or whitespace-only lines, invalid JSON, a byte order mark, and malformed UTF-8 error the stream with `StreamParseError`. Its `line` property is one-based and its `cause` retains the parsing or decoding failure. Error messages omit record contents. Parsing does not validate the operation's schema.
 
-The client supplies `Accept: text/event-stream` when no Accept header is configured. A successful connection must have an SSE content type and a body; 204 completes without opening an event reader. A refused response raises `StreamResponseError`, whose `response` retains its status and headers. Its body is canceled before error handling.
+JSON line streams have no automatic retry and reject a `retry` option. Transport, body reading, and parsing failures propagate to the consumer. Reopening after an error is an application decision; records already received could be delivered again.
 
 ### Reconnection
 
-The default policy is:
+SSE reconnects within the same stream by default, beginning with a 1000 ms delay and no retry limit. Configure `retry: { delay: 500, maxRetries: 3 }` or disable reconnection with `retry: false`. `delay` and `maxRetries` must be non-negative safe integers. `maxRetries` counts total additional managed connection attempts for the subscription; successful events do not reset it. `maxRetries: 0` permits only the initial attempt.
 
-| Outcome                                                     | Action                                      |
-| ----------------------------------------------------------- | ------------------------------------------- |
-| Transport/read failure, HTTP 408, 429, or 5xx               | Reconnect after the current retry interval. |
-| Other HTTP error, invalid SSE response, or callback failure | Reject with the error.                      |
-| Normal EOF or HTTP 204                                      | Complete after `onClose`.                   |
-| Call signal aborted                                         | Stop and reject with `signal.reason`.       |
+| Outcome                                                                                               | SSE action                                                                                    |
+| ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Normal EOF                                                                                            | Reconnect after the current interval; close normally when retries are exhausted.              |
+| HTTP 204                                                                                              | Close normally.                                                                               |
+| Actual transport or response-read failure; HTTP 408, 429, or 500–599                                  | Retry after the current interval; error with the original failure when retries are exhausted. |
+| Other HTTP error, invalid media or body, request construction error, or middleware's own thrown error | Error the stream immediately.                                                                 |
+| Call signal aborted                                                                                   | Error immediately with `signal.reason`, including while paused between reads.                 |
 
-The retry interval starts at 1000 ms. A valid SSE `retry:` field updates it for subsequent attempts. `onError` can override the policy: return a finite non-negative number to retry after that many milliseconds, `false` to reject with the original error, or nothing to keep the default. Throwing rejects with the thrown error. To reopen a subscription after normal EOF, throw from `onClose` and return a delay from `onError` for that error.
+A valid SSE `retry:` field consists only of ASCII digits and must represent a safe integer. It replaces the subscription's current interval. A valid `Retry-After` on a retryable HTTP response increases that attempt's wait to the larger of its value and the current interval; it does not change the interval for subsequent attempts. With retries disabled, normal EOF closes and errors propagate directly.
 
-Each attempt uses the [same encoded request body](#request-bodies) and runs through the full middleware chain. The latest completed event block's cursor is sent as `Last-Event-ID`. Events may be delivered more than once; applications that need deduplication should use their IDs.
+Each managed attempt uses the [same encoded request body](#request-bodies) and traverses the full middleware chain. The latest completed block's cursor is sent as `Last-Event-ID`. Events may be delivered more than once; applications that need deduplication should use their IDs. Attempts initiated inside retry middleware are outside `maxRetries`.
 
-### Cancellation
+### Cancellation and pipes
 
-Call `controller.abort()` from your shutdown or unsubscribe handler. Cancellation closes the active reader, clears the retry timer, and prevents further attempts, including while a callback or transport is still pending. A callback's own asynchronous work must observe the signal if it needs cancellation too.
+Aborting the call's signal errors the stream with `signal.reason`, cancels active reads and transport, clears a pending retry timer, and prevents further managed attempts. It works before first demand and while the consumer is paused. Breaking out of `for await`, calling `reader.cancel()`, or canceling an unlocked stream performs cleanup and closes consumption normally. Releasing a reader's lock alone does not cancel the subscription; cancel it or abort the signal when finished.
 
-Subscriptions keep running when a browser page becomes hidden. Their lifecycle is controlled by the server, callbacks, and call signal in both browsers and Node.
+Standard pipe cancellation and error propagation apply. Await or handle the promise returned by `pipeTo()`:
+
+```ts
+const events = api.stream("GET /events", { retry: false })
+try {
+  await events.pipeTo(
+    new WritableStream({
+      write(event) {
+        console.log(event.data)
+      },
+    }),
+  )
+} catch (error) {
+  console.error("Event processing stopped", error)
+}
+```
+
+A destination error cancels its source unless pipe options disable cancellation. Handle failures from your own asynchronous processing too. Subscriptions continue when a browser page becomes hidden; use a call signal for application shutdown in browsers and Node.
 
 ## Middleware
 
@@ -308,8 +341,9 @@ A middleware may forward a different request, return a response without calling 
 ### Requests, bodies, and retries
 
 - Middleware receives the same `Request` object passed by its caller. In-place changes remain visible to outer middleware, so an outer logger could expose a newly added token. Forward a copy with `new Request(request)` or `new Request(request, init)` to isolate changes. These constructors take over the original body.
-- Bodies can be read only once. For retries, clone the request before the first attempt. To inspect a response body, read a `response.clone()` and return the original; consuming the original leaves no body for the caller to read or parse. Cancel discarded response bodies with `response.body?.cancel()` so their connections can be reused.
-- Stream reconnection creates a fresh request and reruns the chain. Retry middleware can add attempts within each connection attempt, so account for both retry policies.
+- Bodies can be read only once. For retries, clone the request before the first attempt. For finite responses, a `response.clone()` can be read while returning the original. Avoid `clone().text()` on indefinite streams: it waits for EOF, and teeing a response can buffer unconsumed data. Observe stream response status and headers in middleware around the same request instead of making a separate observation request. Cancel discarded response bodies with `response.body?.cancel()` so their connections can be reused.
+- Preserve `request.signal` when constructing replacement requests so stream cancellation reaches transport and response reading. `new Request(request, init)` preserves it unless `init.signal` replaces it; combine additional signals with `AbortSignal.any` as above.
+- Stream reconnection creates a fresh request and reruns the chain. Retry middleware can add attempts within each connection attempt; those attempts do not count toward the stream's `maxRetries`. Middleware's own thrown errors are fatal to SSE; an actual transport rejection passed through unchanged is eligible for retry.
 - A function that takes only a request also qualifies as middleware and can stop the chain. Put transport test doubles in the `fetch` option so every middleware still runs.
 
 ### Credentials and timeouts
@@ -320,12 +354,12 @@ A call's `signal` limits the whole call, including a stream subscription's retri
 
 ## Typed wrappers
 
-The client exports helper types for functions that forward calls. `Endpoints` is the generated interface; `K` selects one endpoint.
+The client exports helper types for functions that forward calls. `Endpoints` is the generated description of request fields and responses; `K` selects one endpoint. These helpers derive call arguments, decoded data, and stream messages from that description.
 
-| Method   | Endpoint keys               | Arguments                    | Data                                                      |
-| -------- | --------------------------- | ---------------------------- | --------------------------------------------------------- |
-| `fetch`  | `Endpoint<Endpoints>`       | `EndpointArgs<Endpoints, K>` | The returned `TypedResponse` narrows by status.           |
-| `result` | `ResultEndpoint<Endpoints>` | `EndpointArgs<Endpoints, K>` | `EndpointData<Endpoints, K>` is the decoded success data. |
-| `stream` | `StreamEndpoint<Endpoints>` | `StreamArgs<Endpoints, K>`   | `EndpointMessage<Endpoints, K>` is a parsed event.        |
+| Method   | Endpoint keys               | Arguments                     | Data                                                               |
+| -------- | --------------------------- | ----------------------------- | ------------------------------------------------------------------ |
+| `fetch`  | `Endpoint<Endpoints>`       | `EndpointArgs<Endpoints, K>`  | The returned `TypedResponse` narrows by status.                    |
+| `result` | `ResultEndpoint<Endpoints>` | `EndpointArgs<Endpoints, K>`  | `EndpointData<Endpoints, K>` is the decoded success data.          |
+| `stream` | `StreamEndpoint<Endpoints>` | `StreamArgs<Endpoints, K, M>` | `EndpointStreamItem<Endpoints, K, M>` is the selected parsed item. |
 
-The argument types preserve required parameters and bodies. Constrain a wrapper's endpoint to the key type for its method; a single call cannot take a union of endpoint keys. `StreamOptions<Message>` describes the lifecycle callbacks separately when defining reusable handlers.
+The argument types preserve required parameters and bodies. Constrain a wrapper's endpoint to the key type for its method; a single call cannot take a union of endpoint keys. For streams, `M` extends `StreamMedia<Endpoints, K>` and defaults to all supported media; preserve it in wrappers so `accept` narrows the returned `ReadableStream`. `EndpointMessage<Endpoints, K>` remains the SSE-specific message helper. `StreamOptions` describes media selection and retry settings; `StreamRetryOptions` contains `delay` and `maxRetries`.

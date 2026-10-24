@@ -82,7 +82,7 @@ Only what scanning the repo would miss.
 - Run `pnpm verify` for tests, type checking, lint, and formatting.
 - Release only when asked: pushing a `v*` tag publishes to npm; `pnpm release` creates one.
 - Generated output is a public format; `--check` compares bytes. Changes are High and update `README.md` and `docs/` together. Use a `!` commit if old output stops compiling or an old contract stops working.
-- Contract format changes bump `version` in the renderer and `src/client/contract.ts`. Accept only that version; mismatches require regeneration with the installed package. Keep no historical readers or compatibility fixtures.
+- Contract format changes bump `version` in the renderer and `src/shared/contract.ts`. Accept only that version; mismatches require regeneration with the installed package. Keep no historical readers or compatibility fixtures.
 - Update `tests/__snapshots__/` (`-u`) only for intended output changes; report before/after.
 - Extensionless `src` imports cannot run directly in Node. Use `pnpm build`, then `node dist/cli.mjs <doc> -o <tmp>/out.ts`.
 - oxlint omits `--type-aware`; check those rules in `.oxlintrc.json` manually.
