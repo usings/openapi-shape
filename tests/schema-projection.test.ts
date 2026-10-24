@@ -442,7 +442,7 @@ export const invalidQuery: Input = { body: { file: "bytes" }, query: { q: new Bl
           >
         >(code),
         {
-          baseUrl: "https://api.test",
+          baseURL: "https://api.test",
           fetch: (request) => {
             sent.push(request)
             return Promise.resolve(new Response(null, { status: 204 }))

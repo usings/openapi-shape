@@ -74,6 +74,11 @@ api.stream("GET /records", { retry: { delay: 10 } })
 // @ts-expect-error even retry:false is SSE-only
 api.stream("GET /jsonl", { retry: false })
 api.stream("POST /events/{id}", { params: { id: 1 }, query: { topic: "orders" }, body: { name: "a" } })
+api.stream("POST /events/{id}", { baseURL: new URL("https://events.test"), params: { id: 1 }, query: { topic: "orders" }, body: { name: "a" } })
+// @ts-expect-error baseURL does not make the stream's inputs optional
+api.stream("POST /events/{id}", { baseURL: "https://events.test" })
+// @ts-expect-error stream baseURL must be a string or URL
+api.stream("GET /events", { baseURL: 42 })
 // @ts-expect-error required operation inputs stay required
 api.stream("POST /events/{id}")
 // @ts-expect-error query remains required

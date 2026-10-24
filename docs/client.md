@@ -8,7 +8,7 @@ The client serializes requests and decodes responses; it does not validate their
 import { createClient } from "openapi-shape/client"
 import { contract } from "./api"
 
-const api = createClient(contract, { baseUrl: "https://api.example.com/v1" })
+const api = createClient(contract, { baseURL: "https://api.example.com/v1" })
 
 const {
   data: pet,
@@ -32,7 +32,7 @@ if (error === undefined) {
 
 | Option           | Description                                                                                                                                                                                                       |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `baseUrl`        | The prefix for endpoint paths, such as `https://api.example.com/v1`. Queries and fragments are not allowed. Omit it for relative URLs in a browser; Node requires an absolute URL.                                |
+| `baseURL`        | The prefix for endpoint paths, such as `https://api.example.com/v1`. Queries and fragments are not allowed. Omit it for relative URLs in a browser; Node requires an absolute URL.                                |
 | `middleware`     | Functions that wrap each request, with the first running outermost. See [Middleware](#middleware).                                                                                                                |
 | `fetch`          | The transport function: takes a `Request` and resolves to a `Response` after the middleware runs. Defaults to global `fetch`; replace it with a test double or custom transport.                                  |
 | Request defaults | `RequestInit` fields other than `method`, `body`, and `signal`, including `headers`, `credentials`, and `cache`. Each call overrides these defaults; headers are merged with the call's values taking precedence. |
@@ -54,6 +54,8 @@ A streaming endpoint has an effective successful response explicitly declaring `
 All calls take the operation's typed inputs and per-call request options. `stream` also takes a media selection and SSE retry settings. `result` and `fetch` reject their promises on request construction, transport, or middleware failures; they resolve for every HTTP status. `result` also rejects on decoding errors. Stream construction is lazy: request errors surface through stream consumption, and its [connection policy](#reconnection) determines which failures retry.
 
 ## Requests
+
+A call can override the client's `baseURL`, for example to upload to another domain. Omitting it or passing `undefined` uses the client default. For SSE, the address is fixed at first demand and reused on reconnection.
 
 ### What a call takes
 
@@ -329,7 +331,7 @@ const logger = defineMiddleware(async (request, next) => {
 })
 
 export const api = createClient(contract, {
-  baseUrl: "https://api.example.com/v1",
+  baseURL: "https://api.example.com/v1",
   middleware: [logger, timeout, auth],
 })
 ```

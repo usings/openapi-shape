@@ -26,7 +26,7 @@ export function sseClient(options: ClientOptions = {}) {
         "GET /ordinary": {},
       },
     },
-    { baseUrl: "https://example.test", ...options },
+    { baseURL: "https://example.test", ...options },
   )
 }
 

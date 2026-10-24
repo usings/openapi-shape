@@ -12,7 +12,7 @@ export function recorder<Api>(
 ): { client: Client<Api>; sent: () => Request; requests: Request[] } {
   const requests: Request[] = []
   const client = createClient(given, {
-    baseUrl: "https://x.test",
+    baseURL: "https://x.test",
     ...options,
     fetch: (request) => {
       requests.push(request)

@@ -142,7 +142,7 @@ import { createClient } from "openapi-shape/client"
 import type { contract } from "./api"
 
 export async function run(generated: typeof contract, fetch: (request: Request) => Promise<Response>) {
-  const api = createClient(generated, { baseUrl: "https://api.test", fetch })
+  const api = createClient(generated, { baseURL: "https://api.test", fetch })
   const input = { params: { ids: ["a/b", "c"] }, query: { tags: ["x&y", "z"], filter: { id: 7 } } }
   const results = []
   for (let i = 0; i < 4; i++) {
@@ -353,7 +353,7 @@ describe("generated request plans", () => {
         contentType: "application/json",
       },
     })
-    // The client sends every request to its baseUrl; the document's servers are documentation.
+    // Server declarations do not choose a baseURL for the client or its calls.
     expect(result.code).toContain("// Server: https://api.test/v1\n")
     expect(codes(result.diagnostics).filter((c) => c.startsWith("ignored"))).toStrictEqual([
       "ignored-field #/paths/~1items~1{id}/servers",
@@ -495,7 +495,7 @@ describe("generated request plans", () => {
     const contract = await contractOf(code)
     expect(contract.endpoints["CuStOm /custom"]).toStrictEqual({})
     const api = createClient(contract, {
-      baseUrl: "https://api.test",
+      baseURL: "https://api.test",
       fetch: (request) => {
         expect(request.method).toBe("CuStOm")
         return Promise.resolve(new Response(null, { status: 204 }))
@@ -738,7 +738,7 @@ message.data satisfies string
       ),
     ).toBe("")
     const api = createClient(contract, {
-      baseUrl: "https://example.test",
+      baseURL: "https://example.test",
       fetch: () => Promise.resolve(response("event: removed\ndata: gone\n\n")),
     })
     const messages: StreamMessage[] = []

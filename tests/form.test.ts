@@ -49,7 +49,7 @@ async function generatedClient(document: object) {
   >(code)
   const requests: Request[] = []
   const client = createClient(contract, {
-    baseUrl: "https://api.test",
+    baseURL: "https://api.test",
     fetch: (request) => {
       requests.push(request)
       return Promise.resolve(new Response(null, { status: 204 }))
@@ -93,7 +93,7 @@ describe("form encoding plans", () => {
           }>(code)
           const requests: Request[] = []
           const client = createClient(contract, {
-            baseUrl: "https://api.test",
+            baseURL: "https://api.test",
             fetch: (request) => {
               requests.push(request)
               return Promise.resolve(new Response(null, { status: 204 }))
@@ -175,7 +175,7 @@ describe("form encoding plans", () => {
     }>(code)
     const requests: Request[] = []
     const api = createClient(contract, {
-      baseUrl: "https://api.test",
+      baseURL: "https://api.test",
       fetch: (request) => {
         requests.push(request)
         return Promise.resolve(new Response(null, { status: 204 }))
@@ -224,7 +224,7 @@ describe("form encoding plans", () => {
     }>(code)
     const requests: Request[] = []
     const api = createClient(generated, {
-      baseUrl: "https://api.test",
+      baseURL: "https://api.test",
       fetch: (request) => {
         requests.push(request)
         return Promise.resolve(new Response(null, { status: 204 }))
@@ -368,7 +368,7 @@ describe("form encoding plans", () => {
     expect(generated.endpoints["POST /form"]?.bodyEncodings).toBeUndefined()
     const sent: string[] = []
     const api = createClient(generated, {
-      baseUrl: "https://api.test",
+      baseURL: "https://api.test",
       fetch: async (request) => {
         sent.push(await request.text())
         return new Response(null, { status: 204 })
@@ -418,7 +418,7 @@ describe("form encoding plans", () => {
     }>(explicit.code)
     const requests: Request[] = []
     const api = createClient(generated, {
-      baseUrl: "https://api.test",
+      baseURL: "https://api.test",
       fetch: (request) => {
         requests.push(request)
         return Promise.resolve(new Response(null, { status: 204 }))

@@ -76,6 +76,15 @@ paths:
                 type: object
                 required: [data]
                 properties: { data: { type: string }, event: { type: string } }
+  /records:
+    get:
+      responses:
+        "200":
+          content:
+            application/x-ndjson:
+              itemSchema: { $ref: "#/components/schemas/Pet" }
+            application/jsonl:
+              itemSchema: { $ref: "#/components/schemas/Pet" }
 webhooks:
   pet.created:
     post:

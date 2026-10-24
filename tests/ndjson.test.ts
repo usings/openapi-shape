@@ -42,7 +42,7 @@ function api(options: ClientOptions = {}) {
         "GET /mixed": { stream: ["text/event-stream", "application/x-ndjson"] },
       },
     },
-    { baseUrl: "https://example.test", ...options },
+    { baseURL: "https://example.test", ...options },
   )
 }
 

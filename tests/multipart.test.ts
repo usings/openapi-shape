@@ -32,7 +32,7 @@ async function generatedClient(content: object) {
   }>(code)
   const requests: Request[] = []
   const client = createClient(contract, {
-    baseUrl: "https://api.test",
+    baseURL: "https://api.test",
     fetch: (request) => {
       requests.push(request)
       return Promise.resolve(new Response(null, { status: 204 }))
@@ -291,7 +291,7 @@ it("treats any style field of a hand-written contract as style-based, ignoring c
     }>
   }>
   const client = createClient(contract, {
-    baseUrl: "https://api.test",
+    baseURL: "https://api.test",
     fetch: (request) => {
       requests.push(request)
       return Promise.resolve(new Response(null, { status: 204 }))

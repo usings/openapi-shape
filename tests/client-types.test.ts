@@ -79,7 +79,9 @@ void function endpointChecks(client: Client<Endpoints>): void {
 }
 
 void function clientOptionChecks(): void {
-  void createClient(contract, { baseUrl: new URL("https://api.test"), fetch: globalThis.fetch })
+  void createClient(contract, { baseURL: new URL("https://api.test"), fetch: globalThis.fetch })
+  // @ts-expect-error the option is named baseURL
+  void createClient(contract, { baseUrl: "https://api.test" })
   // @ts-expect-error one signal would cancel every request; a call or the fetch option takes it
   void createClient(contract, { signal: AbortSignal.timeout(10_000) })
   // @ts-expect-error contract entries name declared endpoints
@@ -88,6 +90,21 @@ void function clientOptionChecks(): void {
   void createClient({ ...contract, version: 4 })
   // @ts-expect-error a newer contract must be regenerated with the installed package
   void createClient({ ...contract, version: 6 })
+}
+
+void function callBaseURLChecks(client: Client<Endpoints>): void {
+  void client.fetch("GET /pets", { baseURL: "https://api.test/v2" })
+  void client.result("GET /pets/{id}", {
+    baseURL: new URL("https://uploads.test"),
+    params: { id: 1 },
+  })
+  void client.stream("GET /events", { baseURL: "https://events.test" })
+  // @ts-expect-error the per-call option is named baseURL
+  void client.fetch("GET /pets", { baseUrl: "https://api.test" })
+  // @ts-expect-error baseURL must be a string or URL
+  void client.result("GET /pets", { baseURL: 42 })
+  // @ts-expect-error baseURL does not make path parameters optional
+  void client.fetch("GET /pets/{id}", { baseURL: "https://api.test" })
 }
 
 const jsonResponse = (schema: unknown) => ({
@@ -479,7 +496,7 @@ async function use() {
       }),
     ).toBe("")
     const api = createClient(await contractOf(code), {
-      baseUrl: "https://api.test",
+      baseURL: "https://api.test",
       fetch: () => Promise.resolve(Response.json("raw")),
     })
     const response = await api.fetch("GET /mixed0")
@@ -954,7 +971,11 @@ describe("platform types", () => {
         "use.ts": [
           'import { createClient } from "openapi-shape/client"',
           'import { contract } from "./api"',
-          'const api = createClient(contract, { baseUrl: "https://api.test" })',
+          'const api = createClient(contract, { baseURL: "https://api.test" })',
+          "createClient(contract, { baseURL: undefined })",
+          'void api.fetch("GET /pets", { baseURL: undefined })',
+          'void api.result("GET /pets", { baseURL: new URL("https://other.test") })',
+          'void api.stream("GET /events", { baseURL: undefined, retry: false })',
           'void api.fetch("PATCH /pets/{id}", { params: { id: 1 } })',
           'void api.fetch("PATCH /pets/{id}", { params: { id: 1 }, body: undefined })',
           "export async function use(): Promise<{ id: number }[] | undefined> {",

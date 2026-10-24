@@ -61,6 +61,44 @@ describe("SSE parser", () => {
 describe("SSE connections", () => {
   afterEach(() => vi.useRealTimers())
 
+  it("snapshots the call baseURL on first demand and reuses it when reconnecting", async () => {
+    const requests: Request[] = []
+    const api = client({
+      fetch: (request) => {
+        requests.push(request)
+        return Promise.resolve(
+          requests.length === 1 ? response() : new Response(null, { status: 204 }),
+        )
+      },
+    })
+    const baseURL = new URL("https://events.test/v1/")
+    const events = api.stream("GET /events", { baseURL, retry: { delay: 0, maxRetries: 1 } })
+    const reader = events.getReader()
+    expect(requests).toHaveLength(0)
+    baseURL.pathname = "/v2/"
+    expect(await reader.read()).toMatchObject({ value: { data: "hello" } })
+    baseURL.hostname = "changed.test"
+    baseURL.pathname = "/changed"
+    expect(await reader.read()).toMatchObject({ done: true })
+    reader.releaseLock()
+    await api.fetch("GET /ordinary")
+    expect(requests.map((request) => request.url)).toStrictEqual([
+      "https://events.test/v2/events",
+      "https://events.test/v2/events",
+      "https://example.test/ordinary",
+    ])
+  })
+
+  it("rejects an invalid call baseURL lazily without connecting", async () => {
+    const fetch = vi.fn<Fetcher>()
+    const events = client({ fetch }).stream("GET /events", {
+      baseURL: "https://events.test/?token=x",
+    })
+    expect(fetch).not.toHaveBeenCalled()
+    await expect(events.getReader().read()).rejects.toThrow("baseURL")
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it("replays fixed bytes through fresh middleware and resumes only a completed event ID", async () => {
     vi.useFakeTimers()
     const seen: Array<{ body: string; auth: string | null; id: string | null }> = []

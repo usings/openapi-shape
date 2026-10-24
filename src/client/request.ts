@@ -6,6 +6,7 @@ import { isInstance, isStream } from "./values"
 
 /** What a call takes at run time: its parameters, its body, and any other `RequestInit` field. */
 export interface CallInit extends Omit<RequestInit, "headers" | "body"> {
+  baseURL?: string | URL | undefined
   params?: Record<string, unknown>
   query?: unknown
   headers?: Headers | Array<[string, string]> | Record<string, unknown>
@@ -32,9 +33,10 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
   const separator = endpoint.indexOf(" ")
   const method = endpoint.slice(0, separator)
   const path = endpoint.slice(separator + 1)
-  const { params, query, headers: given, body: value, contentType, ...rest } = init
+  const { baseURL, params, query, headers: given, body: value, contentType, ...rest } = init
 
-  let url = defaults.prefix + expandPath(path, params, declared.params)
+  const prefix = baseURL === undefined ? defaults.prefix : normalizeBaseURL(baseURL)
+  let url = prefix + expandPath(path, params, declared.params)
   if (query !== undefined) url = appendQuery(url, serializeQuery(query, declared))
 
   const headers = new Headers(defaults.headers)
@@ -80,6 +82,13 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
   // Streaming request bodies need half duplex (Fetch Standard).
   if (isStream(body)) requestInit.duplex = "half"
   return new Request(url, requestInit)
+}
+
+/** Endpoint paths append to this prefix, so a query or fragment cannot be part of it. */
+export function normalizeBaseURL(baseURL: string | URL | undefined): string {
+  const prefix = baseURL === undefined ? "" : String(baseURL).replace(/\/+$/, "")
+  if (/[?#]/.test(prefix)) throw new TypeError(`baseURL "${prefix}" has a query or fragment`)
+  return prefix
 }
 
 function appendQuery(url: string, query: string): string {

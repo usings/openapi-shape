@@ -160,7 +160,7 @@ Form encodings use the selected media type, including its parameters. An explici
 
 `stream` includes explicit `text/event-stream`, `application/jsonl`, and `application/x-ndjson` declarations, retaining case and parameters. Entries are unique and follow response and media declaration order after applying status precedence. `HEAD`, 204, and 205 do not qualify, and a media declaration still qualifies when its schema is `never`. A registry entry such as `stream: ["text/event-stream", "application/x-ndjson; charset=utf-8"]` makes `accept` required for `api.stream()`. Every endpoint remains callable with `fetch`; endpoints with stream media are excluded from `result`.
 
-Connection settings belong to client configuration: `baseUrl` selects the server, credentials come from headers or middleware, and the runtime manages cookies. Method and path come from each endpoint key. The contract stores serialization settings and supported streaming media; it contains no executable schemas or transport code.
+Connection settings belong to client configuration: `baseURL` selects the server, credentials come from headers or middleware, and the runtime manages cookies. Method and path come from each endpoint key. The contract stores serialization settings and supported streaming media; it contains no executable schemas or transport code.
 
 ### Format compatibility
 

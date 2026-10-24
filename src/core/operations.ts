@@ -193,7 +193,7 @@ class OperationBuilder {
         if (!Array.isArray(at?.value) || at.value.length === 0) continue
         this.context.warn(
           "ignored-field",
-          "Servers of a path or operation are not applied: the client sends every request to its baseUrl; use a second client for these operations",
+          "Servers of a path or operation are not applied: set baseURL on the client or the individual call",
           at,
         )
       }

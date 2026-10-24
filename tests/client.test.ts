@@ -29,10 +29,10 @@ function refuse(): never {
 
 describe("contract validation", () => {
   it("refuses a base URL that would swallow the path", () => {
-    expect(() => createClient(contract, { baseUrl: "https://api.test/v1?k=1" })).toThrow(
+    expect(() => createClient(contract, { baseURL: "https://api.test/v1?k=1" })).toThrow(
       "has a query or fragment",
     )
-    expect(() => createClient(contract, { baseUrl: new URL("https://api.test/v1#top") })).toThrow(
+    expect(() => createClient(contract, { baseURL: new URL("https://api.test/v1#top") })).toThrow(
       "has a query or fragment",
     )
   })
@@ -84,6 +84,61 @@ describe("contract validation", () => {
 })
 
 describe("requests", () => {
+  it.each(["fetch", "result"] as const)(
+    "overrides baseURL for one %s call without changing later requests",
+    async (method) => {
+      const { client, requests } = recorder(contract, {
+        baseURL: "https://api.test/v1/",
+        headers: { "x-client": "shared" },
+      })
+      await client[method]("GET /pets/{id}", {
+        baseURL: new URL("https://uploads.test/v2/"),
+        params: { id: 7 },
+      })
+      await client[method]("GET /pets", { baseURL: undefined })
+      expect(requests.map((request) => request.url)).toStrictEqual([
+        "https://uploads.test/v2/pets/7",
+        "https://api.test/v1/pets",
+      ])
+      expect(requests[0].headers.get("x-client")).toBe("shared")
+    },
+  )
+
+  it("uses independent baseURL values for concurrent uploads and ordinary requests", async () => {
+    const { client, requests } = recorder(contract, { baseURL: "https://api.test/v1" })
+    await Promise.all([
+      client.fetch("POST /upload", {
+        baseURL: "https://uploads.test/files///",
+        contentType: "multipart/form-data",
+        body: { file: new Blob(["portrait"]) },
+      }),
+      client.result("GET /search", {
+        baseURL: "https://search.test/v2",
+        query: { q: "Milo & Luna" },
+      }),
+      client.fetch("GET /pets"),
+    ])
+    expect(requests.map((request) => request.url)).toStrictEqual([
+      "https://uploads.test/files/upload",
+      "https://search.test/v2/search?q=Milo%20%26%20Luna",
+      "https://api.test/v1/pets",
+    ])
+    const form = await requests[0].formData()
+    expect(await (form.get("file") as Blob).text()).toBe("portrait")
+  })
+
+  it.each(["https://uploads.test/v2?token=x", "https://uploads.test/v2#fragment"])(
+    "rejects a per-call baseURL containing a query or fragment: %s",
+    async (baseURL) => {
+      const { client, requests } = recorder(contract)
+      await expect(client.fetch("GET /pets", { baseURL })).rejects.toThrow("baseURL")
+      await expect(client.result("GET /pets", { baseURL })).rejects.toThrow("baseURL")
+      expect(requests).toHaveLength(0)
+      await client.fetch("GET /pets")
+      expect(requests[0].url).toBe("https://x.test/pets")
+    },
+  )
+
   it.each(["GET /missing", "toString", "constructor", "__proto__"])(
     "rejects endpoint %s absent from the own registry without sending",
     async (endpoint) => {
@@ -168,7 +223,7 @@ describe("requests", () => {
 describe("parameters", () => {
   describe("parameter serialization", () => {
     it("expands path parameters with simple style under the base URL", async () => {
-      const { client, sent } = recorder(contract, { baseUrl: "https://api.test/v1/" })
+      const { client, sent } = recorder(contract, { baseURL: "https://api.test/v1/" })
       await client.fetch("GET /pets/{id}", { params: { id: 7 } })
       expect([sent().method, sent().url]).toStrictEqual(["GET", "https://api.test/v1/pets/7"])
     })
@@ -663,7 +718,7 @@ describe("responses", () => {
   it("hands the request to the fetch option, called unbound, and resolves to its response", async () => {
     const answer = new Response("{}", { status: 404 })
     const client = createClient(contract, {
-      baseUrl: "https://api.test",
+      baseURL: "https://api.test",
       // A browser's fetch refuses to be called on another object.
       fetch(this: unknown, request) {
         expect(this).toBeUndefined()
@@ -829,7 +884,7 @@ describe("middleware", () => {
       { middleware: [fallback, refuse] },
       { middleware: [fallback], fetch: refuse },
     ]) {
-      const client = createClient(contract, { baseUrl: "https://x.test", ...options })
+      const client = createClient(contract, { baseURL: "https://x.test", ...options })
       // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
       const response = await client.fetch("GET /pets")
       expect(response.status).toBe(503)

@@ -174,8 +174,7 @@ export type StreamArgs<
 type Init<Op extends Operation, Method extends string> = Omit<
   RequestInit,
   "method" | "headers" | "body"
-> &
-  Field<"params", Op> &
+> & { baseURL?: string | URL | undefined } & Field<"params", Op> &
   Field<"query", Op> &
   HeadersField<Op> &
   // fetch cannot send a body with GET or HEAD.

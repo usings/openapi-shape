@@ -3,7 +3,7 @@ import { CONTRACT_VERSION } from "../shared/contract"
 import { streamFormat } from "../shared/media"
 import { decodeBody } from "./body"
 import type { CallInit, RequestDefaults } from "./request"
-import { buildRequest } from "./request"
+import { buildRequest, normalizeBaseURL } from "./request"
 import type { StreamSender } from "./stream"
 import { stream as subscribe } from "./stream"
 import type {
@@ -43,8 +43,8 @@ export { StreamResponseError } from "./stream"
  * (a timeout would run out for all of them at once), plus where and how requests are sent.
  */
 export interface ClientOptions extends Omit<RequestInit, "method" | "body" | "signal"> {
-  /** Prefix for endpoint paths, such as `https://api.example.com/v1`. Without it, URLs are relative. */
-  baseUrl?: string | URL
+  /** Default prefix for endpoint paths; each call can override it. Without it, URLs are relative. */
+  baseURL?: string | URL | undefined
   /** Wraps the sending of every request, the first outermost. */
   middleware?: readonly Middleware[]
   /** Sends each request, after the last middleware. Default: the global `fetch`. */
@@ -124,10 +124,8 @@ export function createClient<Endpoints>(
     )
       throw new TypeError(`Invalid plan for endpoint "${endpoint}"; regenerate the contract`)
   }
-  const { baseUrl, middleware = [], fetch: transport, headers, ...init } = options
-  const prefix = baseUrl === undefined ? "" : String(baseUrl).replace(/\/+$/, "")
-  // Endpoint paths go after it, so a query or fragment would swallow them.
-  if (/[?#]/.test(prefix)) throw new TypeError(`baseUrl "${prefix}" has a query or fragment`)
+  const { baseURL, middleware = [], fetch: transport, headers, ...init } = options
+  const prefix = normalizeBaseURL(baseURL)
   const defaults: RequestDefaults = {
     endpoints: contract.endpoints as Readonly<Record<string, EndpointContract | undefined>>,
     prefix,

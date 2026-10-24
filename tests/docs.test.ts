@@ -20,7 +20,7 @@ const snippets = Object.values(TEXT).flatMap((markdown) => blocks(markdown, "ts"
 const API = [
   'import { createClient } from "openapi-shape/client"',
   'import { contract } from "./api"',
-  'const api = createClient(contract, { baseUrl: "https://api.example.com/v1" })',
+  'const api = createClient(contract, { baseURL: "https://api.example.com/v1" })',
   "",
 ].join("\n")
 

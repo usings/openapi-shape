@@ -25,7 +25,7 @@ async function withServer(
   }
 }
 
-function events(baseUrl: string, options: ClientOptions = {}) {
+function events(baseURL: string, options: ClientOptions = {}) {
   return createClient<{
     "POST /events": {
       body: { "multipart/form-data": { topic: string } }
@@ -38,7 +38,7 @@ function events(baseUrl: string, options: ClientOptions = {}) {
         "POST /events": { stream: ["text/event-stream"], contentType: "multipart/form-data" },
       },
     },
-    { baseUrl, ...options },
+    { baseURL, ...options },
   )
 }
 
@@ -160,7 +160,7 @@ it("reads native JSONL HTTP chunks and the final record without a newline", asyn
         "GET /records": { responses: { 200: { content: { "application/jsonl": unknown[] } } } }
       }>(
         { version: 5, endpoints: { "GET /records": { stream: ["application/jsonl"] } } },
-        { baseUrl: url },
+        { baseURL: url },
       )
       const items: unknown[] = []
       for await (const item of api.stream("GET /records")) items.push(item)

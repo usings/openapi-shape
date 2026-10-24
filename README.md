@@ -30,7 +30,7 @@ The source can be a local JSON or YAML file or an HTTP(S) URL. External referenc
 import { createClient } from "openapi-shape/client"
 import { contract } from "./api"
 
-const api = createClient(contract, { baseUrl: "https://api.example.com/v1" })
+const api = createClient(contract, { baseURL: "https://api.example.com/v1" })
 
 const { data: pets, error } = await api.result("GET /pets", { query: { limit: 10 } })
 if (error !== undefined) throw new Error(error?.message ?? "Could not load pets")

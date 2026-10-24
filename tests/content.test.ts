@@ -128,7 +128,7 @@ async function recording(document: object) {
   const contract = await contractOf(code)
   const sent: Request[] = []
   const api = createClient(contract, {
-    baseUrl: "https://x.test",
+    baseURL: "https://x.test",
     fetch: (request) => {
       sent.push(request)
       return Promise.resolve(new Response(null, { status: 204 }))
@@ -162,7 +162,7 @@ describe("media types", () => {
       'import { createClient } from "openapi-shape/client"',
       'import { contract } from "./api"',
       "type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false",
-      'const api = createClient(contract, { baseUrl: "https://x.test" })',
+      'const api = createClient(contract, { baseURL: "https://x.test" })',
       "export async function check(): Promise<void> {",
       ...checks,
       "}",
@@ -178,7 +178,7 @@ describe("media types", () => {
     for (const [i, [mediaType, , write, stream]] of MEDIA.entries()) {
       const sent: Request[] = []
       const api = createClient(contract, {
-        baseUrl: "https://x.test",
+        baseURL: "https://x.test",
         fetch: (request) => {
           sent.push(request)
           const read = MEDIA[i][1]
@@ -248,7 +248,7 @@ describe("media types", () => {
       const use = [
         'import { createClient } from "openapi-shape/client"',
         'import { contract } from "./api"',
-        'const api = createClient(contract, { baseUrl: "https://x.test" })',
+        'const api = createClient(contract, { baseURL: "https://x.test" })',
         "export async function check(): Promise<void> {",
         ...checks,
         "}",

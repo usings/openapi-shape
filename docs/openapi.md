@@ -50,7 +50,7 @@ Each `patternProperties` match, including compiling its pattern, has a 100 ms ex
 - **Ignored headers:** header parameters named `Accept`, `Content-Type`, or `Authorization`, and response headers named `Content-Type`, are ignored as required by OpenAPI.
 - **Path templates:** undeclared template variables become `string` parameters. Parameters absent from the template are dropped. Both cases produce diagnostics.
 - **Fetch capabilities:** `Endpoints` excludes `CONNECT`, `TRACE`, and `TRACK`. Client call arguments exclude bodies on `GET` and `HEAD`; `DELETE` bodies are supported. Incoming webhook and callback descriptions retain their declared bodies.
-- **Servers:** root servers are listed in the module header. Path and operation servers produce an `ignored-field` warning. Configure a separate client for operations that need a different `baseUrl`.
+- **Servers:** root servers are listed in the module header. Path and operation servers produce an `ignored-field` warning. Configure a separate client for operations that need a different `baseURL`.
 
 ## Media types
 
