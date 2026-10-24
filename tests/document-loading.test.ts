@@ -376,9 +376,14 @@ it("uses redirected response URLs as reference bases and counts decompressed HTT
       response.end()
     } else if (request.url === "/moved/entry.yaml") {
       response.end(
-        "openapi: 3.1.2\ninfo: {title: Redirected, version: '1'}\ncomponents: {schemas: {T: {$ref: './schema.json'}}}",
+        "openapi: 3.1.2\ninfo: {title: Redirected, version: '1'}\ncomponents: {schemas: {T: {$ref: './schema.json#named'}}}",
       )
     } else if (request.url === "/moved/schema.json") {
+      response.writeHead(302, { location: "/schemas/value.json" })
+      response.end()
+    } else if (request.url === "/schemas/value.json") {
+      response.end('{"$anchor":"named","$ref":"./child.json"}')
+    } else if (request.url === "/schemas/child.json") {
       response.end('{"type":"string"}')
     } else if (request.url === "/compressed") {
       response.writeHead(200, { "content-encoding": "gzip", "content-type": "application/json" })

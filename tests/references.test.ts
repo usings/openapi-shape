@@ -42,6 +42,91 @@ async function serving<T>(
 
 describe("reference resolution", () => {
   describe("references across documents", () => {
+    it.each([undefined, "https://schemas.test/value"])(
+      "resolves redirected document anchors through retrieval aliases (schema id: %s)",
+      async (id) => {
+        const calls: string[] = []
+        const result = await generate(
+          oas("3.1", {
+            components: {
+              schemas: {
+                Alias: { $ref: "alias.json#named" },
+                OtherAlias: { $ref: "other.json#named" },
+                Final: { $ref: "moved.json#named" },
+                Pointer: { $ref: "alias.json#/$defs/Named" },
+              },
+            },
+          }),
+          {
+            base: "https://spec.test/api.json",
+            load: (uri) => {
+              calls.push(uri)
+              const response = Response.json({
+                ...(id === undefined ? {} : { $id: id }),
+                $defs: { Named: { $anchor: "named", type: "string" } },
+              })
+              Object.defineProperty(response, "url", { value: "https://spec.test/moved.json" })
+              return response
+            },
+          },
+        )
+        expect(result.diagnostics).toStrictEqual([])
+        expect(declaration(result.code, "Alias")).toBe("string")
+        expect(declaration(result.code, "OtherAlias")).toBe("Alias")
+        expect(declaration(result.code, "Final")).toBe("Alias")
+        expect(declaration(result.code, "Pointer")).toBe("Alias")
+        expect(calls).not.toContain("https://schemas.test/value")
+      },
+    )
+
+    it("resolves redirected anchors exposed by a later explicit schema reference", async () => {
+      const result = await generate(
+        oas("3.1", {
+          components: {
+            schemas: {
+              Alias: { $ref: "alias.json#named" },
+              Pointer: { $ref: "alias.json#/x-schema" },
+            },
+          },
+        }),
+        {
+          base: "https://spec.test/api.json",
+          load: () => {
+            const response = Response.json({ "x-schema": { $anchor: "named", type: "string" } })
+            Object.defineProperty(response, "url", { value: "https://spec.test/moved.json" })
+            return response
+          },
+        },
+      )
+      expect(result.diagnostics).toStrictEqual([])
+      expect(declaration(result.code, "Alias")).toBe("string")
+      expect(declaration(result.code, "Pointer")).toBe("Alias")
+    })
+
+    it("reuses a retrieved entry document when other URLs redirect to it", async () => {
+      const uri = "https://spec.test/api.json"
+      const document = oas("3.1", {
+        components: {
+          schemas: {
+            Value: { $anchor: "named", type: "string" },
+            Alias: { $ref: "alias.json#named" },
+            OtherAlias: { $ref: "other.json#named" },
+          },
+        },
+      })
+      const result = await generate(uri, {
+        load: () => {
+          const response = Response.json(document)
+          Object.defineProperty(response, "url", { value: uri })
+          return response
+        },
+      })
+      expect(result.diagnostics).toStrictEqual([])
+      expect(declaration(result.code, "Value")).toBe("string")
+      expect(declaration(result.code, "Alias")).toBe("Value")
+      expect(declaration(result.code, "OtherAlias")).toBe("Value")
+    })
+
     it("plans repeated inline reference names before their first use", async () => {
       const result = await generate(
         oas("3.1", {
@@ -478,47 +563,53 @@ describe("reference resolution", () => {
       expect(result.diagnostics).toStrictEqual([])
     })
 
-    it.each(["x-User", "links", "default", "discriminator", "x-/~用户"])(
-      "indexes an explicitly referenced external schema named %s",
-      async (name) => {
-        const pointer = name.replaceAll("~", "~0").replaceAll("/", "~1")
-        const api = "https://spec.test/api.json"
-        const calls: string[] = []
-        const documents: Record<string, object> = {
-          "https://spec.test/common.json": {
-            [name]: {
-              "$id": "nested/user.json",
-              "type": "object",
-              "properties": { id: { $ref: "id.json" }, tag: { $ref: "#tag" } },
-              "$defs": { Tag: { $anchor: "tag", type: "boolean" } },
-              // Promoting the entry must not promote its metadata as well.
-              "x-data": { $id: "id.json", type: "number" },
-              "default": { $id: "id.json", type: "number" },
-            },
+    it.each([
+      "x-User",
+      "links",
+      "default",
+      "discriminator",
+      "x-/~用户",
+      "properties",
+      "schemas",
+      "content",
+    ])("indexes an explicitly referenced external schema named %s", async (name) => {
+      const pointer = name.replaceAll("~", "~0").replaceAll("/", "~1")
+      const api = "https://spec.test/api.json"
+      const calls: string[] = []
+      const documents: Record<string, object> = {
+        "https://spec.test/common.json": {
+          [name]: {
+            "$id": "nested/user.json",
+            "type": "object",
+            "properties": { id: { $ref: "id.json" }, tag: { $ref: "#tag" } },
+            "$defs": { Tag: { $anchor: "tag", type: "boolean" } },
+            // Promoting the entry must not promote its metadata as well.
+            "x-data": { $id: "id.json", type: "number" },
+            "default": { $id: "id.json", type: "number" },
           },
-          "https://spec.test/nested/id.json": { type: "string" },
-          "https://spec.test/id.json": { type: "null" },
-        }
-        const result = await generate(
-          oas("3.1", { components: { schemas: { User: { $ref: `common.json#/${pointer}` } } } }),
-          {
-            base: api,
-            load: (uri) => {
-              calls.push(uri)
-              return Response.json(documents[uri])
-            },
+        },
+        "https://spec.test/nested/id.json": { type: "string" },
+        "https://spec.test/id.json": { type: "null" },
+      }
+      const result = await generate(
+        oas("3.1", { components: { schemas: { User: { $ref: `common.json#/${pointer}` } } } }),
+        {
+          base: api,
+          load: (uri) => {
+            calls.push(uri)
+            return Response.json(documents[uri])
           },
-        )
-        expect(result.diagnostics).toStrictEqual([])
-        expect(declaration(result.code, "User")).toBe("{\n  id?: id\n  tag?: Tag\n}")
-        expect(declaration(result.code, "id")).toBe("string")
-        expect(declaration(result.code, "Tag")).toBe("boolean")
-        expect(calls).toStrictEqual([
-          "https://spec.test/common.json",
-          "https://spec.test/nested/id.json",
-        ])
-      },
-    )
+        },
+      )
+      expect(result.diagnostics).toStrictEqual([])
+      expect(declaration(result.code, "User")).toBe("{\n  id?: id\n  tag?: Tag\n}")
+      expect(declaration(result.code, "id")).toBe("string")
+      expect(declaration(result.code, "Tag")).toBe("boolean")
+      expect(calls).toStrictEqual([
+        "https://spec.test/common.json",
+        "https://spec.test/nested/id.json",
+      ])
+    })
 
     it.each([false, true])(
       "retries anchors after indexing external schema targets (reverse: %s)",
@@ -585,6 +676,92 @@ describe("reference resolution", () => {
           }),
         ),
       ).toStrictEqual(["unresolved-ref #/components/schemas/Stolen/$ref"])
+    })
+
+    it("indexes nested resources against a schema-valued dictionary entry before claiming URIs", async () => {
+      const calls: string[] = []
+      const documents: Record<string, object> = {
+        "https://spec.test/dict.json": {
+          schemas: {
+            $id: "sub/parent.json",
+            $ref: "#/$defs/Child",
+            $defs: { Child: { $id: "child.json", $anchor: "named", type: "string" } },
+          },
+        },
+        "https://spec.test/child.json": { $anchor: "named", type: "number" },
+      }
+      const result = await generate(
+        oas("3.1", {
+          components: {
+            schemas: {
+              Nested: { $ref: "dict.json#/schemas" },
+              Separate: { $ref: "child.json#named" },
+            },
+          },
+        }),
+        {
+          base: "https://spec.test/api.json",
+          load: (uri) => {
+            calls.push(uri)
+            return Response.json(documents[uri])
+          },
+        },
+      )
+      expect(result.diagnostics).toStrictEqual([])
+      expect(declaration(result.code, "Nested")).toBe("string")
+      expect(declaration(result.code, "Separate")).toBe("number")
+      expect(calls).toStrictEqual(["https://spec.test/dict.json", "https://spec.test/child.json"])
+    })
+
+    it.each(["$anchor", "$dynamicAnchor"])(
+      "indexes %s on a schema named like a name map without mistaking map keys for declarations",
+      async (keyword) => {
+        const result = await generate(
+          oas("3.1", {
+            components: {
+              schemas: { Named: { $ref: "dict.json#named" }, Map: { $ref: "dict.json#/Map" } },
+            },
+          }),
+          {
+            base: "https://spec.test/api.json",
+            load: () =>
+              Response.json({
+                properties: { [keyword]: "named", type: "number" },
+                Map: {
+                  type: "object",
+                  properties: { $id: { type: "string" }, $anchor: { type: "boolean" } },
+                },
+              }),
+          },
+        )
+        expect(result.diagnostics).toStrictEqual([])
+        expect(declaration(result.code, "Named")).toBe("number")
+        expect(declaration(result.code, "Map")).toBe("{\n  $id?: string\n  $anchor?: boolean\n}")
+      },
+    )
+
+    it("does not borrow canonical anchors through a redirected document's losing root id", async () => {
+      const result = generate(
+        oas("3.1", {
+          components: {
+            schemas: {
+              Owner: { $id: "https://shared.test/value", $anchor: "named", type: "string" },
+              Other: { $ref: "alias.json#named" },
+            },
+          },
+        }),
+        {
+          base: "https://spec.test/api.json",
+          load: () => {
+            const response = Response.json({ $id: "https://shared.test/value", type: "number" })
+            Object.defineProperty(response, "url", { value: "https://spec.test/moved.json" })
+            return response
+          },
+        },
+      )
+      expect(await errorsOf(result)).toStrictEqual([
+        "unresolved-ref #/components/schemas/Other/$ref",
+      ])
     })
 
     it("does not activate $id in a 3.0 external schema dictionary", async () => {

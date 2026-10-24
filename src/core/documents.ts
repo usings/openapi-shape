@@ -117,6 +117,8 @@ export class DocumentSet {
   readonly entry: LoadedDocument
   private readonly resources = new Map<string, DocumentNode>()
   private readonly anchors = new Map<string, DocumentNode>()
+  /** Documents actually read, keyed by final retrieval URL rather than schema resource IDs. */
+  private readonly retrieved = new Map<string, LoadedDocument>()
   private readonly pending = new Set<string>()
   private readonly failed = new Map<string, string>()
   private readonly schemaTargets = new Map<LoadedDocument, Set<string>>()
@@ -134,9 +136,11 @@ export class DocumentSet {
     entry: LoadedDocument,
     private readonly retrieval: boolean,
     readonly reader: DocumentReader,
+    entryRetrieved: boolean,
   ) {
     this.entry = entry
     this.register(entry)
+    if (entryRetrieved) this.retrieved.set(entry.uri, entry)
   }
 
   get hasPending(): boolean {
@@ -326,26 +330,38 @@ export class DocumentSet {
       if (target?.value === undefined) return { kind: "error", message: `"${ref}" does not exist` }
       return { kind: "found", node: target }
     }
-    const anchored = this.anchors.get(`${docUri}#${fragment}`)
+    // Retrieval URLs and redirects name the same resource, including its anchors. A losing `$id`
+    // claim must not borrow anchors from the resource that already owns that canonical URI.
+    const anchored = this.owns(resource.base, resource.document, resource.pointer)
+      ? this.anchors.get(`${resource.base}#${fragment}`)
+      : undefined
     if (anchored === undefined) return { kind: "error", message: `anchor "${ref}" does not exist` }
     return { kind: "found", node: anchored }
   }
 
   private add(uri: string, fetched: FetchedDocument): void {
-    const root = fetched.root
-    let version = this.entry.version
-    if (isRecord(root) && root.openapi !== undefined) {
-      const own = parseOpenApiVersion(root.openapi)
-      if (own === undefined) {
-        this.failed.set(uri, `${uri} declares unsupported OpenAPI version ${String(root.openapi)}`)
-        return
+    let document = this.retrieved.get(fetched.uri)
+    if (document === undefined) {
+      const root = fetched.root
+      let version = this.entry.version
+      if (isRecord(root) && root.openapi !== undefined) {
+        const own = parseOpenApiVersion(root.openapi)
+        if (own === undefined) {
+          this.failed.set(
+            uri,
+            `${uri} declares unsupported OpenAPI version ${String(root.openapi)}`,
+          )
+          return
+        }
+        version = own
       }
-      version = own
+      document = createDocument(fetched.uri, root, version, /^https?:/i.test(fetched.uri))
+      this.retrieved.set(fetched.uri, document)
+      this.register(document)
     }
-    const document = createDocument(fetched.uri, root, version, /^https?:/i.test(fetched.uri))
-    this.register(document)
-    // A redirect leaves the requested URI pointing at the same document.
-    if (!this.resources.has(uri)) this.resources.set(uri, this.root(document))
+    // Retrieval aliases share the first document actually loaded at the final URL. An in-memory
+    // entry's base is only a location for references, not evidence that it was retrieved there.
+    this.claim(this.resources, uri, this.root(document))
   }
 
   /** The first document to claim a URI keeps it, so a later one cannot shadow it. */
@@ -413,7 +429,16 @@ export class DocumentSet {
         document.excluded.set(at, { value: child, base, owned })
         continue
       }
-      if (map === undefined && NAME_MAPS.has(key)) {
+      // A dictionary entry can itself be a schema named `properties`, `schemas`, etc. String
+      // resource declarations distinguish it from a name map, whose entries are objects/booleans.
+      if (
+        map === undefined &&
+        NAME_MAPS.has(key) &&
+        !(
+          isRecord(child) &&
+          ["$id", "$anchor", "$dynamicAnchor"].some((keyword) => typeof child[keyword] === "string")
+        )
+      ) {
         this.indexChildren(document, child, at, base, owned, key)
       } else this.indexResources(document, child, at, base, owned)
     }
@@ -494,6 +519,7 @@ export async function loadDocuments(
     createDocument(uri, root, version, remote),
     !inMemory || base !== undefined,
     reader,
+    !inMemory,
   )
 }
 

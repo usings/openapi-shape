@@ -19,7 +19,7 @@ The types follow the supported features, [compatibility rules](#following-the-re
 
 ### References
 
-The generator discovers semantically reachable references before compiling types. Examples, extensions, and unused non-schema components do not trigger document loading. References resolve against the document location, OpenAPI 3.2's `$self`, or the nearest schema `$id` in 3.1+. Targets may use JSON Pointers or `$anchor` names in any document. If multiple documents claim the same URI, the first referenced document keeps it, along with the anchors under that URI.
+The generator discovers semantically reachable references before compiling types. Examples, extensions, and unused non-schema components do not trigger document loading. References resolve against the document location, OpenAPI 3.2's `$self`, or the nearest schema `$id` in 3.1+. Targets may use JSON Pointers or `$anchor` names in any document. After an HTTP redirect, relative references use the final URL, while retrieval aliases address the same resource and its anchors. If multiple documents claim the same URI, the first referenced document keeps it, along with the anchors under that URI.
 
 An `$id` or anchor inside an extension (`x-…`), instance data (`example`, `examples`, `default`, `const`, `enum`), a Link, or discriminator metadata is ignored: it claims no URI, and references inside it resolve against the base outside it. Discriminator mapping keys are payload values, including keys named `$id`, `$anchor`, or `$dynamicAnchor`.
 
