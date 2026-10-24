@@ -11,7 +11,7 @@ import { expectPassesTsc } from "./helpers/tsc"
 async function errorsOf(promise: Promise<unknown>): Promise<string[]> {
   const failure: unknown = await promise.catch((error: unknown) => error)
   if (!(failure instanceof GenerateError)) {
-    throw new Error(`Expected GenerateError, got ${String(failure)}`)
+    throw new TypeError(`Expected GenerateError, got ${String(failure)}`)
   }
   return codes(failure.diagnostics.filter((d) => d.severity === "error"))
 }
