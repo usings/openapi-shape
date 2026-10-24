@@ -89,19 +89,21 @@ export const cli = defineCommand({
         process.stdout.write(result.code)
         return
       }
-      const target = resolve(cwd, args.output)
+      // Preserve `..` until the filesystem has followed any preceding directory symlinks.
+      const target = isAbsolute(args.output) ? args.output : `${cwd}/${args.output}`
       const warnings = result.diagnostics.length === 0 ? "" : ` (${counts(result.diagnostics)})`
       if (args.check) {
-        let existing: string | null = null
+        const expected = Buffer.from(result.code)
+        let existing: Buffer | null = null
         try {
-          existing = await readFile(target, "utf8")
+          existing = await readFile(target)
         } catch (error) {
           if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
             const reason = error instanceof Error ? error.message : String(error)
             return fail(`Cannot read ${args.output}: ${reason}`)
           }
         }
-        if (existing === result.code) {
+        if (existing?.equals(expected)) {
           process.stderr.write(`${args.output} is up to date${warnings}\n`)
           return
         }
@@ -110,7 +112,7 @@ export const cli = defineCommand({
             `${args.output} does not exist; run the same command without --check to write it`,
           )
         }
-        process.stderr.write(firstDifference(args.output, existing, result.code))
+        process.stderr.write(firstDifference(args.output, existing, expected))
         return fail(
           `${args.output} is out of date; run the same command without --check to update it`,
         )
@@ -237,11 +239,31 @@ function where(location: string, source: string, cwd: string): string {
 }
 
 /** The first line where `file` differs from what would be written, as `<file>:<line>:` lines. */
-function firstDifference(file: string, actual: string, expected: string): string {
-  const a = actual.split("\n")
-  const e = expected.split("\n")
-  let line = 0
-  while (line < a.length && line < e.length && a[line] === e[line]) line++
-  const at = `${file}:${line + 1}:`
-  return `${at} expected: ${e[line] ?? "<end of file>"}\n${at} found:    ${a[line] ?? "<end of file>"}\n`
+function firstDifference(file: string, actual: Buffer, expected: Buffer): string {
+  let offset = 0
+  let line = 1
+  let start = 0
+  while (
+    offset < actual.length &&
+    offset < expected.length &&
+    actual[offset] === expected[offset]
+  ) {
+    if (actual[offset] === 10) {
+      line++
+      start = offset + 1
+    }
+    offset++
+  }
+  const aEnd = actual.indexOf(10, start)
+  const eEnd = expected.indexOf(10, start)
+  const a = actual.subarray(start, aEnd === -1 ? undefined : aEnd)
+  const e = expected.subarray(start, eEnd === -1 ? undefined : eEnd)
+  let found = a.toString("utf8")
+  let wanted = e.toString("utf8")
+  if (found === wanted) {
+    found += ` [hex: ${actual.subarray(start, aEnd === -1 ? undefined : aEnd + 1).toString("hex")}]`
+    wanted += ` [hex: ${expected.subarray(start, eEnd === -1 ? undefined : eEnd + 1).toString("hex")}]`
+  }
+  const at = `${file}:${line}:`
+  return `${at} expected: ${wanted}\n${at} found:    ${found}\n`
 }

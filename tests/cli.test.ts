@@ -166,6 +166,44 @@ describe("openapi-shape <source>", () => {
     })
   })
 
+  it.each([
+    ["relative", "existing"],
+    ["absolute", "existing"],
+    ["relative", "missing file"],
+    ["absolute", "missing file"],
+    ["relative", "missing directory"],
+    ["absolute", "missing directory"],
+  ])("resolves a %s output through directory symlinks before .. (%s)", async (kind, state) => {
+    await withFiles({ "openapi.json": spec }, async (dir) => {
+      const generated = await run(["openapi.json"], dir)
+      await mkdir(join(dir, "real/nested"), { recursive: true })
+      await symlink("real/nested", join(dir, "alias"))
+      const actual = join(dir, "real/out/api.ts")
+      const unrelated = join(dir, "out/api.ts")
+      const unrelatedContents = state === "existing" ? "unrelated output" : generated.stdout
+      await mkdir(dirname(unrelated))
+      await fs.writeFile(unrelated, unrelatedContents)
+      if (state !== "missing directory") await mkdir(dirname(actual))
+      if (state === "existing") await fs.writeFile(actual, generated.stdout)
+      const output = `${kind === "absolute" ? `${dir}/` : ""}alias/../out/api.ts`
+
+      const checked = await run(["openapi.json", "-o", output, "--check"], dir)
+      expect(checked.code).toBe(state === "existing" ? 0 : 1)
+      expect(checked.stderr).toContain(state === "existing" ? "is up to date" : "does not exist")
+      const checkedTarget = await lstat(actual).catch(() => null)
+      const checkedDirectory = await lstat(dirname(actual)).catch(() => null)
+      expect(checkedTarget !== null).toBe(state === "existing")
+      expect(checkedDirectory !== null).toBe(state !== "missing directory")
+      expect(await readFile(unrelated, "utf8")).toBe(unrelatedContents)
+      expect(await run(["openapi.json", "-o", output], dir)).toMatchObject({ code: 0 })
+      expect(await readFile(actual, "utf8")).toBe(generated.stdout)
+      expect(await readFile(unrelated, "utf8")).toBe(unrelatedContents)
+      expect(await readlink(join(dir, "alias"))).toBe("real/nested")
+      expect(await readdir(dirname(actual))).toStrictEqual(["api.ts"])
+      expect(await run(["openapi.json", "-o", output, "--check"], dir)).toMatchObject({ code: 0 })
+    })
+  })
+
   it.each(["relative", "absolute"])(
     "creates a %s dangling symlink's final target while preserving the link",
     async (kind) => {
@@ -302,6 +340,41 @@ describe("openapi-shape <source>", () => {
       const files = await readdir(dir)
       expect(files.toSorted()).toStrictEqual(["api.ts", "openapi.json", "stale.ts"])
     })
+  })
+
+  it("checks raw bytes and reports invalid UTF-8 at the differing line without writing", async () => {
+    await withFiles(
+      { "openapi.json": oas("3.1", { info: { title: "Replacement \uFFFD", version: "1" } }) },
+      async (dir) => {
+        const generated = await run(["openapi.json"], dir)
+        const bytes = Buffer.from(generated.stdout)
+        const offset = bytes.indexOf(Buffer.from("\uFFFD"))
+        expect(offset).toBeGreaterThan(-1)
+        const corrupted = Buffer.concat([
+          bytes.subarray(0, offset),
+          Buffer.from([0xff]),
+          bytes.subarray(offset + 3),
+        ])
+        expect(corrupted.toString("utf8")).toBe(generated.stdout)
+        const target = join(dir, "api.ts")
+        await fs.writeFile(target, corrupted)
+        const before = await lstat(target)
+        const line = bytes.subarray(0, offset).toString("utf8").split("\n").length
+        const checked = await run(["openapi.json", "-o", "api.ts", "--check"], dir)
+        expect(checked.code).toBe(1)
+        expect(checked.stderr).toContain(`api.ts:${line}: expected:`)
+        expect(checked.stderr).toContain(`api.ts:${line}: found:`)
+        expect(checked.stderr).toMatch(/expected: .*\[hex: [\da-f]*efbfbd[\da-f]*\]/)
+        expect(checked.stderr).toMatch(/found: .*\[hex: [\da-f]*ff[\da-f]*\]/)
+        expect(checked.stderr).toContain("is out of date")
+        expect(await readFile(target)).toStrictEqual(corrupted)
+        const after = await lstat(target)
+        expect(after.ino).toBe(before.ino)
+        expect(after.mtimeMs).toBe(before.mtimeMs)
+        const files = await readdir(dir)
+        expect(files.toSorted()).toStrictEqual(["api.ts", "openapi.json"])
+      },
+    )
   })
 
   it("concurrent writers leave one complete output and no temporary files", async () => {
