@@ -157,15 +157,14 @@ async function contract(
   // Typed here, not by openapi-shape/client, so that the module imports nothing:
   // createClient checks it, `version` above all, and infers `Endpoints` from `types`.
   return [
-    "/** Compiled endpoint plans for the Fetch client. */",
     `const endpoints = ${value} as const`,
     "",
-    "/** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */",
     "export const contract: {",
     "  /** The contract's format; `createClient` refuses one it does not read. */",
     `  readonly version: ${CONTRACT_VERSION}`,
     "  /** Carries `Endpoints` for `createClient` to infer; never set. */",
     "  readonly types?: Endpoints",
+    "  /** Compiled endpoint plans for the Fetch client. */",
     "  readonly endpoints: typeof endpoints",
     `} = { version: ${CONTRACT_VERSION}, endpoints }`,
   ].join("\n")

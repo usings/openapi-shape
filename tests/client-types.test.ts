@@ -85,9 +85,9 @@ void function clientOptionChecks(): void {
   // @ts-expect-error contract entries name declared endpoints
   void createClient<Endpoints>({ version: 5, endpoints: { "GET /nope": {} } })
   // @ts-expect-error an older contract must be regenerated
-  void createClient({ ...contract, version: 1 })
+  void createClient({ ...contract, version: 4 })
   // @ts-expect-error a newer contract must be regenerated with the installed package
-  void createClient({ ...contract, version: 999 })
+  void createClient({ ...contract, version: 6 })
 }
 
 const jsonResponse = (schema: unknown) => ({

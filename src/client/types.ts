@@ -1,4 +1,19 @@
-import type { StreamMessage, StreamOptions } from "./stream"
+import type { StreamMessage } from "./sse-parser"
+
+/**
+ * Additional SSE connections allowed over the whole subscription, with a configurable initial
+ * delay.
+ */
+export interface StreamRetryOptions {
+  delay?: number
+  maxRetries?: number
+}
+
+/** The response representation to consume, and SSE reconnection settings. */
+export interface StreamOptions {
+  accept?: string
+  retry?: false | StreamRetryOptions
+}
 
 /** A `Response` for one declared status or range: `json()` resolves to its JSON content. */
 export interface TypedResponse<Status extends number, Ok extends boolean, Json> extends Response {

@@ -1,24 +1,13 @@
-import { streamFormat } from "../shared/media"
-import { isStream } from "./body"
-import { readJsonLines } from "./ndjson"
+import { mediaTypeEssence, streamFormat } from "../shared/media"
+import { abortable, cancelBody } from "./cancellation"
+import { readJsonLines } from "./ndjson-parser"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest } from "./request"
-import type { EventState } from "./sse"
-import { readEvents, StreamReadError } from "./sse"
-import type { StreamRetryOptions } from "./sse-session"
-import { RetryableStreamError, retryAfterDelay, sseSession, validateRetry } from "./sse-session"
-import { abortable, cancelBody } from "./stream-lifecycle"
-import { mediaTypeEssence } from "./values"
-
-export type { StreamMessage } from "./sse"
-export type { StreamRetryOptions } from "./sse-session"
-export { StreamParseError } from "./ndjson"
-
-/** The response representation to consume, and SSE reconnection settings. */
-export interface StreamOptions {
-  accept?: string
-  retry?: false | StreamRetryOptions
-}
+import type { EventState } from "./sse-parser"
+import { readEvents, StreamReadError } from "./sse-parser"
+import { RetryableStreamError, retryAfterDelay, sseSession, validateRetry } from "./sse-retry"
+import type { StreamOptions } from "./types"
+import { isStream } from "./values"
 
 /** A refused response. Status and headers remain readable after its body is canceled. */
 export class StreamResponseError extends Error {

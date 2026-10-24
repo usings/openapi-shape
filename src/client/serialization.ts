@@ -1,12 +1,6 @@
-import type { Encoding, EndpointContract } from "./contract"
-import {
-  isJsonEssence,
-  isJsonWildcardEssence,
-  isPlainObject,
-  mediaTypeEssence,
-  scalar,
-  toJson,
-} from "./values"
+import type { Encoding, EndpointContract } from "../shared/contract"
+import { isJsonEssence, isJsonWildcardEssence, mediaTypeEssence } from "../shared/media"
+import { isPlainObject, scalar, toJson } from "./values"
 
 interface Normalized {
   style: string
@@ -212,22 +206,4 @@ function encode(value: string, reserved: RegExp | null): string {
 /** Bracket notation stays readable: `created[gte]`. */
 function encodeKey(key: string): string {
   return encodeURIComponent(key).replaceAll("%5B", "[").replaceAll("%5D", "]")
-}
-
-export function appendQuery(url: string, query: string): string {
-  if (query === "") return url
-  const hash = url.indexOf("#")
-  const base = hash === -1 ? url : url.slice(0, hash)
-  const fragment = hash === -1 ? "" : url.slice(hash)
-  const separator = !base.includes("?") ? "?" : base.endsWith("?") || base.endsWith("&") ? "" : "&"
-  return `${base}${separator}${query}${fragment}`
-}
-
-/** A header's entry, whatever the case of its name. */
-export function byLowercase<T>(
-  map: Readonly<Record<string, T>> | undefined,
-  name: string,
-): T | undefined {
-  const key = Object.keys(map ?? {}).find((k) => k.toLowerCase() === name.toLowerCase())
-  return key === undefined ? undefined : map?.[key]
 }

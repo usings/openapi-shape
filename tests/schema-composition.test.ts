@@ -131,95 +131,91 @@ async function checkCases(cases: CompositionCase[]): Promise<string> {
 }
 
 describe("composition", () => {
-  describe("composition", () => {
-    it("merges allOf object members into one object", async () => {
-      expect(
-        await typeOf({
+  it("merges allOf object members into one object", async () => {
+    expect(
+      await typeOf({
+        allOf: [
+          { type: "object", properties: { a: { type: "string" } }, required: ["a"] },
+          { type: "object", properties: { b: { type: "number" }, a: { const: "x" } } },
+        ],
+      }),
+    ).toBe('{\n  a: "x"\n  b?: number\n}')
+  })
+
+  it("intersects references and unions alternatives", async () => {
+    const code = await gen(
+      withSchemas("3.1", {
+        Base: { type: "object", properties: { id: { type: "string" } } },
+        Both: {
           allOf: [
-            { type: "object", properties: { a: { type: "string" } }, required: ["a"] },
-            { type: "object", properties: { b: { type: "number" }, a: { const: "x" } } },
+            { $ref: "#/components/schemas/Base" },
+            { type: "object", properties: { x: { type: "number" } } },
           ],
-        }),
-      ).toBe('{\n  a: "x"\n  b?: number\n}')
-    })
-
-    it("intersects references and unions alternatives", async () => {
-      const code = await gen(
-        withSchemas("3.1", {
-          Base: { type: "object", properties: { id: { type: "string" } } },
-          Both: {
-            allOf: [
-              { $ref: "#/components/schemas/Base" },
-              { type: "object", properties: { x: { type: "number" } } },
-            ],
-          },
-          Either: { oneOf: [{ $ref: "#/components/schemas/Base" }, { type: "string" }] },
-          Any: { anyOf: [{ type: "string" }, { type: "string" }, { type: "number" }] },
-        }),
-      )
-      expect(declaration(code, "Both")).toBe("Base & { x?: number }")
-      expect(declaration(code, "Either")).toBe("Base | string")
-      expect(declaration(code, "Any")).toBe("string | number")
-    })
-
-    it("applies sibling keywords alongside applicators", async () => {
-      expect(
-        await typeOf({ type: "string", oneOf: [{ format: "email" }, { format: "uri" }] }),
-      ).toBe("string")
-      expect(
-        await typeOf({
-          type: "object",
-          properties: { a: { type: "string" }, b: { type: "string" } },
-          oneOf: [{ required: ["a"] }, { required: ["b"] }],
-        }),
-      ).toBe("{ a: string; b?: string } | { a?: string; b: string }")
-    })
-
-    it("treats $ref as an applicator: siblings are intersected", async () => {
-      const code = await gen(
-        withSchemas("3.1", {
-          A: { type: "object", properties: { id: { type: "string" } } },
-          Extended: {
-            $ref: "#/components/schemas/A",
-            properties: { more: { type: "boolean" } },
-            description: "Annotated",
-          },
-          Alias: { $ref: "#/components/schemas/A", description: "Only annotations" },
-        }),
-      )
-      expect(declaration(code, "Extended")).toBe("A & { more?: boolean }")
-      expect(declaration(code, "Alias")).toBe("A")
-    })
-
-    it("keeps `not` only where it is exact", async () => {
-      expect(await typeOf({ not: {} })).toBe("never")
-      expect(await typeOf({ not: true })).toBe("never")
-      // Excluding a type is not expressible; the wider type is still correct.
-      expect(await typeOf({ type: ["string", "null"], not: { type: "null" } })).toBe(
-        "string | null",
-      )
-    })
-
-    it.each([
-      [
-        { if: { type: "string" }, then: { minLength: 1 }, else: { type: "number" } },
-        "string | number",
-      ],
-      [{ if: { type: "string" }, else: { type: "number" } }, "string | number"],
-      [{ if: { type: "string" }, then: { type: "string" } }, "unknown"],
-      [
-        {
-          type: "object",
-          properties: { kind: { type: "string" } },
-          if: { properties: { kind: { const: "a" } } },
-          then: { required: ["a"] },
-          else: { required: ["b"] },
         },
-        '{ kind?: "a"; a: unknown } | { kind?: string; b: unknown }',
-      ],
-    ])("if/then/else %j", async (schema, expected) => {
-      expect(await typeOf(schema)).toBe(expected)
-    })
+        Either: { oneOf: [{ $ref: "#/components/schemas/Base" }, { type: "string" }] },
+        Any: { anyOf: [{ type: "string" }, { type: "string" }, { type: "number" }] },
+      }),
+    )
+    expect(declaration(code, "Both")).toBe("Base & { x?: number }")
+    expect(declaration(code, "Either")).toBe("Base | string")
+    expect(declaration(code, "Any")).toBe("string | number")
+  })
+
+  it("applies sibling keywords alongside applicators", async () => {
+    expect(await typeOf({ type: "string", oneOf: [{ format: "email" }, { format: "uri" }] })).toBe(
+      "string",
+    )
+    expect(
+      await typeOf({
+        type: "object",
+        properties: { a: { type: "string" }, b: { type: "string" } },
+        oneOf: [{ required: ["a"] }, { required: ["b"] }],
+      }),
+    ).toBe("{ a: string; b?: string } | { a?: string; b: string }")
+  })
+
+  it("treats $ref as an applicator: siblings are intersected", async () => {
+    const code = await gen(
+      withSchemas("3.1", {
+        A: { type: "object", properties: { id: { type: "string" } } },
+        Extended: {
+          $ref: "#/components/schemas/A",
+          properties: { more: { type: "boolean" } },
+          description: "Annotated",
+        },
+        Alias: { $ref: "#/components/schemas/A", description: "Only annotations" },
+      }),
+    )
+    expect(declaration(code, "Extended")).toBe("A & { more?: boolean }")
+    expect(declaration(code, "Alias")).toBe("A")
+  })
+
+  it("keeps `not` only where it is exact", async () => {
+    expect(await typeOf({ not: {} })).toBe("never")
+    expect(await typeOf({ not: true })).toBe("never")
+    // Excluding a type is not expressible; the wider type is still correct.
+    expect(await typeOf({ type: ["string", "null"], not: { type: "null" } })).toBe("string | null")
+  })
+
+  it.each([
+    [
+      { if: { type: "string" }, then: { minLength: 1 }, else: { type: "number" } },
+      "string | number",
+    ],
+    [{ if: { type: "string" }, else: { type: "number" } }, "string | number"],
+    [{ if: { type: "string" }, then: { type: "string" } }, "unknown"],
+    [
+      {
+        type: "object",
+        properties: { kind: { type: "string" } },
+        if: { properties: { kind: { const: "a" } } },
+        then: { required: ["a"] },
+        else: { required: ["b"] },
+      },
+      '{ kind?: "a"; a: unknown } | { kind?: string; b: unknown }',
+    ],
+  ])("if/then/else %j", async (schema, expected) => {
+    expect(await typeOf(schema)).toBe(expected)
   })
 
   describe("composition through references", () => {
@@ -439,6 +435,7 @@ describe("composition", () => {
 
   describe("bounded composition", () => {
     it("keeps intersections of many alternatives compact", async () => {
+      const started = Date.now()
       const code = await gen(
         withSchemas("3.1", {
           X: {
@@ -448,6 +445,7 @@ describe("composition", () => {
           },
         }),
       )
+      expect(Date.now() - started).toBeLessThan(5000)
       expect(code.length).toBeLessThan(20_000)
       await expectPassesTsc(code)
     })

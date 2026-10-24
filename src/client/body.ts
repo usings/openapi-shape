@@ -1,15 +1,8 @@
-import type { Encoding, EndpointContract } from "./contract"
-import { encodeContent, formFields, formPairs, normalize } from "./parameters"
+import type { Encoding, EndpointContract } from "../shared/contract"
+import { isJsonEssence, isJsonWildcardEssence, mediaTypeEssence } from "../shared/media"
+import { encodeContent, formFields, formPairs, normalize } from "./serialization"
 import type { BodyLike } from "./types"
-import {
-  isInstance,
-  isJsonEssence,
-  isJsonWildcardEssence,
-  isPlainObject,
-  mediaTypeEssence,
-  scalar,
-  toJson,
-} from "./values"
+import { isInstance, isStream, isPlainObject, scalar, toJson } from "./values"
 
 // Request bodies encoded by their media type, and response bodies decoded by theirs.
 
@@ -172,12 +165,4 @@ function bytes(value: unknown): ArrayBuffer | Uint8Array<ArrayBuffer> | undefine
   return isInstance(octets.buffer, "ArrayBuffer")
     ? (octets as Uint8Array<ArrayBuffer>)
     : new Uint8Array(octets)
-}
-
-/** A web `ReadableStream`, or an async iterable such as a Node.js stream. */
-export function isStream(value: unknown): boolean {
-  return (
-    isInstance(value, "ReadableStream") ||
-    (typeof value === "object" && value !== null && Symbol.asyncIterator in value)
-  )
 }

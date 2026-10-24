@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ClientOptions, Fetcher, StreamMessage } from "../src/client"
 import { createClient, StreamParseError, StreamResponseError } from "../src/client"
-import { readJsonLines } from "../src/client/ndjson"
+import { readJsonLines } from "../src/client/ndjson-parser"
 import { collect } from "./helpers/streams"
 
 function body(chunks: Uint8Array[], failure?: Error): ReadableStream<Uint8Array> {

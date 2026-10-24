@@ -1,16 +1,8 @@
-import { encodeBody, isStream } from "./body"
-import type { EndpointContract } from "./contract"
-import {
-  appendQuery,
-  byLowercase,
-  delimited,
-  encodeContent,
-  expandPath,
-  normalize,
-  serializeQuery,
-} from "./parameters"
+import type { EndpointContract } from "../shared/contract"
+import { encodeBody } from "./body"
+import { delimited, encodeContent, expandPath, normalize, serializeQuery } from "./serialization"
 import type { BodyLike } from "./types"
-import { isInstance } from "./values"
+import { isInstance, isStream } from "./values"
 
 /** What a call takes at run time: its parameters, its body, and any other `RequestInit` field. */
 export interface CallInit extends Omit<RequestInit, "headers" | "body"> {
@@ -88,4 +80,19 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
   // Streaming request bodies need half duplex (Fetch Standard).
   if (isStream(body)) requestInit.duplex = "half"
   return new Request(url, requestInit)
+}
+
+function appendQuery(url: string, query: string): string {
+  if (query === "") return url
+  const hash = url.indexOf("#")
+  const base = hash === -1 ? url : url.slice(0, hash)
+  const fragment = hash === -1 ? "" : url.slice(hash)
+  const separator = !base.includes("?") ? "?" : base.endsWith("?") || base.endsWith("&") ? "" : "&"
+  return `${base}${separator}${query}${fragment}`
+}
+
+/** A header's entry, whatever the case of its name. */
+function byLowercase<T>(map: Readonly<Record<string, T>> | undefined, name: string): T | undefined {
+  const key = Object.keys(map ?? {}).find((k) => k.toLowerCase() === name.toLowerCase())
+  return key === undefined ? undefined : map?.[key]
 }

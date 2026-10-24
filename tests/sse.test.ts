@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Fetcher, StreamMessage } from "../src/client"
 import { StreamResponseError } from "../src/client"
-import { readEvents } from "../src/client/sse"
+import { readEvents } from "../src/client/sse-parser"
 import { bytes, sseClient as client, sseResponse as response } from "./helpers/streams"
 
 describe("SSE parser", () => {

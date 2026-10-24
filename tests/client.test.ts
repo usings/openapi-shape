@@ -71,9 +71,9 @@ describe("contract validation", () => {
       undefined,
       null,
       { endpoints: {} },
-      { version: 7, endpoints: {} },
-      { version: 999, endpoints: {} },
-      { version: "3", endpoints: {} },
+      { version: 4, endpoints: {} },
+      { version: 6, endpoints: {} },
+      { version: "5", endpoints: {} },
     ]) {
       expect(() => createClient(given as never)).toThrow(TypeError)
       expect(() => createClient(given as never)).toThrow(

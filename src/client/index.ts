@@ -1,24 +1,25 @@
+import type { Contract, EndpointContract } from "../shared/contract"
+import { CONTRACT_VERSION } from "../shared/contract"
 import { streamFormat } from "../shared/media"
 import { decodeBody } from "./body"
-import type { Contract, EndpointContract } from "./contract"
-import { CONTRACT_VERSION } from "./contract"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest } from "./request"
-import type { StreamOptions, StreamSender } from "./stream"
+import type { StreamSender } from "./stream"
 import { stream as subscribe } from "./stream"
 import type {
   Endpoint,
   EndpointArgs,
   EndpointResult,
+  EndpointStreamItem,
   ResponseOf,
   ResultEndpoint,
   StreamArgs,
   StreamEndpoint,
   StreamMedia,
-  EndpointStreamItem,
+  StreamOptions,
 } from "./types"
 
-export type { Contract } from "./contract"
+export type { Contract } from "../shared/contract"
 export type {
   Endpoint,
   EndpointArgs,
@@ -29,10 +30,13 @@ export type {
   StreamArgs,
   StreamEndpoint,
   StreamMedia,
+  StreamOptions,
+  StreamRetryOptions,
   TypedResponse,
 } from "./types"
-export type { StreamMessage, StreamOptions, StreamRetryOptions } from "./stream"
-export { StreamParseError, StreamResponseError } from "./stream"
+export type { StreamMessage } from "./sse-parser"
+export { StreamParseError } from "./ndjson-parser"
+export { StreamResponseError } from "./stream"
 
 /**
  * Defaults for every request: any `RequestInit` field but `signal`, which every request would share

@@ -1,5 +1,3 @@
-export { isJsonEssence, isJsonWildcardEssence, mediaTypeEssence } from "../shared/media"
-
 /** A value as text: parameters, headers, and form fields. */
 export function scalar(value: unknown): string {
   if (isInstance(value, "Date")) return (value as Date).toISOString()
@@ -71,4 +69,12 @@ export function isInstance(
   } catch {
     return false
   }
+}
+
+/** A web `ReadableStream`, or an async iterable such as a Node.js stream. */
+export function isStream(value: unknown): boolean {
+  return (
+    isInstance(value, "ReadableStream") ||
+    (typeof value === "object" && value !== null && Symbol.asyncIterator in value)
+  )
 }

@@ -1,14 +1,6 @@
-import type { EventState } from "./sse"
-import { wait } from "./stream-lifecycle"
-
-/**
- * Additional SSE connections allowed over the whole subscription, with a configurable initial
- * delay.
- */
-export interface StreamRetryOptions {
-  delay?: number
-  maxRetries?: number
-}
+import { wait } from "./cancellation"
+import type { EventState } from "./sse-parser"
+import type { StreamRetryOptions } from "./types"
 
 /** An internal connection failure carrying the original public error. */
 export class RetryableStreamError extends Error {

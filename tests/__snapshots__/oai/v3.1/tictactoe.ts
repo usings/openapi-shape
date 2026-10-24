@@ -139,18 +139,17 @@ export namespace Schemas {
   }
 }
 
-/** Compiled endpoint plans for the Fetch client. */
 const endpoints = {
   "GET /board": {},
   "GET /board/{row}/{column}": {},
   "PUT /board/{row}/{column}": { contentType: "application/json" },
 } as const
 
-/** How requests go over the wire, for `createClient(contract)` from openapi-shape/client. */
 export const contract: {
   /** The contract's format; `createClient` refuses one it does not read. */
   readonly version: 5
   /** Carries `Endpoints` for `createClient` to infer; never set. */
   readonly types?: Endpoints
+  /** Compiled endpoint plans for the Fetch client. */
   readonly endpoints: typeof endpoints
 } = { version: 5, endpoints }

@@ -141,92 +141,90 @@ async function recording(document: object) {
 const textRange = (value?: object) => ({ "text/*": value ? { schema: value } : {} })
 
 describe("media types", () => {
-  describe("media types", () => {
-    it("are typed as the client reads and writes them", async () => {
-      const code = await gen(description)
-      const checks = MEDIA.flatMap(([, read, write, stream], i) => [
-        ...(stream
-          ? [
-              `  // @ts-expect-error sequential responses are consumed with stream`,
-              `  await api.result("GET /m${i}")`,
-              `  for await (const item of api.stream("GET /m${i}")) { const t: Equal<typeof ${stream === "sse" ? "item.data" : "item"}, ${READ_TYPE[read]}> = true; void t }`,
-            ]
-          : [
-              `  const r${i} = await api.result("GET /m${i}")`,
-              `  if (r${i}.error === undefined) { const t: Equal<typeof r${i}.data, ${READ_TYPE[read]}> = true; void t }`,
-            ]),
-        // Values the client cannot encode go only as ready-made bodies.
-        ...(write === "ready" ? ["  // @ts-expect-error a ready-made body only"] : []),
-        `  await api.fetch("POST /m${i}", { body: ${VALUE[write]} })`,
-      ])
-      const use = [
-        'import { createClient } from "openapi-shape/client"',
-        'import { contract } from "./api"',
-        "type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false",
-        'const api = createClient(contract, { baseUrl: "https://x.test" })',
-        "export async function check(): Promise<void> {",
-        ...checks,
-        "}",
-      ].join("\n")
-      expect(await typecheck({ "api.ts": code, "use.ts": use })).toBe("")
-    })
+  it("are typed as the client reads and writes them", async () => {
+    const code = await gen(description)
+    const checks = MEDIA.flatMap(([, read, write, stream], i) => [
+      ...(stream
+        ? [
+            `  // @ts-expect-error sequential responses are consumed with stream`,
+            `  await api.result("GET /m${i}")`,
+            `  for await (const item of api.stream("GET /m${i}")) { const t: Equal<typeof ${stream === "sse" ? "item.data" : "item"}, ${READ_TYPE[read]}> = true; void t }`,
+          ]
+        : [
+            `  const r${i} = await api.result("GET /m${i}")`,
+            `  if (r${i}.error === undefined) { const t: Equal<typeof r${i}.data, ${READ_TYPE[read]}> = true; void t }`,
+          ]),
+      // Values the client cannot encode go only as ready-made bodies.
+      ...(write === "ready" ? ["  // @ts-expect-error a ready-made body only"] : []),
+      `  await api.fetch("POST /m${i}", { body: ${VALUE[write]} })`,
+    ])
+    const use = [
+      'import { createClient } from "openapi-shape/client"',
+      'import { contract } from "./api"',
+      "type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false",
+      'const api = createClient(contract, { baseUrl: "https://x.test" })',
+      "export async function check(): Promise<void> {",
+      ...checks,
+      "}",
+    ].join("\n")
+    expect(await typecheck({ "api.ts": code, "use.ts": use })).toBe("")
+  })
 
-    it("are read and written at run time as their types say", async () => {
-      const code = await gen(description)
-      const contract = await contractOf(code)
-      // What the client did with each: how it read the response, and what it labelled a request.
-      const observed: Array<[string, string, string]> = []
-      for (const [i, [mediaType, , write, stream]] of MEDIA.entries()) {
-        const sent: Request[] = []
-        const api = createClient(contract, {
-          baseUrl: "https://x.test",
-          fetch: (request) => {
-            sent.push(request)
-            const read = MEDIA[i][1]
-            const headers = { "content-type": mediaType }
-            const body = stream === "sse" ? "data: x\n\n" : BODY[read]
-            return Promise.resolve(new Response(body, { status: 200, headers }))
-          },
-        })
-        let data: unknown
-        if (stream) {
-          // oxlint-disable-next-line no-await-in-loop -- consume each independent finite stream
-          for await (const item of api.stream(
-            `GET /m${i}` as never,
-            (stream === "sse" ? { retry: false } : {}) as never,
-          )) {
-            data = stream === "sse" ? (item as { data: string }).data : item
-          }
-        } else {
-          // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-          const result = await api.result(`GET /m${i}`)
-          data = result.data
+  it("are read and written at run time as their types say", async () => {
+    const code = await gen(description)
+    const contract = await contractOf(code)
+    // What the client did with each: how it read the response, and what it labelled a request.
+    const observed: Array<[string, string, string]> = []
+    for (const [i, [mediaType, , write, stream]] of MEDIA.entries()) {
+      const sent: Request[] = []
+      const api = createClient(contract, {
+        baseUrl: "https://x.test",
+        fetch: (request) => {
+          sent.push(request)
+          const read = MEDIA[i][1]
+          const headers = { "content-type": mediaType }
+          const body = stream === "sse" ? "data: x\n\n" : BODY[read]
+          return Promise.resolve(new Response(body, { status: 200, headers }))
+        },
+      })
+      let data: unknown
+      if (stream) {
+        // oxlint-disable-next-line no-await-in-loop -- consume each independent finite stream
+        for await (const item of api.stream(
+          `GET /m${i}` as never,
+          (stream === "sse" ? { retry: false } : {}) as never,
+        )) {
+          data = stream === "sse" ? (item as { data: string }).data : item
         }
-        const read =
-          data instanceof Blob
-            ? "blob"
-            : data === "x"
-              ? "text"
-              : JSON.stringify(data) === '{"a":"x"}'
-                ? "json"
-                : JSON.stringify(data)
-        const body = write === "string" ? "x" : { a: "x" }
+      } else {
         // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-        const label = await api.fetch(`POST /m${i}`, { body } as never).then(
-          () => sent.at(-1)?.headers.get("content-type")?.split(";")[0] ?? "none",
-          (error: Error) => (error.message.startsWith("Cannot encode") ? "refused" : error.message),
-        )
-        observed.push([mediaType, read, label])
+        const result = await api.result(`GET /m${i}`)
+        data = result.data
       }
-      // Sent as the only media type declared, without the call naming it.
-      expect(observed).toStrictEqual(
-        MEDIA.map(([mediaType, read, write]) => [
-          mediaType,
-          read,
-          write === "ready" ? "refused" : mediaType.split(";")[0],
-        ]),
+      const read =
+        data instanceof Blob
+          ? "blob"
+          : data === "x"
+            ? "text"
+            : JSON.stringify(data) === '{"a":"x"}'
+              ? "json"
+              : JSON.stringify(data)
+      const body = write === "string" ? "x" : { a: "x" }
+      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+      const label = await api.fetch(`POST /m${i}`, { body } as never).then(
+        () => sent.at(-1)?.headers.get("content-type")?.split(";")[0] ?? "none",
+        (error: Error) => (error.message.startsWith("Cannot encode") ? "refused" : error.message),
       )
-    })
+      observed.push([mediaType, read, label])
+    }
+    // Sent as the only media type declared, without the call naming it.
+    expect(observed).toStrictEqual(
+      MEDIA.map(([mediaType, read, write]) => [
+        mediaType,
+        read,
+        write === "ready" ? "refused" : mediaType.split(";")[0],
+      ]),
+    )
   })
 
   describe("the default media type", () => {
