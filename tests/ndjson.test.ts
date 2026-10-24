@@ -2,12 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { ClientOptions, Fetcher, StreamMessage } from "../src/client"
 import { createClient, StreamParseError, StreamResponseError } from "../src/client"
 import { readJsonLines } from "../src/client/ndjson"
-
-async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {
-  const values: T[] = []
-  for await (const item of items) values.push(item)
-  return values
-}
+import { collect } from "./helpers/streams"
 
 function body(chunks: Uint8Array[], failure?: Error): ReadableStream<Uint8Array> {
   let index = 0
@@ -23,6 +18,8 @@ function body(chunks: Uint8Array[], failure?: Error): ReadableStream<Uint8Array>
   )
 }
 
+const encoder = new TextEncoder()
+
 function api(options: ClientOptions = {}) {
   return createClient<{
     "GET /records": {
@@ -31,7 +28,9 @@ function api(options: ClientOptions = {}) {
     "GET /jsonl": { responses: { 200: { content: { "application/jsonl": unknown[] } } } }
     "GET /mixed": {
       responses: {
-        200: { content: { "text/event-stream": StreamMessage[]; "application/x-ndjson": number[] } }
+        200: {
+          content: { "text/event-stream": StreamMessage[]; "application/x-ndjson": number[] }
+        }
       }
     }
   }>(
@@ -47,7 +46,6 @@ function api(options: ClientOptions = {}) {
   )
 }
 
-const encoder = new TextEncoder()
 const jsonResponse = (text: string, media = "application/x-ndjson") =>
   new Response(text, { headers: { "content-type": media } })
 
@@ -82,7 +80,8 @@ describe("JSON line parser", () => {
     ).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(StreamParseError)
     expect(failure).toMatchObject({ line: 1, cause: expect.any(Error) })
-    expect((failure as Error).message).not.toContain(text.trim() || "empty record data")
+    const record = text.trim()
+    expect(record !== "" && (failure as Error).message.includes(record)).toBe(false)
   })
 
   it("closes an empty stream and accepts one trailing line delimiter", async () => {

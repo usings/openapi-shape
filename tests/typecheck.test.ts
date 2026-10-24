@@ -1,6 +1,6 @@
 import type { ExecFileException } from "node:child_process"
 import { describe, expect, it, vi } from "vitest"
-import { typecheck } from "./tsc"
+import { typecheck } from "./helpers/tsc"
 
 const compiler = vi.hoisted(() => ({
   error: null as ExecFileException | null,

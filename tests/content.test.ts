@@ -1,124 +1,446 @@
 import { describe, expect, it } from "vitest"
 import { createClient } from "../src/client"
 import { generate } from "../src/core/index"
-import type { ResultOperation } from "./helpers/contract"
+import { contentTypeErrors } from "./helpers/content"
 import { contractOf } from "./helpers/contract"
-import { codes, declaration, entry, oas } from "./helpers/generate"
+import { codes, entry, gen, oas } from "./helpers/generate"
 import { expectPassesTsc, typecheck } from "./helpers/tsc"
 
-/** Check decoding through the client while generated types retain media schemas. */
-async function contentType(
-  mediaType: string,
-  media: object,
-  expected: string,
-  version: "3.0" | "3.1" | "3.2" = "3.1",
-  output: "EndpointData" | "EndpointStreamItem" = "EndpointData",
-): Promise<string> {
-  const { code } = await generate(
-    oas(version, {
-      paths: { "/r": { get: { responses: { "200": { content: { [mediaType]: media } } } } } },
+// The rules for media types live in four places that must agree: how the
+// generator types content and picks a request's default media type, and how
+// the client reads and writes bodies, at run time and in its types. One table
+// drives all four.
+
+/** How the client reads a response of a media type. */
+type Read = "json" | "text" | "blob"
+
+/**
+ * How the client takes a request body of a media type: a value it encodes, a string, or a
+ * ready-made body.
+ */
+type Write = "value" | "string" | "ready"
+
+const MEDIA: Array<[mediaType: string, read: Read, write: Write, stream?: "sse" | "ndjson"]> = [
+  ["application/json", "json", "value"],
+  ["application/problem+json", "json", "value"],
+  ["APPLICATION/Problem+JSON; p=*", "json", "value"],
+  ["application/vnd.api+json; charset=utf-8", "json", "value"],
+  ["text/plain", "text", "string"],
+  ["TEXT/PLAIN; charset=utf-8", "text", "string"],
+  ["text/csv", "text", "string"],
+  ["text/event-stream", "text", "ready", "sse"],
+  ["application/x-www-form-urlencoded", "blob", "value"],
+  ["multipart/form-data", "blob", "value"],
+  ["application/jsonl", "json", "ready", "ndjson"],
+  ["APPLICATION/X-NDJSON; charset=utf-8", "json", "ready", "ndjson"],
+  ["application/json-seq", "blob", "ready"],
+  ["application/example+json-seq", "blob", "ready"],
+  ["application/xml", "blob", "ready"],
+  ["application/octet-stream", "blob", "ready"],
+  ["image/png", "blob", "ready"],
+]
+
+const recordSchema = { type: "object", properties: { a: { type: "string" } } }
+
+const description = oas("3.1", {
+  paths: Object.fromEntries(
+    MEDIA.map(([mediaType, , , stream], i) => {
+      const content = {
+        [mediaType]: {
+          schema: stream === "ndjson" ? { type: "array", items: recordSchema } : recordSchema,
+        },
+      }
+      return [
+        `/m${i}`,
+        {
+          get: { responses: { "200": { content } } },
+          post: { requestBody: { required: true, content }, responses: { "204": {} } },
+        },
+      ]
     }),
-  )
-  return typecheck({
-    "file0.ts": code,
-    "use.ts": `
-import type { ${output} } from "openapi-shape/client"
-import type { Endpoints } from "./file0"
-type Actual = ${output}<Endpoints, "GET /r">
-type Expected = ${expected}
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
-const equal: Equal<Actual, Expected> = true
-`,
+  ),
+})
+
+/** What a call that reads the response resolves `data` to, as TypeScript. */
+const READ_TYPE: Record<Read, string> = { json: "{ a?: string }", text: "string", blob: "Blob" }
+
+/** A response body of each kind, and a request value of each. */
+const BODY: Record<Read, string> = { json: '{"a":"x"}', text: "x", blob: "x" }
+
+const VALUE: Record<Write, string> = { value: '{ a: "x" }', string: '"x"', ready: '{ a: "x" }' }
+
+// The media type a body is sent as when the call names none: the declared
+// `application/json` one, parameters and all, where one alone is; else the
+// only one declared; else none, and the call names one. The types, the
+// contract, and the client must agree on it.
+const DEFAULTS: Array<[mediaTypes: string[], index: number | null, sent?: string]> = [
+  [
+    ['application/json; profile="https://x.test/p"'],
+    0,
+    'application/json; profile="https://x.test/p"',
+  ],
+  // A `*` in a parameter is no wildcard.
+  [
+    ['application/json; profile="https://x.test/*"'],
+    0,
+    'application/json; profile="https://x.test/*"',
+  ],
+  [["application/json", "*/*"], 0, "application/json"],
+  [["application/xml", "application/json"], 1, "application/json"],
+  [["application/merge-patch+json"], 0, "application/merge-patch+json"],
+  // A wildcard cannot label a request: its JSON goes as application/json.
+  [["*/*"], 0, "application/json"],
+  [["Application/*"], 0, "application/json"],
+  [[" \tApplication/JSON ; charset=utf-8"], 0, "Application/JSON ; charset=utf-8"],
+  [["application/json", "application/json; charset=utf-8"], null],
+  // Spaces and tabs around the type count alike (RFC 9110, OWS).
+  [["application/json; charset=utf-8", "application/json\t;v=2"], null],
+  [["*/*", "text/plain"], null],
+]
+
+/** One required property per media type, so that a body is of one of them. */
+const property = (j: number): object => ({
+  type: "object",
+  required: [`m${j}`],
+  properties: { [`m${j}`]: { type: "string" } },
+})
+
+const defaults = oas("3.1", {
+  paths: Object.fromEntries(
+    DEFAULTS.map(([mediaTypes], i) => [
+      `/d${i}`,
+      {
+        post: {
+          requestBody: {
+            required: true,
+            content: Object.fromEntries(mediaTypes.map((m, j) => [m, { schema: property(j) }])),
+          },
+          responses: { "204": {} },
+        },
+      },
+    ]),
+  ),
+})
+
+/** A client of the module generated from `document`, recording what it sends. */
+async function recording(document: object) {
+  const code = await gen(document)
+  const contract = await contractOf(code)
+  const sent: Request[] = []
+  const api = createClient(contract, {
+    baseUrl: "https://x.test",
+    fetch: (request) => {
+      sent.push(request)
+      return Promise.resolve(new Response(null, { status: 204 }))
+    },
   })
+  return { api, sent }
 }
 
-describe("response decoding", () => {
-  it.each([false, true])(
-    "preserves binary string literals through allOf (reversed: %s)",
-    async (reverse) => {
-      const members = [{ type: "string", format: "binary" }, { const: "abc" }]
-      const schema = { allOf: reverse ? members.toReversed() : members }
-      const { code } = await generate(
-        oas("3.2", {
-          paths: {
-            "/literal": {
-              post: {
-                requestBody: { required: true, content: { "application/json": { schema } } },
-                responses: { "200": { content: { "application/json": { schema } } } },
+/** `text/*` content, with `schema` if given. */
+const textRange = (value?: object) => ({ "text/*": value ? { schema: value } : {} })
+
+describe("media types", () => {
+  describe("media types", () => {
+    it("are typed as the client reads and writes them", async () => {
+      const code = await gen(description)
+      const checks = MEDIA.flatMap(([, read, write, stream], i) => [
+        ...(stream
+          ? [
+              `  // @ts-expect-error sequential responses are consumed with stream`,
+              `  await api.result("GET /m${i}")`,
+              `  for await (const item of api.stream("GET /m${i}")) { const t: Equal<typeof ${stream === "sse" ? "item.data" : "item"}, ${READ_TYPE[read]}> = true; void t }`,
+            ]
+          : [
+              `  const r${i} = await api.result("GET /m${i}")`,
+              `  if (r${i}.error === undefined) { const t: Equal<typeof r${i}.data, ${READ_TYPE[read]}> = true; void t }`,
+            ]),
+        // Values the client cannot encode go only as ready-made bodies.
+        ...(write === "ready" ? ["  // @ts-expect-error a ready-made body only"] : []),
+        `  await api.fetch("POST /m${i}", { body: ${VALUE[write]} })`,
+      ])
+      const use = [
+        'import { createClient } from "openapi-shape/client"',
+        'import { contract } from "./api"',
+        "type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false",
+        'const api = createClient(contract, { baseUrl: "https://x.test" })',
+        "export async function check(): Promise<void> {",
+        ...checks,
+        "}",
+      ].join("\n")
+      expect(await typecheck({ "api.ts": code, "use.ts": use })).toBe("")
+    })
+
+    it("are read and written at run time as their types say", async () => {
+      const code = await gen(description)
+      const contract = await contractOf(code)
+      // What the client did with each: how it read the response, and what it labelled a request.
+      const observed: Array<[string, string, string]> = []
+      for (const [i, [mediaType, , write, stream]] of MEDIA.entries()) {
+        const sent: Request[] = []
+        const api = createClient(contract, {
+          baseUrl: "https://x.test",
+          fetch: (request) => {
+            sent.push(request)
+            const read = MEDIA[i][1]
+            const headers = { "content-type": mediaType }
+            const body = stream === "sse" ? "data: x\n\n" : BODY[read]
+            return Promise.resolve(new Response(body, { status: 200, headers }))
+          },
+        })
+        let data: unknown
+        if (stream) {
+          // oxlint-disable-next-line no-await-in-loop -- consume each independent finite stream
+          for await (const item of api.stream(
+            `GET /m${i}` as never,
+            (stream === "sse" ? { retry: false } : {}) as never,
+          )) {
+            data = stream === "sse" ? (item as { data: string }).data : item
+          }
+        } else {
+          // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+          const result = await api.result(`GET /m${i}`)
+          data = result.data
+        }
+        const read =
+          data instanceof Blob
+            ? "blob"
+            : data === "x"
+              ? "text"
+              : JSON.stringify(data) === '{"a":"x"}'
+                ? "json"
+                : JSON.stringify(data)
+        const body = write === "string" ? "x" : { a: "x" }
+        // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+        const label = await api.fetch(`POST /m${i}`, { body } as never).then(
+          () => sent.at(-1)?.headers.get("content-type")?.split(";")[0] ?? "none",
+          (error: Error) => (error.message.startsWith("Cannot encode") ? "refused" : error.message),
+        )
+        observed.push([mediaType, read, label])
+      }
+      // Sent as the only media type declared, without the call naming it.
+      expect(observed).toStrictEqual(
+        MEDIA.map(([mediaType, read, write]) => [
+          mediaType,
+          read,
+          write === "ready" ? "refused" : mediaType.split(";")[0],
+        ]),
+      )
+    })
+  })
+
+  describe("the default media type", () => {
+    it("is the one the types let a call omit", async () => {
+      const code = await gen(defaults)
+      const checks = DEFAULTS.flatMap(([mediaTypes, index], i) => {
+        const call = (j: number): string => `api.fetch("POST /d${i}", { body: { m${j}: "x" } })`
+        if (index === null) {
+          return [
+            "  // @ts-expect-error no default: the call names a media type",
+            `  await ${call(0)}`,
+            `  await api.fetch("POST /d${i}", { contentType: ${JSON.stringify(mediaTypes[0])}, body: { m0: "x" } })`,
+          ]
+        }
+        return mediaTypes.flatMap((_, j) =>
+          j === index
+            ? [`  await ${call(j)}`]
+            : ["  // @ts-expect-error a body of another media type names it", `  await ${call(j)}`],
+        )
+      })
+      const use = [
+        'import { createClient } from "openapi-shape/client"',
+        'import { contract } from "./api"',
+        'const api = createClient(contract, { baseUrl: "https://x.test" })',
+        "export async function check(): Promise<void> {",
+        ...checks,
+        "}",
+      ].join("\n")
+      expect(await typecheck({ "api.ts": code, "use.ts": use })).toBe("")
+    })
+
+    it("is the one the client sends, parameters and all", async () => {
+      const { api, sent } = await recording(defaults)
+      const observed: typeof DEFAULTS = []
+      for (const [i, [mediaTypes, index]] of DEFAULTS.entries()) {
+        if (index === null) continue
+        // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+        await api.fetch(`POST /d${i}`, { body: { [`m${index}`]: "x" } } as never)
+        observed.push([mediaTypes, index, sent.at(-1)?.headers.get("content-type") ?? undefined])
+      }
+      expect(observed).toStrictEqual(DEFAULTS.filter(([, index]) => index !== null))
+      // Named by the call too, a `*` in a parameter labels the request.
+      const starred = DEFAULTS.findIndex(([[first]]) => first.includes('/*"'))
+      const [[mediaType]] = DEFAULTS[starred]
+      await api.fetch(`POST /d${starred}`, { contentType: mediaType, body: { m0: "x" } } as never)
+      expect(sent.at(-1)?.headers.get("content-type")).toBe(mediaType)
+    })
+
+    it("labels encoded and ready bodies with the compiled default media type", async () => {
+      const content = { "application/json;charset=UTF-8": {}, "application/octet-stream": {} }
+      const upload = {
+        post: { requestBody: { required: true, content }, responses: { "204": {} } },
+      }
+      const { api, sent } = await recording(oas("3.1", { paths: { "/upload": upload } }))
+      const labels: Array<string | null> = []
+      for (const body of [{ a: 1 }, new Blob(["x"], { type: "image/png" }), new Uint8Array([1])]) {
+        // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+        await api.fetch("POST /upload", { body } as never)
+        labels.push(sent.at(-1)?.headers.get("content-type") ?? null)
+      }
+      expect(labels).toStrictEqual(Array(3).fill("application/json;charset=UTF-8"))
+    })
+  })
+
+  it("requires narrowing wildcard results before accessing schema properties", async () => {
+    const mediaSchema = {
+      schema: { type: "object", required: ["id"], properties: { id: { type: "integer" } } },
+    }
+    const { code } = await generate(
+      oas("3.1", {
+        paths: Object.fromEntries(
+          ["application/*", "*/*", "application/json"].map((media, i) => [
+            `/r${i}`,
+            {
+              get: {
+                responses: { "200": { description: "OK", content: { [media]: mediaSchema } } },
+              },
+            },
+          ]),
+        ),
+      }),
+    )
+    expect(
+      await typecheck({
+        "api.ts": code,
+        "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const client = createClient(contract)
+async function check() {
+  const app = await client.result("GET /r0")
+  if (app.error === undefined) {
+    app.data satisfies { id: number } | Blob
+    // @ts-expect-error application/* may return a Blob
+    app.data.id.toFixed()
+    if (!(app.data instanceof Blob)) app.data.id.toFixed()
+  }
+  const any = await client.result("GET /r1")
+  if (any.error === undefined) {
+    any.data satisfies { id: number } | Blob | string
+    // @ts-expect-error */* may also return text
+    any.data.id.toFixed()
+    if (typeof any.data !== "string" && !(any.data instanceof Blob)) any.data.id.toFixed()
+  }
+  const json = await client.result("GET /r2")
+  if (json.error === undefined) json.data.id.toFixed()
+  const raw = await client.fetch("GET /r0")
+  if (raw.ok) (await raw.json()).id.toFixed()
+}
+`,
+      }),
+    ).toBe("")
+  })
+
+  it("types a text/* response as JSON or text, and its request body as text", async () => {
+    const { code } = await generate(
+      oas("3.1", {
+        paths: {
+          "/any": {
+            get: { responses: { "200": { description: "OK", content: textRange() } } },
+            post: { requestBody: { content: textRange() }, responses: { "204": {} } },
+          },
+          "/strings": {
+            get: {
+              responses: { "200": { description: "OK", content: textRange({ type: "string" }) } },
+            },
+          },
+        },
+      }),
+    )
+    expect(
+      await typecheck({
+        "api.ts": code,
+        "use.ts": `
+import { createClient } from "openapi-shape/client"
+import { contract } from "./api"
+const client = createClient(contract)
+async function check() {
+  const any = await client.result("GET /any")
+  if (any.error === undefined) {
+    // @ts-expect-error a text/json response is parsed
+    any.data.toUpperCase()
+    if (typeof any.data === "string") any.data.toUpperCase()
+  }
+  const strings = await client.result("GET /strings")
+  if (strings.error === undefined) strings.data.toUpperCase()
+  await client.result("POST /any", { body: "text" })
+  // @ts-expect-error text is sent as a string
+  await client.result("POST /any", { body: { a: 1 } })
+}
+`,
+      }),
+    ).toBe("")
+  })
+  describe("response media schemas", () => {
+    it.each([
+      ["application/json", {}, "unknown"],
+      ["application/problem+json", { schema: {} }, "unknown"],
+      ["*/*", {}, "unknown"],
+      ["text/plain", {}, "string"],
+      ["text/*", {}, "unknown"],
+      ["image/png", {}, "Blob"],
+      ["application/octet-stream", { schema: { description: "annotation only" } }, "Blob"],
+      ["application/xml", {}, "Blob"],
+    ])("%s without schema decodes to %s", async (media, schema, expected) => {
+      expect(await contentTypeErrors(media, schema, expected)).toBe("")
+    })
+
+    const object = { type: "object", properties: { id: { type: "integer" } } }
+
+    it.each([
+      ["text/json", object, "{ id?: number }"],
+      ["*/*", { type: "integer" }, "number | string | Blob"],
+      ["text/csv", { type: "string" }, "string"],
+      ["text/plain", { type: "integer" }, "string"],
+      ["text/plain", { oneOf: [{ type: "integer" }, { type: "boolean" }] }, "string"],
+      ["text/plain", { enum: ["ok", "no"] }, '"ok" | "no"'],
+      ["text/*", { enum: ["ok", "no"] }, '"ok" | "no"'],
+      ["text/*", object, "unknown"],
+      ["application/vnd.github.diff", { type: "string" }, "Blob"],
+      ["image/png", { type: "string", format: "binary" }, "Blob"],
+    ])("%s decodes according to the response media", async (media, schema, expected) => {
+      expect(await contentTypeErrors(media, { schema }, expected)).toBe("")
+    })
+  })
+
+  it("keeps referenced text literals in decoded responses", async () => {
+    const { code } = await generate(
+      oas("3.2", {
+        components: { schemas: { Word: { type: "string", enum: ["ok", "no"] } } },
+        paths: {
+          "/text": {
+            get: {
+              responses: {
+                "200": {
+                  content: { "text/plain": { schema: { $ref: "#/components/schemas/Word" } } },
+                },
               },
             },
           },
-        }),
-      )
-      await expectPassesTsc(
-        code,
-        `
-import { createClient } from "openapi-shape/client"
-import { contract } from "./file0"
-const api = createClient(contract)
-const result = await api.result("POST /literal", { body: "abc" })
-if (result.error === undefined) {
-  result.data satisfies "abc"
-  const value: typeof result.data = "abc"
-}
-// @ts-expect-error the literal constraint still applies
-void api.result("POST /literal", { body: "other" })
+        },
+      }),
+    )
+    await expectPassesTsc(
+      code,
+      `
+import {createClient} from "openapi-shape/client"
+import {contract} from "./file0"
+const api=createClient(contract)
+const result=await api.result("GET /text")
+if (result.error === undefined) result.data satisfies "ok" | "no"
 `,
-      )
-    },
-  )
-
-  it.each([
-    ["application/json", {}, "unknown"],
-    ["application/problem+json", { schema: {} }, "unknown"],
-    ["*/*", {}, "unknown"],
-    ["text/plain", {}, "string"],
-    ["text/*", {}, "unknown"],
-    ["image/png", {}, "Blob"],
-    ["application/octet-stream", { schema: { description: "annotation only" } }, "Blob"],
-    ["application/xml", {}, "Blob"],
-  ])("%s without schema decodes to %s", async (media, schema, expected) => {
-    expect(await contentType(media, schema, expected)).toBe("")
+    )
   })
-
-  const object = { type: "object", properties: { id: { type: "integer" } } }
-  it.each([
-    ["text/json", object, "{ id?: number }"],
-    ["*/*", { type: "integer" }, "number | string | Blob"],
-    ["application/x-www-form-urlencoded", object, "Blob"],
-    ["multipart/form-data", object, "Blob"],
-    ["text/csv", { type: "string" }, "string"],
-    ["text/plain", { type: "integer" }, "string"],
-    ["text/plain", { oneOf: [{ type: "integer" }, { type: "boolean" }] }, "string"],
-    ["text/plain", { enum: ["ok", "no"] }, '"ok" | "no"'],
-    ["text/*", { enum: ["ok", "no"] }, '"ok" | "no"'],
-    ["text/*", object, "unknown"],
-    ["application/xml", object, "Blob"],
-    ["application/vnd.github.diff", { type: "string" }, "Blob"],
-    ["image/png", { type: "string", format: "binary" }, "Blob"],
-  ])("%s decodes according to the response media", async (media, schema, expected) => {
-    expect(await contentType(media, { schema }, expected)).toBe("")
-  })
-
-  it.each(["3.0", "3.1"] as const)(
-    "projects binary annotations in %s by transport",
-    async (version) => {
-      const bytes = { schema: { type: "string", format: "binary" } }
-      expect(await contentType("application/json", bytes, "string", version)).toBe("")
-      expect(await contentType("text/plain", bytes, "string", version)).toBe("")
-      expect(await contentType("text/*", bytes, "unknown", version)).toBe("")
-      expect(await contentType("*/*", bytes, "string | Blob", version)).toBe("")
-      expect(await contentType("image/png", bytes, "Blob", version)).toBe("")
-      expect(
-        await contentType(
-          "application/json",
-          { schema: { type: "string", contentMediaType: "image/png" } },
-          "string",
-          version,
-        ),
-      ).toBe("")
-    },
-  )
 })
 
 describe("sequential content", () => {
@@ -237,7 +559,7 @@ void api.result("GET /events")
     expect(entry(code, "POST /r")).toContain('body: { "application/x-ndjson": number[] }')
     expect(entry(code, "POST /r")).toContain('"application/jsonl": number[]')
     expect(
-      await contentType(
+      await contentTypeErrors(
         "application/jsonl",
         { itemSchema: { type: "integer" } },
         "number",
@@ -277,7 +599,7 @@ void api.stream("POST /r", { body: [1, 2] })
     [{}, "unknown"],
   ])("distinguishes whole sequence schemas from item schemas: %j", async (media, expected) => {
     expect(
-      await contentType("application/x-ndjson", media, expected, "3.2", "EndpointStreamItem"),
+      await contentTypeErrors("application/x-ndjson", media, expected, "3.2", "EndpointStreamItem"),
     ).toBe("")
   })
 
@@ -380,196 +702,4 @@ const items: Equal<EndpointStreamItem<Endpoints, "GET /items">, { id: number }> 
     expect(endpoints["HEAD /head"]).toStrictEqual({})
     expect(endpoints["GET /shadowed"]).toStrictEqual({})
   })
-})
-
-const binary = { type: "string", format: "binary" }
-const document = () =>
-  oas("3.1", {
-    paths: {
-      "/f": {
-        post: {
-          parameters: [{ name: "q", in: "query", schema: binary }],
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Doc" } },
-              "application/x-www-form-urlencoded": { schema: { $ref: "#/components/schemas/Doc" } },
-              "multipart/form-data": { schema: { $ref: "#/components/schemas/Doc" } },
-            },
-          },
-          responses: { "204": { description: "Done" } },
-        },
-      },
-    },
-    components: {
-      schemas: { Doc: { type: "object", required: ["file"], properties: { file: binary } } },
-    },
-  })
-
-describe("request projections", () => {
-  it("types and encodes JSON/text strings separately from actual multipart files", async () => {
-    const { code, diagnostics } = await generate(document())
-    expect(diagnostics).toStrictEqual([])
-    expect(declaration(code, "Doc")).toContain("file: string")
-    expect(declaration(code, "DocMultipart")).toContain("file: Blob")
-    await expectPassesTsc(
-      code,
-      `
-import type { Endpoints } from "./file0"
-import type { EndpointArgs } from "openapi-shape/client"
-type Input = EndpointArgs<Endpoints, "POST /f">[0]
-export const parts: Input = { contentType: "multipart/form-data", body: { file: new Blob([]) } }
-export const json: Input = { contentType: "application/json", body: { file: "bytes" }, query: { q: "bytes" } }
-export const form: Input = { contentType: "application/x-www-form-urlencoded", body: { file: "bytes" } }
-// @ts-expect-error JSON does not encode nested Blob values
-export const invalidJson: Input = { body: { file: new Blob([]) } }
-// @ts-expect-error parameters are text
-export const invalidQuery: Input = { body: { file: "bytes" }, query: { q: new Blob([]) } }
-`,
-    )
-    const sent: Request[] = []
-    const api = createClient(
-      await contractOf<
-        Record<
-          string,
-          ResultOperation<{
-            body?: unknown
-            query?: unknown
-            contentType?:
-              | "application/json"
-              | "multipart/form-data"
-              | "application/x-www-form-urlencoded"
-          }>
-        >
-      >(code),
-      {
-        baseUrl: "https://api.test",
-        fetch: (request) => {
-          sent.push(request)
-          return Promise.resolve(new Response(null, { status: 204 }))
-        },
-      },
-    )
-    await api.result("POST /f", { body: { file: "bytes" }, query: { q: "bytes" } })
-    await api.result("POST /f", {
-      contentType: "multipart/form-data",
-      body: { file: new Blob(["bytes"]) },
-    })
-    expect(await sent[0].json()).toStrictEqual({ file: "bytes" })
-    expect(sent[0].url).toBe("https://api.test/f?q=bytes")
-    const form = await sent[1].formData()
-    const file = form.get("file") as File
-    expect(await file.text()).toBe("bytes")
-  })
-
-  it("projects recursive JSON, styled fields and nested multipart values to encodable strings", async () => {
-    const { code, diagnostics } = await generate(
-      oas("3.1", {
-        paths: {
-          "/f": {
-            post: {
-              requestBody: {
-                required: true,
-                content: {
-                  "multipart/form-data": {
-                    schema: {
-                      type: "object",
-                      required: ["file", "files", "nested", "matrix", "styled"],
-                      properties: {
-                        file: binary,
-                        files: { type: "array", items: binary },
-                        nested: { $ref: "#/components/schemas/Node" },
-                        matrix: { type: "array", items: { type: "array", items: binary } },
-                        styled: binary,
-                      },
-                    },
-                    encoding: { styled: { style: "form" } },
-                  },
-                },
-              },
-              responses: { "204": { description: "Done" } },
-            },
-          },
-        },
-        components: {
-          schemas: {
-            Node: {
-              type: "object",
-              properties: { file: binary, next: { $ref: "#/components/schemas/Node" } },
-            },
-          },
-        },
-      }),
-    )
-    expect(diagnostics).toStrictEqual([])
-    await expectPassesTsc(
-      code,
-      `
-import type { Endpoints } from "./file0"
-import type { EndpointArgs } from "openapi-shape/client"
-type Input = EndpointArgs<Endpoints, "POST /f">[0]
-export const input: Input = { body: {
-  file: new Blob([]), files: [new Blob([])], nested: { file: "bytes", next: { file: "more" } }, matrix: [["bytes"]], styled: "bytes"
-} }
-// @ts-expect-error a nested array part is JSON-encoded, not a file
-export const bad: Input = { body: { file: new Blob([]), files: [], nested: {}, matrix: [[new Blob([])]], styled: "bytes" } }
-`,
-    )
-  })
-})
-
-it("excludes non-object form inputs and keeps referenced text literals", async () => {
-  const { code } = await generate(
-    oas("3.2", {
-      components: { schemas: { Word: { type: "string", enum: ["ok", "no"] } } },
-      paths: {
-        "/form": {
-          post: {
-            requestBody: {
-              required: true,
-              content: { "application/x-www-form-urlencoded": { schema: { type: "number" } } },
-            },
-            responses: { "204": {} },
-          },
-        },
-        "/text": {
-          get: {
-            responses: {
-              "200": {
-                content: { "text/plain": { schema: { $ref: "#/components/schemas/Word" } } },
-              },
-            },
-          },
-        },
-        "/custom": { additionalOperations: { CuStOm: { responses: { "204": {} } } } },
-      },
-    }),
-  )
-  expect(
-    await typecheck({
-      "api.ts": code,
-      "use.ts": `
-import { createClient } from "openapi-shape/client"
-import { contract } from "./api"
-const api = createClient(contract)
-// @ts-expect-error a form encoder cannot encode a number as fields
-void api.fetch("POST /form", { body: 1 })
-void api.fetch("POST /form", { body: "already=encoded" })
-async function use() {
-  const result = await api.result("GET /text")
-  if (result.error === undefined) result.data satisfies "ok" | "no"
-}
-`,
-    }),
-  ).toBe("")
-  const contract = await contractOf(code)
-  expect(contract.endpoints["CuStOm /custom"]).toStrictEqual({})
-  const api = createClient(contract, {
-    baseUrl: "https://api.test",
-    fetch: (request) => {
-      expect(request.method).toBe("CuStOm")
-      return Promise.resolve(new Response(null, { status: 204 }))
-    },
-  })
-  await api.fetch("CuStOm /custom")
 })

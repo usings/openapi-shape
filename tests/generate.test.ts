@@ -2,11 +2,16 @@ import { readFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
 import { join } from "node:path"
+import { setImmediate } from "node:timers"
 import { pathToFileURL } from "node:url"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import type { DocumentLoader } from "../src/core/index"
 import { GenerateError, generate } from "../src/core/index"
+import * as rendering from "../src/core/render-types"
+import { SchemaBuilder } from "../src/core/schemas"
 import { codes, declaration, gen, oas } from "./helpers/generate"
 import { withFiles } from "./helpers/tmp"
+import { typecheck } from "./helpers/tsc"
 
 const FIXTURES = join(import.meta.dirname, "fixtures/oai")
 
@@ -16,96 +21,72 @@ async function failureCodes(input: string | object): Promise<string[]> {
   return codes((failure as GenerateError).diagnostics)
 }
 
-describe("generate", () => {
-  it("checks shared objects once and still rejects cycles on later calls", async () => {
-    const visits = { reads: 0 }
-    let shared: Record<string, unknown> = { leaf: "value" }
-    for (let i = 0; i < 30; i++) {
-      const child = shared
-      shared = {
-        a: child,
-        get b() {
-          if (++visits.reads > 100) throw new Error("Repeated traversal of a shared example")
-          return child
-        },
-      }
-    }
-    const document = oas("3.1", {
-      components: {
-        schemas: {
-          S: { type: "string", example: shared },
-        },
-      },
-    })
-    const result = await generate(document)
-    expect(result.code).toContain("export type S = string")
-    expect(result.diagnostics).toStrictEqual([])
-    expect(visits.reads).toBe(30)
-    shared.cycle = shared
-    await expect(generate(document)).rejects.toThrow("the document refers to itself")
-    delete shared.cycle
-    await expect(generate(document)).resolves.toMatchObject({ code: result.code })
-  })
+const pet = {
+  type: "object",
+  required: ["id", "secret", "name", "location"],
+  properties: {
+    id: { type: "integer", readOnly: true },
+    secret: { type: "string", writeOnly: true },
+    name: { type: ["string", "null"] },
+    location: {
+      type: "array",
+      prefixItems: [{ type: "number" }, { type: "number" }],
+      minItems: 2,
+      items: false,
+    },
+  },
+}
 
-  it("stops a pathological pattern match and can generate again after the timeout", async () => {
-    const hostile = oas("3.1", {
-      components: {
-        schemas: {
-          Slow: {
-            type: "object",
-            required: [`${"a".repeat(26)}!`],
-            patternProperties: { "^(a+)+$": { type: "string" } },
+function document(schema: object, schemas: Record<string, object> = {}) {
+  return oas("3.1", {
+    components: { schemas },
+    paths: {
+      "/pets": {
+        post: {
+          requestBody: { required: true, content: { "application/json": { schema } } },
+          responses: {
+            "200": { description: "Pet", content: { "application/json": { schema } } },
           },
         },
       },
-    })
-    await expect(generate(hostile)).rejects.toMatchObject({
-      name: "GenerateError",
-      diagnostics: [
+    },
+  })
+}
+
+const load: DocumentLoader = (uri) => {
+  if (uri === "https://schemas.test/pet.json") return Response.json(pet)
+  throw new Error(`Unknown test resource: ${uri}`)
+}
+
+// Advance the cooperative budget deterministically; cancellation itself uses the real event loop.
+function clockSlices(): void {
+  let now = 0
+  vi.spyOn(performance, "now").mockImplementation(() => (now += 8))
+}
+
+function endpoints(count: number): object {
+  return oas("3.1", {
+    paths: Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [
+        `/items/${i}`,
         {
-          severity: "error",
-          code: "invalid-document",
-          location: "#",
-          message: expect.stringContaining("patternProperties match exceeded"),
-        },
-      ],
-    })
-    const result = await generate(
-      oas("3.1", {
-        components: {
-          schemas: {
-            Fast: {
-              type: "object",
-              required: ["x-id"],
-              patternProperties: { "(?<=x-)id$": { type: "number" } },
-            },
-          },
-        },
-      }),
-    )
-    expect(result.code).toContain('"x-id": number')
-    expect(result.diagnostics).toStrictEqual([])
-  })
-
-  it("also bounds pattern matching when merging allOf properties", async () => {
-    await expect(
-      generate(
-        oas("3.1", {
-          components: {
-            schemas: {
-              Slow: {
-                allOf: [
-                  { type: "object", properties: { [`${"a".repeat(26)}!`]: { type: "string" } } },
-                  { patternProperties: { "^(a+)+$": { type: "string" } } },
-                ],
+          get: {
+            responses: {
+              "200": {
+                description: "OK",
+                content: {
+                  "application/json": { schema: { type: "string" } },
+                },
               },
             },
           },
-        }),
-      ),
-    ).rejects.toThrow("patternProperties match exceeded")
+        },
+      ]),
+    ),
   })
+}
 
+describe("generation", () => {
   it("accepts paths, file URLs, and parsed documents alike", async () => {
     const path = join(FIXTURES, "v3.0/petstore.yaml")
     const [fromPath, fromUrl, fromJson, fromParsed] = await Promise.all([
@@ -211,5 +192,131 @@ describe("generate", () => {
     expect(code.split("\n\n")[0]).toBe(
       "// Pets API 2.0\n// Line 1\n// Line 2 */\n//\n// Generated by openapi-shape from an OpenAPI 3.1.2 document. Do not edit.",
     )
+  })
+})
+
+describe("generation equivalence", () => {
+  it("preserves request and response meaning across inline, local and external schemas", async () => {
+    const variants = [
+      document(pet),
+      document({ $ref: "#/components/schemas/Pet" }, { Pet: pet }),
+      document({ $ref: "pet.json" }),
+    ]
+    const outputs = await Promise.all(
+      variants.map((input) =>
+        generate(input, {
+          base: "https://schemas.test/api.json",
+          load,
+        }),
+      ),
+    )
+    for (const output of outputs) expect(output.diagnostics).toStrictEqual([])
+    expect(
+      await typecheck(
+        {
+          ...Object.fromEntries(outputs.map((output, i) => [`api${i}.ts`, output.code])),
+          "use.ts": `
+import type { Endpoints as Inline } from "./api0"
+import type { Endpoints as Local } from "./api1"
+import type { Endpoints as External } from "./api2"
+type I = Inline["POST /pets"]
+type L = Local["POST /pets"]
+type E = External["POST /pets"]
+export const localForward: [I] extends [L] ? true : false = true
+export const localBackward: [L] extends [I] ? true : false = true
+export const externalForward: [I] extends [E] ? true : false = true
+export const externalBackward: [E] extends [I] ? true : false = true
+// Concrete witnesses keep equivalent but accidentally over-wide results from passing.
+const input: I["body"]["application/json"] = { secret: "s", name: null, location: [1, 2] }
+const output: E["responses"][200]["content"]["application/json"] = { id: 1, name: "pet", location: [1, 2] }
+// @ts-expect-error writeOnly secret remains required in a request
+const missingSecret: L["body"]["application/json"] = { id: 1, name: "pet", location: [1, 2] }
+// @ts-expect-error readOnly id remains required in a response
+const missingId: E["responses"][200]["content"]["application/json"] = { secret: "s", name: "pet", location: [1, 2] }
+// @ts-expect-error the tuple is closed
+const longLocation: I["body"]["application/json"] = { secret: "s", name: "pet", location: [1, 2, 3] }
+`,
+        },
+        { compilerOptions: { exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true } },
+      ),
+    ).toBe("")
+  })
+
+  it("generates identical bytes after other generations, a failure and concurrent calls", async () => {
+    const input = document({ $ref: "pet.json" })
+    const before = structuredClone(input)
+    const options = { base: "https://schemas.test/api.json", load }
+    const first = await generate(input, options)
+    await generate(document({ anyOf: [{ type: "number" }, { type: "string" }] }))
+    await expect(generate(document({ $ref: "missing.json" }), options)).rejects.toThrow(
+      "Unknown test resource",
+    )
+    const repeated = await Promise.all(
+      [1, 8, 2].map((maxConcurrentLoads) => generate(input, { ...options, maxConcurrentLoads })),
+    )
+    for (const output of repeated) expect(output).toStrictEqual(first)
+    expect(input).toStrictEqual(before)
+  })
+})
+
+describe("cancellation", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it.each(["declarations", "operations"] as const)(
+    "cancels between %s before building the remaining document",
+    async (stage) => {
+      clockSlices()
+      const count = 200
+      const controller = new AbortController()
+      const reason = new Error(`cancel ${stage}`)
+      const original = SchemaBuilder.prototype.type
+      let visited = 0
+      const spy = vi.spyOn(SchemaBuilder.prototype, "type").mockImplementation(function (
+        this: SchemaBuilder,
+        node,
+      ) {
+        if (++visited === 1) setImmediate(() => controller.abort(reason))
+        return original.call(this, node)
+      })
+      const input =
+        stage === "declarations"
+          ? oas("3.1", {
+              components: {
+                schemas: Object.fromEntries(
+                  Array.from({ length: count }, (_, i) => [`S${i}`, { type: "string" }]),
+                ),
+              },
+            })
+          : endpoints(count)
+      await expect(generate(input, { signal: controller.signal })).rejects.toBe(reason)
+      expect(visited).toBeGreaterThan(0)
+      expect(visited).toBeLessThan(count)
+      spy.mockRestore()
+      const recovered = await generate(input)
+      expect(recovered.diagnostics).toStrictEqual([])
+      expect(recovered.code).toContain(stage === "declarations" ? "S199" : "/items/199")
+    },
+  )
+
+  it("cancels while rendering without returning a partial module, and isolates another run", async () => {
+    clockSlices()
+    const controller = new AbortController()
+    const reason = { cancelled: "render" }
+    let rendered = 0
+    const original = rendering.renderType
+    const spy = vi.spyOn(rendering, "renderType").mockImplementation((type, context) => {
+      if (++rendered === 1) setImmediate(() => controller.abort(reason))
+      return original(type, context)
+    })
+    const input = endpoints(200)
+    await expect(generate(input, { signal: controller.signal })).rejects.toBe(reason)
+    expect(rendered).toBeGreaterThan(0)
+    expect(rendered).toBeLessThan(200)
+    spy.mockRestore()
+    const [plain, cancellable] = await Promise.all([
+      generate(input),
+      generate(input, { signal: new AbortController().signal }),
+    ])
+    expect(cancellable).toStrictEqual(plain)
   })
 })

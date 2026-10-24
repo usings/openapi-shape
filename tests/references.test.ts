@@ -8,6 +8,17 @@ import { codes, declaration, entry, gen, oas } from "./helpers/generate"
 import { withFiles } from "./helpers/tmp"
 import { expectPassesTsc } from "./helpers/tsc"
 
+async function errorsOf(promise: Promise<unknown>): Promise<string[]> {
+  const failure: unknown = await promise.catch((error: unknown) => error)
+  if (!(failure instanceof GenerateError)) {
+    throw new Error(`Expected GenerateError, got ${String(failure)}`)
+  }
+  return codes(failure.diagnostics.filter((d) => d.severity === "error"))
+}
+
+/** A schema claiming `https://spec.test/<n>.json`, typed apart from the document there. */
+const claims = (n: number) => ({ $id: `https://spec.test/${n}.json`, type: "number" })
+
 /** Serve documents by path on 127.0.0.1 for the duration of `fn`. */
 async function serving<T>(
   documents: Record<string, object>,
@@ -29,498 +40,41 @@ async function serving<T>(
   }
 }
 
-async function errorsOf(promise: Promise<unknown>): Promise<string[]> {
-  const failure: unknown = await promise.catch((error: unknown) => error)
-  if (!(failure instanceof GenerateError)) {
-    throw new Error(`Expected GenerateError, got ${String(failure)}`)
-  }
-  return codes(failure.diagnostics.filter((d) => d.severity === "error"))
-}
-
-/** A schema claiming `https://spec.test/<n>.json`, typed apart from the document there. */
-const claims = (n: number) => ({ $id: `https://spec.test/${n}.json`, type: "number" })
-
-describe("references across documents", () => {
-  it("plans repeated inline reference names before their first use", async () => {
-    const result = await generate(
-      oas("3.1", {
-        "components": {
-          schemas: {
-            Owner: {
-              type: "object",
-              properties: {
-                first: { $ref: "#/x-definitions/value" },
-                second: { $ref: "#/x-definitions/value" },
-              },
-            },
-          },
-        },
-        "x-definitions": { value: { type: "object", properties: { id: { type: "string" } } } },
-      }),
-    )
-    expect(result.diagnostics).toStrictEqual([])
-    expect(declaration(result.code, "Owner")).toBe(
-      "{\n  first?: x_definitions_value\n  second?: x_definitions_value\n}",
-    )
-    expect(declaration(result.code, "x_definitions_value")).toBe("{\n  id?: string\n}")
-  })
-
-  it("discovers references behind an anchor made visible by later dictionary indexing", async () => {
-    const calls: string[] = []
-    const result = await generate(
-      oas("3.1", {
-        components: {
-          schemas: {
-            Anchor: { $ref: "common.json#named" },
-            Pointer: { $ref: "common.json#/x-schemas/Value" },
-          },
-        },
-      }),
-      {
-        base: "https://spec.test/api.json",
-        load: (uri) => {
-          calls.push(uri)
-          if (uri.endsWith("value.json")) return Response.json({ type: "string" })
-          return Response.json({
-            "x-schemas": {
-              Value: { type: "number" },
-              Named: { $anchor: "named", properties: { value: { $ref: "value.json" } } },
-            },
-          })
-        },
-      },
-    )
-    expect(result.diagnostics).toStrictEqual([])
-    expect(declaration(result.code, "Anchor")).toContain("value?: value")
-    expect(declaration(result.code, "value")).toBe("string")
-    expect(calls).toStrictEqual(["https://spec.test/common.json", "https://spec.test/value.json"])
-  })
-
-  it("loads only schemas selected by semantic positions", async () => {
-    const ref = { $ref: "unused.json" }
-    const calls: string[] = []
-    const result = await generate(
-      oas("3.1", {
-        components: {
-          schemas: {
-            Value: { "type": "string", "examples": [ref], "default": ref, "x-schema": ref },
-          },
-          parameters: { Unused: ref },
-        },
-        paths: {
-          "/value": {
-            get: {
-              responses: {
-                "200": {
-                  content: {
-                    "application/octet-stream": { schema: ref },
-                    "text/plain": { schema: { type: "object", properties: { hidden: ref } } },
-                    "application/json": { schema: { type: "string" }, examples: { unused: ref } },
-                  },
-                  headers: { "Content-Type": ref },
+describe("reference resolution", () => {
+  describe("references across documents", () => {
+    it("plans repeated inline reference names before their first use", async () => {
+      const result = await generate(
+        oas("3.1", {
+          "components": {
+            schemas: {
+              Owner: {
+                type: "object",
+                properties: {
+                  first: { $ref: "#/x-definitions/value" },
+                  second: { $ref: "#/x-definitions/value" },
                 },
               },
             },
           },
-        },
-      }),
-      {
-        base: "https://spec.test/api.json",
-        load: (uri) => {
-          calls.push(uri)
-          return Response.json({ type: "number" })
-        },
-      },
-    )
-    expect(result.diagnostics).toStrictEqual([])
-    expect(calls).toStrictEqual([])
-  })
+          "x-definitions": { value: { type: "object", properties: { id: { type: "string" } } } },
+        }),
+      )
+      expect(result.diagnostics).toStrictEqual([])
+      expect(declaration(result.code, "Owner")).toBe(
+        "{\n  first?: x_definitions_value\n  second?: x_definitions_value\n}",
+      )
+      expect(declaration(result.code, "x_definitions_value")).toBe("{\n  id?: string\n}")
+    })
 
-  it.each(["$anchor", "$dynamicAnchor"])(
-    "does not let discriminator mapping %s shadow an anchor",
-    async (keyword) => {
-      const { code, diagnostics } = await generate(
+    it("discovers references behind an anchor made visible by later dictionary indexing", async () => {
+      const calls: string[] = []
+      const result = await generate(
         oas("3.1", {
           components: {
             schemas: {
-              Pet: {
-                oneOf: [{ $ref: "#/components/schemas/Target" }],
-                discriminator: { propertyName: "kind", mapping: { [keyword]: "Target" } },
-              },
-              Target: {
-                [keyword]: "Target",
-                type: "object",
-                properties: { kind: { type: "string" } },
-                required: ["kind"],
-              },
-              Alias: { $ref: "#Target" },
+              Anchor: { $ref: "common.json#named" },
+              Pointer: { $ref: "common.json#/x-schemas/Value" },
             },
-          },
-        }),
-      )
-      expect(diagnostics).toStrictEqual([])
-      expect(declaration(code, "Alias")).toBe("Target")
-    },
-  )
-
-  it("keeps discriminator mapping names out of the schema resource index", async () => {
-    const uri = "https://spec.test/cat.json"
-    const calls: string[] = []
-    const { code, diagnostics } = await generate(
-      oas("3.1", {
-        components: {
-          schemas: {
-            Pet: {
-              oneOf: [{ $ref: uri }],
-              discriminator: {
-                propertyName: "kind",
-                mapping: { $id: uri, $anchor: "Local", $dynamicAnchor: "Dynamic" },
-              },
-            },
-            Local: { $anchor: "local", type: "string" },
-            Dynamic: { $dynamicAnchor: "dynamic", type: "number" },
-            LocalUse: { $ref: "#local" },
-            DynamicUse: { $ref: "#dynamic" },
-            Named: {
-              type: "object",
-              properties: { discriminator: { $id: "https://spec.test/named", type: "boolean" } },
-            },
-            NamedUse: { $ref: "https://spec.test/named" },
-          },
-        },
-      }),
-      {
-        base: "https://spec.test/api.json",
-        load: (url) => {
-          calls.push(url)
-          return Response.json({
-            type: "object",
-            properties: { kind: { type: "string" }, name: { type: "string" } },
-            required: ["kind", "name"],
-          })
-        },
-      },
-    )
-    expect(calls).toStrictEqual([uri])
-    expect(diagnostics).toStrictEqual([])
-    expect(declaration(code, "cat")).toContain("name: string")
-    expect(declaration(code, "LocalUse")).toBe("Local")
-    expect(declaration(code, "DynamicUse")).toBe("Dynamic")
-    expect(declaration(code, "NamedUse")).toBe("boolean")
-  })
-
-  it("loads relative files, naming their definitions", async () => {
-    await withFiles(
-      {
-        "api/openapi.yaml": [
-          "openapi: 3.1.0",
-          "info: { title: Split, version: '1' }",
-          "paths:",
-          "  /pets:",
-          "    $ref: ./paths/pets.yaml",
-          "components:",
-          "  schemas:",
-          "    Pet:",
-          "      $ref: ../schemas/pet.json",
-        ].join("\n"),
-        "api/paths/pets.yaml": [
-          "get:",
-          "  parameters:",
-          "    - $ref: '../parameters.yaml#/limit'",
-          "  responses:",
-          "    '200':",
-          "      description: OK",
-          "      content:",
-          "        application/json:",
-          "          schema:",
-          "            type: array",
-          "            items: { $ref: '../../schemas/pet.json' }",
-          "    default:",
-          "      $ref: '../../schemas/common.yaml#/components/responses/Error'",
-        ].join("\n"),
-        "api/parameters.yaml": "limit:\n  name: limit\n  in: query\n  schema: { type: integer }\n",
-        "schemas/pet.json": {
-          type: "object",
-          required: ["id"],
-          properties: {
-            id: { type: "integer" },
-            owner: { $ref: "common.yaml#/components/schemas/Owner" },
-          },
-        },
-        "schemas/common.yaml": [
-          "openapi: 3.1.0",
-          "info: { title: Common, version: '1' }",
-          "components:",
-          "  schemas:",
-          "    Owner: { type: object, properties: { name: { type: string } } }",
-          "    Error: { type: object, properties: { message: { type: string } } }",
-          "  responses:",
-          "    Error:",
-          "      description: Failure",
-          "      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }",
-        ].join("\n"),
-      },
-      async (dir) => {
-        const { code, diagnostics } = await generate(join(dir, "api/openapi.yaml"))
-        expect(diagnostics).toStrictEqual([])
-        // The component that references the file lends the file its name.
-        expect(declaration(code, "Pet")).toBe("{\n  id: number\n  owner?: Owner\n}")
-        expect(declaration(code, "Owner")).toBe("{\n  name?: string\n}")
-        const operation = entry(code, "GET /pets")
-        expect(operation).toContain("query?: { limit?: number }")
-        expect(operation).toContain('"200": { content: { "application/json": Schemas.Pet[] } }')
-        expect(operation).toContain('"default": { content: { "application/json": Schemas.Error } }')
-        await expectPassesTsc(code)
-      },
-    )
-  })
-
-  it("resolves an in-memory document's relative references against `base`", async () => {
-    await withFiles({ "schemas/thing.json": { type: "string" } }, async (dir) => {
-      const doc = oas("3.1", { components: { schemas: { Thing: { $ref: "schemas/thing.json" } } } })
-      expect(declaration(await gen(doc, { base: join(dir, "openapi.json") }), "Thing")).toBe(
-        "string",
-      )
-      expect(await errorsOf(generate(doc))).toStrictEqual([
-        "unresolved-ref #/components/schemas/Thing/$ref",
-      ])
-    })
-  })
-
-  it("uses $self (3.2) as the document's base URI", async () => {
-    await withFiles({ "shared/thing.json": { type: "boolean" } }, async (dir) => {
-      const doc = oas("3.2", {
-        $self: "shared/openapi.json",
-        components: { schemas: { Thing: { $ref: "thing.json" } } },
-      })
-      expect(declaration(await gen(doc, { base: join(dir, "root.json") }), "Thing")).toBe("boolean")
-    })
-  })
-
-  it("reads 3.0 semantics in a 3.0 document referenced from a 3.1 one", async () => {
-    await withFiles(
-      {
-        "old.json": oas("3.0", {
-          components: { schemas: { N: { type: "string", nullable: true } } },
-        }),
-      },
-      async (dir) => {
-        const doc = oas("3.1", {
-          components: { schemas: { M: { $ref: "old.json#/components/schemas/N" } } },
-        })
-        expect(declaration(await gen(doc, { base: join(dir, "x.json") }), "M")).toBe(
-          "string | null",
-        )
-      },
-    )
-  })
-
-  it("ignores $id and anchors in extensions, instance data, and links", async () => {
-    const calls: string[] = []
-    const api = "https://spec.test/api.json"
-    const doc = oas("3.1", {
-      "x-metadata": claims(0),
-      "paths": {
-        "x-internal": { schema: claims(1) },
-        "/pets": {
-          get: {
-            responses: {
-              "200": { description: "OK", links: { self: { requestBody: claims(2) } } },
-              "x-ext": { content: { "application/json": { schema: claims(3) } } },
-            },
-          },
-        },
-      },
-      "x-defs": {
-        Pet: {
-          $id: "https://other.test/pet.json",
-          type: "object",
-          properties: { tag: { $ref: "#/components/schemas/Tag" } },
-        },
-      },
-      "components": {
-        schemas: {
-          ...Object.fromEntries(
-            [0, 1, 2, 3, 4].map((n) => [`S${n}`, { $ref: `https://spec.test/${n}.json` }]),
-          ),
-          Holder: { "type": "object", "x-shape": claims(4), "default": { $anchor: "held" } },
-          // References inside an extension resolve against the document.
-          Pet: { $ref: "#/x-defs/Pet" },
-          Tag: { type: "integer" },
-        },
-      },
-    })
-    const result = await generate(api, {
-      load: (url) => {
-        calls.push(url)
-        return Response.json(url === api ? doc : { type: "string" })
-      },
-    })
-    expect(calls).toStrictEqual([api, ...[0, 1, 2, 3, 4].map((n) => `https://spec.test/${n}.json`)])
-    for (const n of [0, 1, 2, 3, 4]) expect(declaration(result.code, `S${n}`)).toBe("string")
-    expect(declaration(result.code, "Pet")).toBe("{\n  tag?: Tag\n}")
-  })
-
-  it("moves a document's base only by its own $ids", async () => {
-    const api = "https://spec.test/api.json"
-    const nested = { $id: "lib/", $ref: "#/$defs/S", $defs: { S: { type: "null" } } }
-    const result = await generate(
-      oas("3.1", {
-        paths: { "/a": { get: { responses: { "200": { $ref: "alias.json#/R" } } } } },
-        components: {
-          schemas: {
-            Pet: {
-              type: "object",
-              properties: { t: { $ref: "defs.json#/$defs/T" } },
-              $defs: { "a~b": { type: "object", properties: { p: nested } } },
-            },
-            // A pointer `parsePointer` reads leniently, as the key "a~b".
-            Lib: { $ref: "#/components/schemas/Pet/$defs/a~b" },
-          },
-        },
-      }),
-      {
-        base: api,
-        load: (url) => {
-          if (url !== "https://spec.test/alias.json") {
-            const type = url.startsWith("https://evil.test/") ? "boolean" : "string"
-            return Response.json({ $defs: { T: { type } } })
-          }
-          // Another document at the entry's address, as a redirect leaves it.
-          const response = Response.json({
-            R: { description: "OK" },
-            components: { schemas: { Pet: { $id: "https://evil.test/pet.json" } } },
-          })
-          Object.defineProperty(response, "url", { value: api })
-          return response
-        },
-      },
-    )
-    expect(declaration(result.code, "T")).toBe("string")
-    expect(declaration(result.code, "Lib")).toBe("{\n  p?: S\n}")
-    expect(declaration(result.code, "S")).toBe("null")
-  })
-
-  it("lets an OpenAPI root's $id claim its URI", async () => {
-    const code = await gen(
-      oas("3.1", {
-        $id: "https://root.test/api",
-        components: {
-          schemas: {
-            A: { $ref: "https://root.test/api#/components/schemas/B" },
-            C: { $ref: "https://root.test/api#bee" },
-            B: { $anchor: "bee", type: "string" },
-          },
-        },
-      }),
-    )
-    expect([declaration(code, "A"), declaration(code, "C")]).toStrictEqual(["B", "B"])
-  })
-
-  it("indexes the schemas of documents without an openapi field", async () => {
-    const api = "https://spec.test/api.json"
-    const documents: Record<string, object> = {
-      [api]: oas("3.1", {
-        paths: { "/pets": { $ref: "paths/pets.json" } },
-        components: {
-          schemas: { Pet: { $ref: "common.json#/Pet" } },
-        },
-      }),
-      // A Path Item file, and a file that lists schemas at its top level.
-      "https://spec.test/paths/pets.json": {
-        get: {
-          responses: {
-            "200": {
-              description: "OK",
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: { n: { $ref: "#count" } },
-                    $defs: { N: { $anchor: "count", type: "integer" } },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      "https://spec.test/common.json": {
-        Pet: {
-          $id: "https://other.test/pet",
-          type: "object",
-          properties: { tag: { $ref: "#/$defs/Tag" } },
-          $defs: { Tag: { type: "integer" } },
-        },
-      },
-    }
-    const calls: string[] = []
-    const result = await generate(api, {
-      load: (url) => {
-        calls.push(url)
-        return Response.json(documents[url])
-      },
-    })
-    expect(calls).not.toContain("https://other.test/pet")
-    expect(declaration(result.code, "Pet")).toBe("{\n  tag?: Tag\n}")
-    expect(entry(result.code, "GET /pets")).toContain("n?: Schemas.N")
-    expect(result.diagnostics).toStrictEqual([])
-  })
-
-  it.each(["x-User", "links", "default", "discriminator", "x-/~用户"])(
-    "indexes an explicitly referenced external schema named %s",
-    async (name) => {
-      const pointer = name.replaceAll("~", "~0").replaceAll("/", "~1")
-      const api = "https://spec.test/api.json"
-      const calls: string[] = []
-      const documents: Record<string, object> = {
-        "https://spec.test/common.json": {
-          [name]: {
-            "$id": "nested/user.json",
-            "type": "object",
-            "properties": { id: { $ref: "id.json" }, tag: { $ref: "#tag" } },
-            "$defs": { Tag: { $anchor: "tag", type: "boolean" } },
-            // Promoting the entry must not promote its metadata as well.
-            "x-data": { $id: "id.json", type: "number" },
-            "default": { $id: "id.json", type: "number" },
-          },
-        },
-        "https://spec.test/nested/id.json": { type: "string" },
-        "https://spec.test/id.json": { type: "null" },
-      }
-      const result = await generate(
-        oas("3.1", { components: { schemas: { User: { $ref: `common.json#/${pointer}` } } } }),
-        {
-          base: api,
-          load: (uri) => {
-            calls.push(uri)
-            return Response.json(documents[uri])
-          },
-        },
-      )
-      expect(result.diagnostics).toStrictEqual([])
-      expect(declaration(result.code, "User")).toBe("{\n  id?: id\n  tag?: Tag\n}")
-      expect(declaration(result.code, "id")).toBe("string")
-      expect(declaration(result.code, "Tag")).toBe("boolean")
-      expect(calls).toStrictEqual([
-        "https://spec.test/common.json",
-        "https://spec.test/nested/id.json",
-      ])
-    },
-  )
-
-  it.each([false, true])(
-    "retries anchors after indexing external schema targets (reverse: %s)",
-    async (reverse) => {
-      const schemas = {
-        Anchor: { $ref: "common.json#named" },
-        Pointer: { $ref: "common.json#/x-schemas/links/$defs/Value" },
-      }
-      const calls: string[] = []
-      const result = await generate(
-        oas("3.1", {
-          components: {
-            schemas: reverse ? Object.fromEntries(Object.entries(schemas).toReversed()) : schemas,
           },
         }),
         {
@@ -530,161 +84,621 @@ describe("references across documents", () => {
             if (uri.endsWith("value.json")) return Response.json({ type: "string" })
             return Response.json({
               "x-schemas": {
-                links: {
-                  $anchor: "named",
-                  $id: "nested/user.json",
-                  $defs: { Value: { $ref: "value.json" } },
-                  type: "boolean",
-                },
-                // Its anchor belongs to the containing document, before the nested $id.
-                Named: { $anchor: "named", type: "integer" },
+                Value: { type: "number" },
+                Named: { $anchor: "named", properties: { value: { $ref: "value.json" } } },
               },
             })
           },
         },
       )
       expect(result.diagnostics).toStrictEqual([])
-      expect(declaration(result.code, "Anchor")).toBe("number")
-      expect(declaration(result.code, "Pointer")).toBe("string")
-      expect(calls).toStrictEqual([
-        "https://spec.test/common.json",
-        "https://spec.test/nested/value.json",
-      ])
-    },
-  )
-
-  it("keeps an existing resource's anchors when an external schema claims the same URI", async () => {
-    const doc = oas("3.1", {
-      components: {
-        schemas: {
-          Owner: { $id: "https://shared.test/schema", $anchor: "owner", type: "string" },
-          External: { $ref: "common.json#/x-User" },
-          Stolen: { $ref: "https://shared.test/schema#other" },
-        },
-      },
+      expect(declaration(result.code, "Anchor")).toContain("value?: value")
+      expect(declaration(result.code, "value")).toBe("string")
+      expect(calls).toStrictEqual(["https://spec.test/common.json", "https://spec.test/value.json"])
     })
-    expect(
-      await errorsOf(
-        generate(doc, {
-          base: "https://spec.test/api.json",
-          load: () =>
-            Response.json({
-              "x-User": { $id: "https://shared.test/schema", $anchor: "other", type: "number" },
-            }),
+
+    it("loads only schemas selected by semantic positions", async () => {
+      const ref = { $ref: "unused.json" }
+      const calls: string[] = []
+      const result = await generate(
+        oas("3.1", {
+          components: {
+            schemas: {
+              Value: { "type": "string", "examples": [ref], "default": ref, "x-schema": ref },
+            },
+            parameters: { Unused: ref },
+          },
+          paths: {
+            "/value": {
+              get: {
+                responses: {
+                  "200": {
+                    content: {
+                      "application/octet-stream": { schema: ref },
+                      "text/plain": { schema: { type: "object", properties: { hidden: ref } } },
+                      "application/json": { schema: { type: "string" }, examples: { unused: ref } },
+                    },
+                    headers: { "Content-Type": ref },
+                  },
+                },
+              },
+            },
+          },
         }),
-      ),
-    ).toStrictEqual(["unresolved-ref #/components/schemas/Stolen/$ref"])
-  })
+        {
+          base: "https://spec.test/api.json",
+          load: (uri) => {
+            calls.push(uri)
+            return Response.json({ type: "number" })
+          },
+        },
+      )
+      expect(result.diagnostics).toStrictEqual([])
+      expect(calls).toStrictEqual([])
+    })
 
-  it("does not activate $id in a 3.0 external schema dictionary", async () => {
-    const calls: string[] = []
-    const code = await gen(
-      oas("3.0", { components: { schemas: { User: { $ref: "common.json#/x-User" } } } }),
-      {
-        base: "https://spec.test/api.json",
-        load: (uri) => {
-          calls.push(uri)
-          return Response.json(
-            uri.endsWith("common.json")
-              ? { "x-User": { $id: "nested/user.json", $ref: "value.json" } }
-              : { type: "string" },
+    it.each(["$anchor", "$dynamicAnchor"])(
+      "does not let discriminator mapping %s shadow an anchor",
+      async (keyword) => {
+        const { code, diagnostics } = await generate(
+          oas("3.1", {
+            components: {
+              schemas: {
+                Pet: {
+                  oneOf: [{ $ref: "#/components/schemas/Target" }],
+                  discriminator: { propertyName: "kind", mapping: { [keyword]: "Target" } },
+                },
+                Target: {
+                  [keyword]: "Target",
+                  type: "object",
+                  properties: { kind: { type: "string" } },
+                  required: ["kind"],
+                },
+                Alias: { $ref: "#Target" },
+              },
+            },
+          }),
+        )
+        expect(diagnostics).toStrictEqual([])
+        expect(declaration(code, "Alias")).toBe("Target")
+      },
+    )
+
+    it("keeps discriminator mapping names out of the schema resource index", async () => {
+      const uri = "https://spec.test/cat.json"
+      const calls: string[] = []
+      const { code, diagnostics } = await generate(
+        oas("3.1", {
+          components: {
+            schemas: {
+              Pet: {
+                oneOf: [{ $ref: uri }],
+                discriminator: {
+                  propertyName: "kind",
+                  mapping: { $id: uri, $anchor: "Local", $dynamicAnchor: "Dynamic" },
+                },
+              },
+              Local: { $anchor: "local", type: "string" },
+              Dynamic: { $dynamicAnchor: "dynamic", type: "number" },
+              LocalUse: { $ref: "#local" },
+              DynamicUse: { $ref: "#dynamic" },
+              Named: {
+                type: "object",
+                properties: { discriminator: { $id: "https://spec.test/named", type: "boolean" } },
+              },
+              NamedUse: { $ref: "https://spec.test/named" },
+            },
+          },
+        }),
+        {
+          base: "https://spec.test/api.json",
+          load: (url) => {
+            calls.push(url)
+            return Response.json({
+              type: "object",
+              properties: { kind: { type: "string" }, name: { type: "string" } },
+              required: ["kind", "name"],
+            })
+          },
+        },
+      )
+      expect(calls).toStrictEqual([uri])
+      expect(diagnostics).toStrictEqual([])
+      expect(declaration(code, "cat")).toContain("name: string")
+      expect(declaration(code, "LocalUse")).toBe("Local")
+      expect(declaration(code, "DynamicUse")).toBe("Dynamic")
+      expect(declaration(code, "NamedUse")).toBe("boolean")
+    })
+
+    it("loads relative files, naming their definitions", async () => {
+      await withFiles(
+        {
+          "api/openapi.yaml": [
+            "openapi: 3.1.0",
+            "info: { title: Split, version: '1' }",
+            "paths:",
+            "  /pets:",
+            "    $ref: ./paths/pets.yaml",
+            "components:",
+            "  schemas:",
+            "    Pet:",
+            "      $ref: ../schemas/pet.json",
+          ].join("\n"),
+          "api/paths/pets.yaml": [
+            "get:",
+            "  parameters:",
+            "    - $ref: '../parameters.yaml#/limit'",
+            "  responses:",
+            "    '200':",
+            "      description: OK",
+            "      content:",
+            "        application/json:",
+            "          schema:",
+            "            type: array",
+            "            items: { $ref: '../../schemas/pet.json' }",
+            "    default:",
+            "      $ref: '../../schemas/common.yaml#/components/responses/Error'",
+          ].join("\n"),
+          "api/parameters.yaml":
+            "limit:\n  name: limit\n  in: query\n  schema: { type: integer }\n",
+          "schemas/pet.json": {
+            type: "object",
+            required: ["id"],
+            properties: {
+              id: { type: "integer" },
+              owner: { $ref: "common.yaml#/components/schemas/Owner" },
+            },
+          },
+          "schemas/common.yaml": [
+            "openapi: 3.1.0",
+            "info: { title: Common, version: '1' }",
+            "components:",
+            "  schemas:",
+            "    Owner: { type: object, properties: { name: { type: string } } }",
+            "    Error: { type: object, properties: { message: { type: string } } }",
+            "  responses:",
+            "    Error:",
+            "      description: Failure",
+            "      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }",
+          ].join("\n"),
+        },
+        async (dir) => {
+          const { code, diagnostics } = await generate(join(dir, "api/openapi.yaml"))
+          expect(diagnostics).toStrictEqual([])
+          // The component that references the file lends the file its name.
+          expect(declaration(code, "Pet")).toBe("{\n  id: number\n  owner?: Owner\n}")
+          expect(declaration(code, "Owner")).toBe("{\n  name?: string\n}")
+          const operation = entry(code, "GET /pets")
+          expect(operation).toContain("query?: { limit?: number }")
+          expect(operation).toContain('"200": { content: { "application/json": Schemas.Pet[] } }')
+          expect(operation).toContain(
+            '"default": { content: { "application/json": Schemas.Error } }',
           )
+          await expectPassesTsc(code)
         },
-      },
-    )
-    expect(declaration(code, "User")).toBe("string")
-    expect(calls).toStrictEqual(["https://spec.test/common.json", "https://spec.test/value.json"])
-  })
-})
-
-describe("reference errors", () => {
-  it("fails on missing targets, collecting every error", async () => {
-    const doc = oas("3.1", {
-      paths: {
-        "/r": { get: { parameters: [{ $ref: "#/components/parameters/Nope" }], responses: {} } },
-      },
-      components: {
-        schemas: { A: { $ref: "#/components/schemas/Missing" }, B: { $ref: "#/nowhere" } },
-      },
-    })
-    expect(await errorsOf(generate(doc))).toStrictEqual([
-      "unresolved-ref #/components/schemas/A/$ref",
-      "unresolved-ref #/components/schemas/B/$ref",
-      "unresolved-ref #/paths/~1r/get/parameters/0/$ref",
-    ])
-  })
-
-  it("fails on reference cycles between non-schema objects", async () => {
-    const doc = oas("3.1", {
-      paths: {
-        "/r": { get: { parameters: [{ $ref: "#/components/parameters/A" }], responses: {} } },
-      },
-      components: {
-        parameters: {
-          A: { $ref: "#/components/parameters/B" },
-          B: { $ref: "#/components/parameters/A" },
-        },
-      },
-    })
-    expect(await errorsOf(generate(doc))).toStrictEqual([
-      "circular-ref #/paths/~1r/get/parameters/0/$ref",
-    ])
-  })
-
-  it("fails on unreadable documents", async () => {
-    await withFiles(
-      { "openapi.json": oas("3.1", { components: { schemas: { A: { $ref: "missing.json" } } } }) },
-      async (dir) => {
-        expect(await errorsOf(generate(join(dir, "openapi.json")))).toStrictEqual([
-          "unresolved-ref #/components/schemas/A/$ref",
-        ])
-      },
-    )
-  })
-
-  it("does not let remote documents read local files", async () => {
-    const server = createServer((_, response) => {
-      response.setHeader("content-type", "application/json")
-      response.end(
-        JSON.stringify(
-          oas("3.1", { components: { schemas: { A: { $ref: "file:///etc/hosts" } } } }),
-        ),
       )
     })
-    await new Promise<void>((resolve) => {
-      server.listen(0, "127.0.0.1", resolve)
-    })
-    try {
-      const { port } = server.address() as AddressInfo
-      expect(await errorsOf(generate(`http://127.0.0.1:${port}/openapi.json`))).toStrictEqual([
-        "unresolved-ref #/components/schemas/A/$ref",
-      ])
-    } finally {
-      server.close()
-    }
-  })
 
-  it("schema references may form cycles through properties", async () => {
-    const code = await gen(
-      oas("3.1", {
-        components: {
-          schemas: {
-            Node: {
-              type: "object",
-              properties: {
-                next: { $ref: "#/components/schemas/Node" },
-                all: { type: "array", items: { $ref: "#/components/schemas/Node" } },
+    it("resolves an in-memory document's relative references against `base`", async () => {
+      await withFiles({ "schemas/thing.json": { type: "string" } }, async (dir) => {
+        const doc = oas("3.1", {
+          components: { schemas: { Thing: { $ref: "schemas/thing.json" } } },
+        })
+        expect(declaration(await gen(doc, { base: join(dir, "openapi.json") }), "Thing")).toBe(
+          "string",
+        )
+        expect(await errorsOf(generate(doc))).toStrictEqual([
+          "unresolved-ref #/components/schemas/Thing/$ref",
+        ])
+      })
+    })
+
+    it("uses $self (3.2) as the document's base URI", async () => {
+      await withFiles({ "shared/thing.json": { type: "boolean" } }, async (dir) => {
+        const doc = oas("3.2", {
+          $self: "shared/openapi.json",
+          components: { schemas: { Thing: { $ref: "thing.json" } } },
+        })
+        expect(declaration(await gen(doc, { base: join(dir, "root.json") }), "Thing")).toBe(
+          "boolean",
+        )
+      })
+    })
+
+    it("reads 3.0 semantics in a 3.0 document referenced from a 3.1 one", async () => {
+      await withFiles(
+        {
+          "old.json": oas("3.0", {
+            components: { schemas: { N: { type: "string", nullable: true } } },
+          }),
+        },
+        async (dir) => {
+          const doc = oas("3.1", {
+            components: { schemas: { M: { $ref: "old.json#/components/schemas/N" } } },
+          })
+          expect(declaration(await gen(doc, { base: join(dir, "x.json") }), "M")).toBe(
+            "string | null",
+          )
+        },
+      )
+    })
+
+    it("ignores $id and anchors in extensions, instance data, and links", async () => {
+      const calls: string[] = []
+      const api = "https://spec.test/api.json"
+      const doc = oas("3.1", {
+        "x-metadata": claims(0),
+        "paths": {
+          "x-internal": { schema: claims(1) },
+          "/pets": {
+            get: {
+              responses: {
+                "200": { description: "OK", links: { self: { requestBody: claims(2) } } },
+                "x-ext": { content: { "application/json": { schema: claims(3) } } },
               },
             },
           },
         },
-      }),
+        "x-defs": {
+          Pet: {
+            $id: "https://other.test/pet.json",
+            type: "object",
+            properties: { tag: { $ref: "#/components/schemas/Tag" } },
+          },
+        },
+        "components": {
+          schemas: {
+            ...Object.fromEntries(
+              [0, 1, 2, 3, 4].map((n) => [`S${n}`, { $ref: `https://spec.test/${n}.json` }]),
+            ),
+            Holder: { "type": "object", "x-shape": claims(4), "default": { $anchor: "held" } },
+            // References inside an extension resolve against the document.
+            Pet: { $ref: "#/x-defs/Pet" },
+            Tag: { type: "integer" },
+          },
+        },
+      })
+      const result = await generate(api, {
+        load: (url) => {
+          calls.push(url)
+          return Response.json(url === api ? doc : { type: "string" })
+        },
+      })
+      expect(calls).toStrictEqual([
+        api,
+        ...[0, 1, 2, 3, 4].map((n) => `https://spec.test/${n}.json`),
+      ])
+      for (const n of [0, 1, 2, 3, 4]) expect(declaration(result.code, `S${n}`)).toBe("string")
+      expect(declaration(result.code, "Pet")).toBe("{\n  tag?: Tag\n}")
+    })
+
+    it("moves a document's base only by its own $ids", async () => {
+      const api = "https://spec.test/api.json"
+      const nested = { $id: "lib/", $ref: "#/$defs/S", $defs: { S: { type: "null" } } }
+      const result = await generate(
+        oas("3.1", {
+          paths: { "/a": { get: { responses: { "200": { $ref: "alias.json#/R" } } } } },
+          components: {
+            schemas: {
+              Pet: {
+                type: "object",
+                properties: { t: { $ref: "defs.json#/$defs/T" } },
+                $defs: { "a~b": { type: "object", properties: { p: nested } } },
+              },
+              // A pointer `parsePointer` reads leniently, as the key "a~b".
+              Lib: { $ref: "#/components/schemas/Pet/$defs/a~b" },
+            },
+          },
+        }),
+        {
+          base: api,
+          load: (url) => {
+            if (url !== "https://spec.test/alias.json") {
+              const type = url.startsWith("https://evil.test/") ? "boolean" : "string"
+              return Response.json({ $defs: { T: { type } } })
+            }
+            // Another document at the entry's address, as a redirect leaves it.
+            const response = Response.json({
+              R: { description: "OK" },
+              components: { schemas: { Pet: { $id: "https://evil.test/pet.json" } } },
+            })
+            Object.defineProperty(response, "url", { value: api })
+            return response
+          },
+        },
+      )
+      expect(declaration(result.code, "T")).toBe("string")
+      expect(declaration(result.code, "Lib")).toBe("{\n  p?: S\n}")
+      expect(declaration(result.code, "S")).toBe("null")
+    })
+
+    it("lets an OpenAPI root's $id claim its URI", async () => {
+      const code = await gen(
+        oas("3.1", {
+          $id: "https://root.test/api",
+          components: {
+            schemas: {
+              A: { $ref: "https://root.test/api#/components/schemas/B" },
+              C: { $ref: "https://root.test/api#bee" },
+              B: { $anchor: "bee", type: "string" },
+            },
+          },
+        }),
+      )
+      expect([declaration(code, "A"), declaration(code, "C")]).toStrictEqual(["B", "B"])
+    })
+
+    it("indexes the schemas of documents without an openapi field", async () => {
+      const api = "https://spec.test/api.json"
+      const documents: Record<string, object> = {
+        [api]: oas("3.1", {
+          paths: { "/pets": { $ref: "paths/pets.json" } },
+          components: {
+            schemas: { Pet: { $ref: "common.json#/Pet" } },
+          },
+        }),
+        // A Path Item file, and a file that lists schemas at its top level.
+        "https://spec.test/paths/pets.json": {
+          get: {
+            responses: {
+              "200": {
+                description: "OK",
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      properties: { n: { $ref: "#count" } },
+                      $defs: { N: { $anchor: "count", type: "integer" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "https://spec.test/common.json": {
+          Pet: {
+            $id: "https://other.test/pet",
+            type: "object",
+            properties: { tag: { $ref: "#/$defs/Tag" } },
+            $defs: { Tag: { type: "integer" } },
+          },
+        },
+      }
+      const calls: string[] = []
+      const result = await generate(api, {
+        load: (url) => {
+          calls.push(url)
+          return Response.json(documents[url])
+        },
+      })
+      expect(calls).not.toContain("https://other.test/pet")
+      expect(declaration(result.code, "Pet")).toBe("{\n  tag?: Tag\n}")
+      expect(entry(result.code, "GET /pets")).toContain("n?: Schemas.N")
+      expect(result.diagnostics).toStrictEqual([])
+    })
+
+    it.each(["x-User", "links", "default", "discriminator", "x-/~用户"])(
+      "indexes an explicitly referenced external schema named %s",
+      async (name) => {
+        const pointer = name.replaceAll("~", "~0").replaceAll("/", "~1")
+        const api = "https://spec.test/api.json"
+        const calls: string[] = []
+        const documents: Record<string, object> = {
+          "https://spec.test/common.json": {
+            [name]: {
+              "$id": "nested/user.json",
+              "type": "object",
+              "properties": { id: { $ref: "id.json" }, tag: { $ref: "#tag" } },
+              "$defs": { Tag: { $anchor: "tag", type: "boolean" } },
+              // Promoting the entry must not promote its metadata as well.
+              "x-data": { $id: "id.json", type: "number" },
+              "default": { $id: "id.json", type: "number" },
+            },
+          },
+          "https://spec.test/nested/id.json": { type: "string" },
+          "https://spec.test/id.json": { type: "null" },
+        }
+        const result = await generate(
+          oas("3.1", { components: { schemas: { User: { $ref: `common.json#/${pointer}` } } } }),
+          {
+            base: api,
+            load: (uri) => {
+              calls.push(uri)
+              return Response.json(documents[uri])
+            },
+          },
+        )
+        expect(result.diagnostics).toStrictEqual([])
+        expect(declaration(result.code, "User")).toBe("{\n  id?: id\n  tag?: Tag\n}")
+        expect(declaration(result.code, "id")).toBe("string")
+        expect(declaration(result.code, "Tag")).toBe("boolean")
+        expect(calls).toStrictEqual([
+          "https://spec.test/common.json",
+          "https://spec.test/nested/id.json",
+        ])
+      },
     )
-    expect(declaration(code, "Node")).toBe("{\n  next?: Node\n  all?: Node[]\n}")
+
+    it.each([false, true])(
+      "retries anchors after indexing external schema targets (reverse: %s)",
+      async (reverse) => {
+        const schemas = {
+          Anchor: { $ref: "common.json#named" },
+          Pointer: { $ref: "common.json#/x-schemas/links/$defs/Value" },
+        }
+        const calls: string[] = []
+        const result = await generate(
+          oas("3.1", {
+            components: {
+              schemas: reverse ? Object.fromEntries(Object.entries(schemas).toReversed()) : schemas,
+            },
+          }),
+          {
+            base: "https://spec.test/api.json",
+            load: (uri) => {
+              calls.push(uri)
+              if (uri.endsWith("value.json")) return Response.json({ type: "string" })
+              return Response.json({
+                "x-schemas": {
+                  links: {
+                    $anchor: "named",
+                    $id: "nested/user.json",
+                    $defs: { Value: { $ref: "value.json" } },
+                    type: "boolean",
+                  },
+                  // Its anchor belongs to the containing document, before the nested $id.
+                  Named: { $anchor: "named", type: "integer" },
+                },
+              })
+            },
+          },
+        )
+        expect(result.diagnostics).toStrictEqual([])
+        expect(declaration(result.code, "Anchor")).toBe("number")
+        expect(declaration(result.code, "Pointer")).toBe("string")
+        expect(calls).toStrictEqual([
+          "https://spec.test/common.json",
+          "https://spec.test/nested/value.json",
+        ])
+      },
+    )
+
+    it("keeps an existing resource's anchors when an external schema claims the same URI", async () => {
+      const doc = oas("3.1", {
+        components: {
+          schemas: {
+            Owner: { $id: "https://shared.test/schema", $anchor: "owner", type: "string" },
+            External: { $ref: "common.json#/x-User" },
+            Stolen: { $ref: "https://shared.test/schema#other" },
+          },
+        },
+      })
+      expect(
+        await errorsOf(
+          generate(doc, {
+            base: "https://spec.test/api.json",
+            load: () =>
+              Response.json({
+                "x-User": { $id: "https://shared.test/schema", $anchor: "other", type: "number" },
+              }),
+          }),
+        ),
+      ).toStrictEqual(["unresolved-ref #/components/schemas/Stolen/$ref"])
+    })
+
+    it("does not activate $id in a 3.0 external schema dictionary", async () => {
+      const calls: string[] = []
+      const code = await gen(
+        oas("3.0", { components: { schemas: { User: { $ref: "common.json#/x-User" } } } }),
+        {
+          base: "https://spec.test/api.json",
+          load: (uri) => {
+            calls.push(uri)
+            return Response.json(
+              uri.endsWith("common.json")
+                ? { "x-User": { $id: "nested/user.json", $ref: "value.json" } }
+                : { type: "string" },
+            )
+          },
+        },
+      )
+      expect(declaration(code, "User")).toBe("string")
+      expect(calls).toStrictEqual(["https://spec.test/common.json", "https://spec.test/value.json"])
+    })
+  })
+
+  describe("reference errors", () => {
+    it("fails on missing targets, collecting every error", async () => {
+      const doc = oas("3.1", {
+        paths: {
+          "/r": { get: { parameters: [{ $ref: "#/components/parameters/Nope" }], responses: {} } },
+        },
+        components: {
+          schemas: { A: { $ref: "#/components/schemas/Missing" }, B: { $ref: "#/nowhere" } },
+        },
+      })
+      expect(await errorsOf(generate(doc))).toStrictEqual([
+        "unresolved-ref #/components/schemas/A/$ref",
+        "unresolved-ref #/components/schemas/B/$ref",
+        "unresolved-ref #/paths/~1r/get/parameters/0/$ref",
+      ])
+    })
+
+    it("fails on reference cycles between non-schema objects", async () => {
+      const doc = oas("3.1", {
+        paths: {
+          "/r": { get: { parameters: [{ $ref: "#/components/parameters/A" }], responses: {} } },
+        },
+        components: {
+          parameters: {
+            A: { $ref: "#/components/parameters/B" },
+            B: { $ref: "#/components/parameters/A" },
+          },
+        },
+      })
+      expect(await errorsOf(generate(doc))).toStrictEqual([
+        "circular-ref #/paths/~1r/get/parameters/0/$ref",
+      ])
+    })
+
+    it("fails on unreadable documents", async () => {
+      await withFiles(
+        {
+          "openapi.json": oas("3.1", { components: { schemas: { A: { $ref: "missing.json" } } } }),
+        },
+        async (dir) => {
+          expect(await errorsOf(generate(join(dir, "openapi.json")))).toStrictEqual([
+            "unresolved-ref #/components/schemas/A/$ref",
+          ])
+        },
+      )
+    })
+
+    it("does not let remote documents read local files", async () => {
+      const server = createServer((_, response) => {
+        response.setHeader("content-type", "application/json")
+        response.end(
+          JSON.stringify(
+            oas("3.1", { components: { schemas: { A: { $ref: "file:///etc/hosts" } } } }),
+          ),
+        )
+      })
+      await new Promise<void>((resolve) => {
+        server.listen(0, "127.0.0.1", resolve)
+      })
+      try {
+        const { port } = server.address() as AddressInfo
+        expect(await errorsOf(generate(`http://127.0.0.1:${port}/openapi.json`))).toStrictEqual([
+          "unresolved-ref #/components/schemas/A/$ref",
+        ])
+      } finally {
+        server.close()
+      }
+    })
+
+    it("schema references may form cycles through properties", async () => {
+      const code = await gen(
+        oas("3.1", {
+          components: {
+            schemas: {
+              Node: {
+                type: "object",
+                properties: {
+                  next: { $ref: "#/components/schemas/Node" },
+                  all: { type: "array", items: { $ref: "#/components/schemas/Node" } },
+                },
+              },
+            },
+          },
+        }),
+      )
+      expect(declaration(code, "Node")).toBe("{\n  next?: Node\n  all?: Node[]\n}")
+    })
   })
 })
 
-describe("what a document may reach", () => {
+describe("reference discovery", () => {
   it("keeps an in-memory document without base from reaching files or the network", async () => {
     await withFiles({ "secret.json": { type: "string", const: "TOP-SECRET" } }, async (dir) => {
       const file = pathToFileURL(join(dir, "secret.json")).href

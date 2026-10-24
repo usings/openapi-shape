@@ -1,40 +1,15 @@
 import { runInNewContext } from "node:vm"
 import { describe, expect, it } from "vitest"
-import type { Client, ClientOptions, Contract, Middleware } from "../src/client"
+import type { Middleware } from "../src/client"
 import { createClient, defineMiddleware } from "../src/client"
 import type { BodyLike } from "../src/client/types"
 import { contract } from "./__snapshots__/client-api"
+import { recorder, shared, url } from "./helpers/client"
 import type { ResultOperation } from "./helpers/contract"
 
-/**
- * A client whose `fetch` records each request and answers with `respond()`; `sent()` is the last
- * request. Endpoint paths go under `https://x.test`.
- */
-function recorder<Api>(
-  given: Contract<Api>,
-  options: ClientOptions = {},
-  respond: () => Response = () => new Response(null, { status: 204 }),
-): { client: Client<Api>; sent: () => Request; requests: Request[] } {
-  const requests: Request[] = []
-  const client = createClient(given, {
-    baseUrl: "https://x.test",
-    ...options,
-    fetch: (request) => {
-      requests.push(request)
-      return Promise.resolve(respond())
-    },
-  })
-  const sent = (): Request => {
-    const last = requests.at(-1)
-    if (last === undefined) throw new Error("Nothing was sent")
-    return last
-  }
-  return { client, sent, requests }
-}
-
-/** A request's URL under `https://x.test`. */
-function url(request: Request): string {
-  return request.url.slice("https://x.test".length)
+// A Node.js-style stream: an async iterable of bytes.
+async function* chunks(): AsyncGenerator<Uint8Array> {
+  yield await Promise.resolve(new Uint8Array([1]))
 }
 
 /** What `result` reads from a response with this body, content type, and status. */
@@ -47,24 +22,12 @@ async function decoded(body: BodyInit | null, type?: string, status = 200): Prom
   return status < 300 ? data : error
 }
 
-/** A `SharedArrayBuffer` holding these bytes. */
-function shared(values: number[]): SharedArrayBuffer {
-  const buffer = new SharedArrayBuffer(values.length)
-  new Uint8Array(buffer).set(values)
-  return buffer
-}
-
 /** A middleware, or a `fetch` option, that throws as it is called. */
 function refuse(): never {
   throw new Error("no token")
 }
 
-// A Node.js-style stream: an async iterable of bytes.
-async function* chunks(): AsyncGenerator<Uint8Array> {
-  yield await Promise.resolve(new Uint8Array([1]))
-}
-
-describe("createClient", () => {
+describe("contract validation", () => {
   it("refuses a base URL that would swallow the path", () => {
     expect(() => createClient(contract, { baseUrl: "https://api.test/v1?k=1" })).toThrow(
       "has a query or fragment",
@@ -120,7 +83,7 @@ describe("createClient", () => {
   })
 })
 
-describe("building requests", () => {
+describe("requests", () => {
   it.each(["GET /missing", "toString", "constructor", "__proto__"])(
     "rejects endpoint %s absent from the own registry without sending",
     async (endpoint) => {
@@ -140,123 +103,6 @@ describe("building requests", () => {
     expect([sent().method, url(sent())]).toStrictEqual(["customVerb", "/a%20b"])
   })
 
-  it("expands path parameters with simple style under the base URL", async () => {
-    const { client, sent } = recorder(contract, { baseUrl: "https://api.test/v1/" })
-    await client.fetch("GET /pets/{id}", { params: { id: 7 } })
-    expect([sent().method, sent().url]).toStrictEqual(["GET", "https://api.test/v1/pets/7"])
-  })
-
-  it("encodes path parameter values, arrays, and objects", async () => {
-    const { client, sent } = recorder<{
-      "GET /a/{x}/{y}/{z}": ResultOperation<{ params: { x: string; y: string[]; z: object } }>
-    }>({
-      version: 5,
-      endpoints: {
-        "GET /a/{x}/{y}/{z}": {},
-      },
-    })
-    await client.fetch("GET /a/{x}/{y}/{z}", {
-      params: { x: "雪/a b", y: ["1", "2"], z: { k: "v w" } },
-    })
-    expect(url(sent())).toBe("/a/%E9%9B%AA%2Fa%20b/1,2/k,v%20w")
-  })
-
-  it.each(["a/b", "a b", "a#b", "a?b", "a;b=c", "雪/名", "a\n/b"])(
-    "expands the entire legal parameter name %s and escapes matrix names",
-    async (name) => {
-      const endpoint = `GET /files/{${name}}/tail`
-      const { client, sent } = recorder<
-        Record<string, ResultOperation<{ params: Record<string, unknown> }>>
-      >({
-        version: 5,
-        endpoints: {
-          [endpoint]: {
-            params: { [name]: { style: "matrix", allowReserved: true } },
-          },
-        },
-      })
-      await client.fetch(endpoint, { params: { [name]: "safe" } })
-      expect(url(sent())).toBe(`/files/;${encodeURIComponent(name)}=safe/tail`)
-      const exploded = recorder<
-        Record<string, ResultOperation<{ params: Record<string, unknown> }>>
-      >({
-        version: 5,
-        endpoints: {
-          [endpoint]: {
-            params: { [name]: { style: "matrix", explode: true } },
-          },
-        },
-      })
-      await exploded.client.fetch(endpoint, { params: { [name]: ["a", "b"] } })
-      expect(url(exploded.sent())).toBe(
-        `/files/;${encodeURIComponent(name)}=a;${encodeURIComponent(name)}=b/tail`,
-      )
-      const simple = recorder<Record<string, ResultOperation<{ params: Record<string, unknown> }>>>(
-        {
-          version: 5,
-          endpoints: {
-            [endpoint]: {},
-          },
-        },
-      )
-      await simple.client.fetch(endpoint, { params: { [name]: "safe" } })
-      expect(url(simple.sent())).toBe("/files/safe/tail")
-      await expect(simple.client.fetch(endpoint, { params: {} })).rejects.toThrow(
-        "Missing path parameter",
-      )
-    },
-  )
-
-  it("preserves segment boundaries and traversal rejection around slash-bearing names", async () => {
-    const { client, sent } = recorder<
-      Record<string, ResultOperation<{ params: Record<string, unknown> }>>
-    >({
-      version: 5,
-      endpoints: {
-        "GET /files//prefix-{a/b}-{c/d}/": {},
-        "GET /files/{a/b}/tail": {
-          params: { "a/b": { allowReserved: true } },
-        },
-      },
-    })
-    await client.fetch("GET /files//prefix-{a/b}-{c/d}/", { params: { "a/b": "x", "c/d": "y" } })
-    expect(url(sent())).toBe("/files//prefix-x-y/")
-    for (const value of ["", ".", "..", "%2e%2E", "x/../y", "x//y"]) {
-      // oxlint-disable-next-line no-await-in-loop -- each traversal case is independent
-      await expect(
-        client.fetch("GET /files/{a/b}/tail", { params: { "a/b": value } }),
-      ).rejects.toThrow("another resource")
-    }
-  })
-
-  it("serializes cross-realm plain objects and Dates as ordinary parameter values", async () => {
-    const { client, sent } = recorder<{
-      "GET /files/{meta}": ResultOperation<{
-        params: { meta: object }
-        query: Record<string, unknown>
-      }>
-    }>({
-      version: 5,
-      endpoints: {
-        "GET /files/{meta}": {
-          query: { filter: { style: "deepObject" } },
-        },
-      },
-    })
-    const input = runInNewContext(
-      '({ params: { meta: { id: 1 } }, query: { filter: { items: ["x", "y"] }, when: new Date(0) }, headers: { "x-meta": { id: 1 } } })',
-    ) as {
-      params: { meta: object }
-      query: Record<string, unknown>
-      headers: Record<string, unknown>
-    }
-    await client.fetch("GET /files/{meta}", input)
-    expect(url(sent())).toBe(
-      "/files/id,1?filter[items][0]=x&filter[items][1]=y&when=1970-01-01T00%3A00%3A00.000Z",
-    )
-    expect(sent().headers.get("x-meta")).toBe("id,1")
-  })
-
   it("rejects, sending nothing, when a request cannot be built", async () => {
     const { client, requests } = recorder(contract)
     await expect(client.fetch("GET /pets/{id}", {} as never)).rejects.toThrow(
@@ -265,118 +111,6 @@ describe("building requests", () => {
     // As `fetch` does for a request it cannot build.
     await expect(client.result("GET /pets/{id}", {} as never)).rejects.toBeInstanceOf(TypeError)
     expect(requests).toHaveLength(0)
-  })
-
-  it.each(["toString", "constructor", "__proto__", "id"])(
-    "requires an own path parameter named %s",
-    async (name) => {
-      const endpoint = `GET /x/{${name}}`
-      const { client, sent, requests } = recorder<
-        Record<string, ResultOperation<{ params: Record<string, string> }>>
-      >({
-        version: 5,
-        endpoints: { [endpoint]: {} },
-      })
-      const inherited = Object.create({ [name]: "inherited" }) as Record<string, string>
-      await expect(client.fetch(endpoint, { params: {} })).rejects.toThrow(
-        `Missing path parameter "${name}"`,
-      )
-      await expect(client.result(endpoint, { params: inherited })).rejects.toThrow(
-        `Missing path parameter "${name}"`,
-      )
-      expect(requests).toHaveLength(0)
-      await client.fetch(endpoint, { params: Object.fromEntries([[name, "own"]]) })
-      expect(url(sent())).toBe("/x/own")
-      const own = Object.assign(Object.create(null), { [name]: "null-prototype" }) as Record<
-        string,
-        string
-      >
-      await client.fetch(endpoint, { params: own })
-      expect(url(sent())).toBe("/x/null-prototype")
-    },
-  )
-
-  it("serializes the query with form style, exploding arrays and objects", async () => {
-    const { client, sent } = recorder<{
-      "GET /q?fixed=1": ResultOperation<{ query: Record<string, unknown> }>
-    }>({
-      version: 5,
-      endpoints: {
-        "GET /q?fixed=1": {
-          query: { compact: { explode: false } },
-        },
-      },
-    })
-    const query = {
-      a: [1, null, 2, undefined, 0, false, ""],
-      b: null,
-      c: { "d": true, "e": "x y", "nil": null, "a&b": "c=d" },
-      f: "",
-      g: new Date(0),
-      empty: [],
-      compact: [],
-    }
-    await client.fetch("GET /q?fixed=1", { query })
-    expect(url(sent())).toBe(
-      "/q?fixed=1&a=1&a=2&a=0&a=false&a=&d=true&e=x%20y&a%26b=c%3Dd&f=&g=1970-01-01T00%3A00%3A00.000Z&compact=",
-    )
-  })
-
-  it("serializes sparse deep fields without invoking methods on the input array", async () => {
-    const { client, sent } = recorder<{
-      "GET /q": ResultOperation<{ query: Record<string, unknown> }>
-    }>({
-      version: 5,
-      endpoints: {
-        "GET /q": {
-          query: { filter: { style: "deepObject" } },
-        },
-      },
-    })
-    const items = Object.assign(Array<string | undefined>(4), {
-      forEach: () => {
-        throw new Error("Do not call a method on the input")
-      },
-    })
-    items[2] = "a/b &+"
-    const filter = Object.assign(Object.create(null), { items, omit: null, empty: {}, flag: false })
-    await client.fetch("GET /q", { query: { filter } })
-    expect(url(sent())).toBe("/q?filter[items][2]=a%2Fb%20%26%2B&filter[flag]=false")
-    await expect(
-      client.fetch("GET /q", {
-        query: { filter: { invalidUnicode: "\uD800", blob: new Blob(["x"]) } },
-      }),
-    ).rejects.toThrow("A Blob cannot be sent as text")
-  })
-
-  it("normalizes parameter content types before encoding their values", async () => {
-    const { client, sent } = recorder<{
-      "GET /q": ResultOperation<{ query: Record<string, unknown> }>
-    }>({
-      version: 5,
-      endpoints: {
-        "GET /q": {
-          query: {
-            json: { contentType: " \tApplication/Problem+JSON ; p=*" },
-            wild: { contentType: "Application/*" },
-            text: { contentType: "TEXT/PLAIN; charset=utf-8" },
-          },
-        },
-      },
-    })
-    await client.fetch("GET /q", { query: { json: "value", wild: "value", text: "value" } })
-    expect(url(sent())).toBe("/q?json=%22value%22&wild=%22value%22&text=value")
-  })
-
-  it("serializes parameters in their declared styles", async () => {
-    const { client, sent } = recorder(contract)
-    const query = { created: { gte: 1 }, expand: ["customer", "invoice"], ids: ["x", "y"] }
-    await client.fetch("GET /charges", { query })
-    expect(url(sent())).toBe(
-      "/charges?created[gte]=1&expand[0]=customer&expand[1]=invoice&ids=x%7Cy",
-    )
-    await client.fetch("GET /files/{names}", { params: { names: ["a", "b"] } })
-    expect(url(sent())).toBe("/files/.a,b")
   })
 
   it("merges headers, the call's over the client's, and serializes declared ones", async () => {
@@ -421,16 +155,6 @@ describe("building requests", () => {
     expect(sent().headers.get("x-trace")).toBe("default")
   })
 
-  it("sets the call's headers over the body's media type", async () => {
-    const { client, sent } = recorder(contract)
-    await client.fetch("PATCH /pets/{id}", {
-      params: { id: 1 },
-      headers: { "content-type": "application/json" },
-      body: { name: "R" },
-    })
-    expect(sent().headers.get("content-type")).toBe("application/json")
-  })
-
   it("applies RequestInit fields, the call's over the client's", async () => {
     const { client, sent } = recorder(contract, { cache: "no-store", redirect: "manual" })
     const controller = new AbortController()
@@ -441,7 +165,310 @@ describe("building requests", () => {
   })
 })
 
+describe("parameters", () => {
+  describe("parameter serialization", () => {
+    it("expands path parameters with simple style under the base URL", async () => {
+      const { client, sent } = recorder(contract, { baseUrl: "https://api.test/v1/" })
+      await client.fetch("GET /pets/{id}", { params: { id: 7 } })
+      expect([sent().method, sent().url]).toStrictEqual(["GET", "https://api.test/v1/pets/7"])
+    })
+
+    it("encodes path parameter values, arrays, and objects", async () => {
+      const { client, sent } = recorder<{
+        "GET /a/{x}/{y}/{z}": ResultOperation<{ params: { x: string; y: string[]; z: object } }>
+      }>({
+        version: 5,
+        endpoints: {
+          "GET /a/{x}/{y}/{z}": {},
+        },
+      })
+      await client.fetch("GET /a/{x}/{y}/{z}", {
+        params: { x: "雪/a b", y: ["1", "2"], z: { k: "v w" } },
+      })
+      expect(url(sent())).toBe("/a/%E9%9B%AA%2Fa%20b/1,2/k,v%20w")
+    })
+
+    it.each(["a/b", "a b", "a#b", "a?b", "a;b=c", "雪/名", "a\n/b"])(
+      "expands the entire legal parameter name %s and escapes matrix names",
+      async (name) => {
+        const endpoint = `GET /files/{${name}}/tail`
+        const { client, sent } = recorder<
+          Record<string, ResultOperation<{ params: Record<string, unknown> }>>
+        >({
+          version: 5,
+          endpoints: {
+            [endpoint]: {
+              params: { [name]: { style: "matrix", allowReserved: true } },
+            },
+          },
+        })
+        await client.fetch(endpoint, { params: { [name]: "safe" } })
+        expect(url(sent())).toBe(`/files/;${encodeURIComponent(name)}=safe/tail`)
+        const exploded = recorder<
+          Record<string, ResultOperation<{ params: Record<string, unknown> }>>
+        >({
+          version: 5,
+          endpoints: {
+            [endpoint]: {
+              params: { [name]: { style: "matrix", explode: true } },
+            },
+          },
+        })
+        await exploded.client.fetch(endpoint, { params: { [name]: ["a", "b"] } })
+        expect(url(exploded.sent())).toBe(
+          `/files/;${encodeURIComponent(name)}=a;${encodeURIComponent(name)}=b/tail`,
+        )
+        const simple = recorder<
+          Record<string, ResultOperation<{ params: Record<string, unknown> }>>
+        >({
+          version: 5,
+          endpoints: {
+            [endpoint]: {},
+          },
+        })
+        await simple.client.fetch(endpoint, { params: { [name]: "safe" } })
+        expect(url(simple.sent())).toBe("/files/safe/tail")
+        await expect(simple.client.fetch(endpoint, { params: {} })).rejects.toThrow(
+          "Missing path parameter",
+        )
+      },
+    )
+
+    it("preserves segment boundaries and traversal rejection around slash-bearing names", async () => {
+      const { client, sent } = recorder<
+        Record<string, ResultOperation<{ params: Record<string, unknown> }>>
+      >({
+        version: 5,
+        endpoints: {
+          "GET /files//prefix-{a/b}-{c/d}/": {},
+          "GET /files/{a/b}/tail": {
+            params: { "a/b": { allowReserved: true } },
+          },
+        },
+      })
+      await client.fetch("GET /files//prefix-{a/b}-{c/d}/", { params: { "a/b": "x", "c/d": "y" } })
+      expect(url(sent())).toBe("/files//prefix-x-y/")
+      for (const value of ["", ".", "..", "%2e%2E", "x/../y", "x//y"]) {
+        // oxlint-disable-next-line no-await-in-loop -- each traversal case is independent
+        await expect(
+          client.fetch("GET /files/{a/b}/tail", { params: { "a/b": value } }),
+        ).rejects.toThrow("another resource")
+      }
+    })
+
+    it("serializes cross-realm plain objects and Dates as ordinary parameter values", async () => {
+      const { client, sent } = recorder<{
+        "GET /files/{meta}": ResultOperation<{
+          params: { meta: object }
+          query: Record<string, unknown>
+        }>
+      }>({
+        version: 5,
+        endpoints: {
+          "GET /files/{meta}": {
+            query: { filter: { style: "deepObject" } },
+          },
+        },
+      })
+      const input = runInNewContext(
+        '({ params: { meta: { id: 1 } }, query: { filter: { items: ["x", "y"] }, when: new Date(0) }, headers: { "x-meta": { id: 1 } } })',
+      ) as {
+        params: { meta: object }
+        query: Record<string, unknown>
+        headers: Record<string, unknown>
+      }
+      await client.fetch("GET /files/{meta}", input)
+      expect(url(sent())).toBe(
+        "/files/id,1?filter[items][0]=x&filter[items][1]=y&when=1970-01-01T00%3A00%3A00.000Z",
+      )
+      expect(sent().headers.get("x-meta")).toBe("id,1")
+    })
+
+    it.each(["toString", "constructor", "__proto__", "id"])(
+      "requires an own path parameter named %s",
+      async (name) => {
+        const endpoint = `GET /x/{${name}}`
+        const { client, sent, requests } = recorder<
+          Record<string, ResultOperation<{ params: Record<string, string> }>>
+        >({
+          version: 5,
+          endpoints: { [endpoint]: {} },
+        })
+        const inherited = Object.create({ [name]: "inherited" }) as Record<string, string>
+        await expect(client.fetch(endpoint, { params: {} })).rejects.toThrow(
+          `Missing path parameter "${name}"`,
+        )
+        await expect(client.result(endpoint, { params: inherited })).rejects.toThrow(
+          `Missing path parameter "${name}"`,
+        )
+        expect(requests).toHaveLength(0)
+        await client.fetch(endpoint, { params: Object.fromEntries([[name, "own"]]) })
+        expect(url(sent())).toBe("/x/own")
+        const own = Object.assign(Object.create(null), { [name]: "null-prototype" }) as Record<
+          string,
+          string
+        >
+        await client.fetch(endpoint, { params: own })
+        expect(url(sent())).toBe("/x/null-prototype")
+      },
+    )
+
+    it("serializes the query with form style, exploding arrays and objects", async () => {
+      const { client, sent } = recorder<{
+        "GET /q?fixed=1": ResultOperation<{ query: Record<string, unknown> }>
+      }>({
+        version: 5,
+        endpoints: {
+          "GET /q?fixed=1": {
+            query: { compact: { explode: false } },
+          },
+        },
+      })
+      const query = {
+        a: [1, null, 2, undefined, 0, false, ""],
+        b: null,
+        c: { "d": true, "e": "x y", "nil": null, "a&b": "c=d" },
+        f: "",
+        g: new Date(0),
+        empty: [],
+        compact: [],
+      }
+      await client.fetch("GET /q?fixed=1", { query })
+      expect(url(sent())).toBe(
+        "/q?fixed=1&a=1&a=2&a=0&a=false&a=&d=true&e=x%20y&a%26b=c%3Dd&f=&g=1970-01-01T00%3A00%3A00.000Z&compact=",
+      )
+    })
+
+    it("serializes sparse deep fields without invoking methods on the input array", async () => {
+      const { client, sent } = recorder<{
+        "GET /q": ResultOperation<{ query: Record<string, unknown> }>
+      }>({
+        version: 5,
+        endpoints: {
+          "GET /q": {
+            query: { filter: { style: "deepObject" } },
+          },
+        },
+      })
+      const items = Object.assign(Array<string | undefined>(4), {
+        forEach: () => {
+          throw new Error("Do not call a method on the input")
+        },
+      })
+      items[2] = "a/b &+"
+      const filter = Object.assign(Object.create(null), {
+        items,
+        omit: null,
+        empty: {},
+        flag: false,
+      })
+      await client.fetch("GET /q", { query: { filter } })
+      expect(url(sent())).toBe("/q?filter[items][2]=a%2Fb%20%26%2B&filter[flag]=false")
+      await expect(
+        client.fetch("GET /q", {
+          query: { filter: { invalidUnicode: "\uD800", blob: new Blob(["x"]) } },
+        }),
+      ).rejects.toThrow("A Blob cannot be sent as text")
+    })
+
+    it("normalizes parameter content types before encoding their values", async () => {
+      const { client, sent } = recorder<{
+        "GET /q": ResultOperation<{ query: Record<string, unknown> }>
+      }>({
+        version: 5,
+        endpoints: {
+          "GET /q": {
+            query: {
+              json: { contentType: " \tApplication/Problem+JSON ; p=*" },
+              wild: { contentType: "Application/*" },
+              text: { contentType: "TEXT/PLAIN; charset=utf-8" },
+            },
+          },
+        },
+      })
+      await client.fetch("GET /q", { query: { json: "value", wild: "value", text: "value" } })
+      expect(url(sent())).toBe("/q?json=%22value%22&wild=%22value%22&text=value")
+    })
+
+    it("serializes parameters in their declared styles", async () => {
+      const { client, sent } = recorder(contract)
+      const query = { created: { gte: 1 }, expand: ["customer", "invoice"], ids: ["x", "y"] }
+      await client.fetch("GET /charges", { query })
+      expect(url(sent())).toBe(
+        "/charges?created[gte]=1&expand[0]=customer&expand[1]=invoice&ids=x%7Cy",
+      )
+      await client.fetch("GET /files/{names}", { params: { names: ["a", "b"] } })
+      expect(url(sent())).toBe("/files/.a,b")
+    })
+  })
+
+  describe("reserved characters, delimiters, and path segments", () => {
+    const { client, sent } = recorder<{
+      "GET /files/{path}": ResultOperation<{ params: { path: string } }>
+      "GET /q": ResultOperation<{ query: Record<string, unknown> }>
+    }>({
+      version: 5,
+      endpoints: {
+        "GET /files/{path}": {
+          params: { path: { style: "simple", explode: false, allowReserved: true } },
+        },
+        "GET /q": {
+          query: {
+            next: { style: "form", explode: true, allowReserved: true },
+            ids: { style: "form", explode: false },
+            sp: { style: "spaceDelimited", explode: false },
+            pipe: { style: "pipeDelimited", explode: false },
+            spArray: { style: "spaceDelimited", explode: false },
+            pipeArray: { style: "pipeDelimited", explode: false },
+          },
+        },
+      },
+    })
+
+    it("keeps reserved characters only where they cannot change the URL", async () => {
+      await client.fetch("GET /files/{path}", { params: { path: "a/b c%20d#e?f" } })
+      expect(url(sent())).toBe("/files/a/b%20c%20d%23e%3Ff")
+      await client.fetch("GET /q", { query: { next: "a#b&c=d/e?f%20g+h" } })
+      expect(url(sent())).toBe("/q?next=a%23b%26c%3Dd/e?f%20g%2Bh")
+    })
+
+    it("keeps commas between values, and percent-encodes spaces and pipes", async () => {
+      const query = {
+        ids: ["a,b", null, "c"],
+        sp: { R: 100, G: 200 },
+        pipe: { R: 100, G: 200 },
+        spArray: ["a b", null, "c/d"],
+        pipeArray: ["a b", null, "c/d"],
+      }
+      await client.fetch("GET /q", { query })
+      expect(url(sent())).toBe(
+        "/q?ids=a%2Cb,c&sp=R%20100%20G%20200&pipe=R%7C100%7CG%7C200&spArray=a%20b%20c%2Fd&pipeArray=a%20b%7Cc%2Fd",
+      )
+    })
+
+    it("refuses path values that would reach another resource", async () => {
+      for (const path of ["..", ".", "", "a/../b", "%2e", "%2e%2E", "/a", "a//b"]) {
+        const call = client.fetch("GET /files/{path}", { params: { path } })
+        // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+        await expect(call).rejects.toThrow("another resource")
+        // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
+        await expect(call).rejects.toBeInstanceOf(TypeError)
+      }
+    })
+  })
+})
+
 describe("request bodies", () => {
+  it("sets the call's headers over the body's media type", async () => {
+    const { client, sent } = recorder(contract)
+    await client.fetch("PATCH /pets/{id}", {
+      params: { id: 1 },
+      headers: { "content-type": "application/json" },
+      body: { name: "R" },
+    })
+    expect(sent().headers.get("content-type")).toBe("application/json")
+  })
+
   it("distinguishes an omitted body from empty text", async () => {
     const { client, sent } = recorder<{
       "POST /text": ResultOperation<{ body?: string | BodyLike; contentType?: string }>
@@ -467,62 +494,6 @@ describe("request bodies", () => {
     expect(await sent().text()).toBe('{"name":"Rex"}')
     await client.fetch("PATCH /pets/{id}", { params: { id: 1 }, body: { name: "R" } })
     expect(sent().headers.get("content-type")).toBe("application/merge-patch+json")
-  })
-
-  it("encodes form bodies, fields as their Encoding Objects say", async () => {
-    const { client, sent } = recorder(contract)
-    await client.fetch("POST /token", { body: { grant_type: "client credentials" } })
-    expect(sent().headers.get("content-type")).toBe("application/x-www-form-urlencoded")
-    expect(await sent().text()).toBe("grant_type=client%20credentials")
-    const body = { amount: 100, metadata: { order: "7" }, tags: ["a", "b"], filter: { live: true } }
-    await client.fetch("POST /charges", { body })
-    expect(await sent().text()).toBe(
-      "amount=100&metadata[order]=7&tags[0]=a&tags[1]=b&filter=%7B%22live%22%3Atrue%7D",
-    )
-  })
-
-  it("encodes multipart bodies as FormData", async () => {
-    const { client, sent } = recorder<{
-      "POST /m": ResultOperation<{
-        body: Record<string, unknown> | BodyLike
-        contentType?: "multipart/form-data"
-      }>
-    }>({
-      version: 5,
-      endpoints: {
-        "POST /m": {
-          contentType: "multipart/form-data",
-        },
-      },
-    })
-    const body = {
-      photo: new File(["PNG"], "photo.png", { type: "image/png" }),
-      raw: new Blob(["x"]),
-      meta: { a: 1 },
-      tags: ["x", "y"],
-      when: new Date(0),
-      bytes: new Uint8Array([1, 2]),
-      shared: shared([3]),
-      sharedView: new Uint8Array(shared([4])),
-      skipped: undefined,
-    }
-    await client.fetch("POST /m", { body })
-    expect(sent().headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/)
-    const form = await sent().formData()
-    expect(form.get("photo")).toMatchObject({ name: "photo.png", type: "image/png" })
-    // A Blob without a name is still a file.
-    expect(form.get("raw")).toMatchObject({ name: "blob" })
-    expect(form.get("meta")).toBe('{"a":1}')
-    expect(form.getAll("tags")).toStrictEqual(["x", "y"])
-    expect(form.get("when")).toBe("1970-01-01T00:00:00.000Z")
-    // Buffers are bytes, so files, too, also in shared memory.
-    const files = await Promise.all(
-      ["bytes", "shared", "sharedView"].map((name) => (form.get(name) as Blob).arrayBuffer()),
-    )
-    expect(files.map((buffer) => new Uint8Array(buffer))).toStrictEqual(
-      [[1, 2], [3], [4]].map((values) => new Uint8Array(values)),
-    )
-    expect(form.has("skipped")).toBe(false)
   })
 
   it("passes ready-made bodies through, with their own or the declared type", async () => {
@@ -685,61 +656,6 @@ describe("request bodies", () => {
       "A Blob cannot be sent inside JSON",
     )
     expect(requests).toHaveLength(0)
-  })
-})
-
-describe("reserved characters, delimiters, and path segments", () => {
-  const { client, sent } = recorder<{
-    "GET /files/{path}": ResultOperation<{ params: { path: string } }>
-    "GET /q": ResultOperation<{ query: Record<string, unknown> }>
-  }>({
-    version: 5,
-    endpoints: {
-      "GET /files/{path}": {
-        params: { path: { style: "simple", explode: false, allowReserved: true } },
-      },
-      "GET /q": {
-        query: {
-          next: { style: "form", explode: true, allowReserved: true },
-          ids: { style: "form", explode: false },
-          sp: { style: "spaceDelimited", explode: false },
-          pipe: { style: "pipeDelimited", explode: false },
-          spArray: { style: "spaceDelimited", explode: false },
-          pipeArray: { style: "pipeDelimited", explode: false },
-        },
-      },
-    },
-  })
-
-  it("keeps reserved characters only where they cannot change the URL", async () => {
-    await client.fetch("GET /files/{path}", { params: { path: "a/b c%20d#e?f" } })
-    expect(url(sent())).toBe("/files/a/b%20c%20d%23e%3Ff")
-    await client.fetch("GET /q", { query: { next: "a#b&c=d/e?f%20g+h" } })
-    expect(url(sent())).toBe("/q?next=a%23b%26c%3Dd/e?f%20g%2Bh")
-  })
-
-  it("keeps commas between values, and percent-encodes spaces and pipes", async () => {
-    const query = {
-      ids: ["a,b", null, "c"],
-      sp: { R: 100, G: 200 },
-      pipe: { R: 100, G: 200 },
-      spArray: ["a b", null, "c/d"],
-      pipeArray: ["a b", null, "c/d"],
-    }
-    await client.fetch("GET /q", { query })
-    expect(url(sent())).toBe(
-      "/q?ids=a%2Cb,c&sp=R%20100%20G%20200&pipe=R%7C100%7CG%7C200&spArray=a%20b%20c%2Fd&pipeArray=a%20b%7Cc%2Fd",
-    )
-  })
-
-  it("refuses path values that would reach another resource", async () => {
-    for (const path of ["..", ".", "", "a/../b", "%2e", "%2e%2E", "/a", "a//b"]) {
-      const call = client.fetch("GET /files/{path}", { params: { path } })
-      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-      await expect(call).rejects.toThrow("another resource")
-      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-      await expect(call).rejects.toBeInstanceOf(TypeError)
-    }
   })
 })
 

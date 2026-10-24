@@ -49,6 +49,7 @@ describe("stream types", () => {
 const events = api.stream("GET /events")
 api.stream("GET /events", undefined)
 events satisfies ReadableStream<EndpointMessage<Endpoints, "GET /events">>
+const message: EndpointMessage<Endpoints, "GET /events"> = { event: "added", data: "hello", id: "1" }
 api.stream("GET /events", { retry: false, signal: AbortSignal.abort() })
 api.stream("GET /events", { accept: "text/event-stream", retry: { delay: 12, maxRetries: 2 } })
 // @ts-expect-error Web Streams return synchronously
@@ -150,6 +151,8 @@ api.result("HEAD /records")
 api.result("GET /headless")
 api.result("GET /error-stream")
 api.result("GET /unsupported")
+// @ts-expect-error result cannot read an SSE stream to completion
+api.result("GET /events")
 // @ts-expect-error result cannot read a JSON line stream to completion
 api.result("GET /records")
 // @ts-expect-error schema never still declares a stream

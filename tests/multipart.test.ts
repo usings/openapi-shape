@@ -2,7 +2,9 @@ import { runInNewContext } from "node:vm"
 import { expect, it } from "vitest"
 import type { Contract } from "../src/client"
 import { createClient } from "../src/client"
+import type { BodyLike } from "../src/client/types"
 import { generate } from "../src/core/index"
+import { recorder, shared } from "./helpers/client"
 import type { ResultOperation } from "./helpers/contract"
 import { contractOf } from "./helpers/contract"
 import type { Version } from "./helpers/generate"
@@ -367,4 +369,48 @@ it("preserves a branded File's name when retyping without the local File prototy
   expect(part.name).toBe("original.bin")
   expect(part.type).toBe("application/octet-stream")
   expect(await part.text()).toBe("binary")
+})
+
+it("encodes multipart bodies as FormData", async () => {
+  const { client, sent } = recorder<{
+    "POST /m": ResultOperation<{
+      body: Record<string, unknown> | BodyLike
+      contentType?: "multipart/form-data"
+    }>
+  }>({
+    version: 5,
+    endpoints: {
+      "POST /m": {
+        contentType: "multipart/form-data",
+      },
+    },
+  })
+  const body = {
+    photo: new File(["PNG"], "photo.png", { type: "image/png" }),
+    raw: new Blob(["x"]),
+    meta: { a: 1 },
+    tags: ["x", "y"],
+    when: new Date(0),
+    bytes: new Uint8Array([1, 2]),
+    shared: shared([3]),
+    sharedView: new Uint8Array(shared([4])),
+    skipped: undefined,
+  }
+  await client.fetch("POST /m", { body })
+  expect(sent().headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/)
+  const fields = await sent().formData()
+  expect(fields.get("photo")).toMatchObject({ name: "photo.png", type: "image/png" })
+  // A Blob without a name is still a file.
+  expect(fields.get("raw")).toMatchObject({ name: "blob" })
+  expect(fields.get("meta")).toBe('{"a":1}')
+  expect(fields.getAll("tags")).toStrictEqual(["x", "y"])
+  expect(fields.get("when")).toBe("1970-01-01T00:00:00.000Z")
+  // Buffers are bytes, so files, too, also in shared memory.
+  const files = await Promise.all(
+    ["bytes", "shared", "sharedView"].map((name) => (fields.get(name) as Blob).arrayBuffer()),
+  )
+  expect(files.map((buffer) => new Uint8Array(buffer))).toStrictEqual(
+    [[1, 2], [3], [4]].map((values) => new Uint8Array(values)),
+  )
+  expect(fields.has("skipped")).toBe(false)
 })
