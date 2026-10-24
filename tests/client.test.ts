@@ -37,36 +37,7 @@ describe("contract validation", () => {
     )
   })
 
-  it.each([
-    null,
-    undefined,
-    false,
-    "GET /a",
-    [],
-    { stream: "unknown" },
-    { stream: false },
-    { stream: null },
-    { stream: [] },
-    { stream: ["sse"] },
-    { stream: ["application/json-seq"] },
-    { stream: ["text/event-stream", "text/event-stream"] },
-    { stream: ["text/event-stream", null] },
-    { stream: Array(1) },
-  ])("rejects an invalid endpoint entry or unsupported stream protocol (%#)", (plan) => {
-    expect(() => createClient({ version: 5, endpoints: { "GET /a": plan } } as never)).toThrow(
-      TypeError,
-    )
-  })
-
-  it.each(["GET", "GET ", " /a", "GET  /a", "GET\t/a", "BAD( /a"])(
-    "validates method and path in endpoint keys (%s)",
-    (endpoint) => {
-      const given = { version: 5, endpoints: { [endpoint]: {} } } as const
-      expect(() => createClient(given)).toThrow("Invalid plan for endpoint")
-    },
-  )
-
-  it("requires the current contract format and directs mismatches to regeneration", () => {
+  it("requires the current version and an endpoints object, otherwise directs regeneration", () => {
     for (const given of [
       undefined,
       null,
@@ -74,6 +45,11 @@ describe("contract validation", () => {
       { version: 4, endpoints: {} },
       { version: 6, endpoints: {} },
       { version: "5", endpoints: {} },
+      { version: 5 },
+      { version: 5, endpoints: null },
+      { version: 5, endpoints: [] },
+      { version: 5, endpoints: false },
+      { version: 5, endpoints: "GET /a" },
     ]) {
       expect(() => createClient(given as never)).toThrow(TypeError)
       expect(() => createClient(given as never)).toThrow(

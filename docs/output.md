@@ -164,7 +164,7 @@ Connection settings belong to client configuration: `baseURL` selects the server
 
 ### Format compatibility
 
-The contract format is v5. The client accepts only its matching format and checks endpoint keys and supported streaming media. Use the package installed in your application to generate and check the module:
+The contract format is v5. The client requires a matching version and an endpoints object; generated endpoint entries are not revalidated when creating a client. Use the package installed in your application to generate and check the module:
 
 ```sh
 pnpm exec openapi-shape ./openapi.yaml -o src/api.ts

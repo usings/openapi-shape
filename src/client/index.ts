@@ -1,6 +1,5 @@
 import type { Contract, EndpointContract } from "../shared/contract"
 import { CONTRACT_VERSION } from "../shared/contract"
-import { streamFormat } from "../shared/media"
 import { decodeBody } from "./body"
 import type { Fetcher, Middleware } from "./middleware"
 import { createSender } from "./middleware"
@@ -93,23 +92,6 @@ export function createClient<Endpoints>(
     Array.isArray(contract.endpoints)
   ) {
     throw new TypeError(`regenerate the module with this version of openapi-shape`)
-  }
-  for (const [endpoint, plan] of Object.entries(contract.endpoints)) {
-    if (
-      plan === null ||
-      typeof plan !== "object" ||
-      Array.isArray(plan) ||
-      !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+ \//.test(endpoint) ||
-      ("stream" in plan &&
-        plan.stream !== undefined &&
-        (!Array.isArray(plan.stream) ||
-          plan.stream.length === 0 ||
-          ![...plan.stream].every(
-            (media: unknown) => typeof media === "string" && streamFormat(media) !== undefined,
-          ) ||
-          new Set(plan.stream).size !== plan.stream.length))
-    )
-      throw new TypeError(`Invalid plan for endpoint "${endpoint}"; regenerate the contract`)
   }
   const { baseURL, middleware = [], fetch: transport, headers, ...init } = options
   const prefix = normalizeBaseURL(baseURL)
