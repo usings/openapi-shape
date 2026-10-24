@@ -5,15 +5,12 @@
 [![Node.js][node-src]][node-href]
 [![License][license-src]][license-href]
 
-**OpenAPI types for Fetch.** Generate a TypeScript module from an OpenAPI 3.0, 3.1, or 3.2 description. Call operations by `"METHOD /path"` to read decoded data, consume typed Web Streams, or work directly with a typed `Response`.
+**OpenAPI types for Fetch.** Generate one TypeScript module from an OpenAPI 3.0, 3.1, or 3.2 description, then call operations by `"METHOD /path"`.
 
-- **Web standards.** Build on Fetch, `Request`, `Response`, and `ReadableStream`. Send JSON and multipart forms, transfer files, and consume SSE or JSON line streams with `for await`, readers, or pipes. Share authentication and logging through middleware.
-- **Types for real APIs.** Get named component schemas, typed request inputs, and responses that narrow by HTTP status. Documented compatibility rules handle common OpenAPI quirks.
-- **Small footprint.** One generated `.ts` file and a dependency-free client. Generated types describe the API; runtime entries store serialization settings and supported streaming media.
-- **Controlled generation.** Cancel work, bound document loading, and provide a custom loader for authenticated or cached sources.
-- **Automation.** Check generated files with `--check` and inspect diagnostics through `generate()`.
-
-**Contract first. Types are a projection. Validation is a separate responsibility.** OpenAPI and JSON Schema define the contract. `openapi-shape` generates TypeScript types and runtime serialization settings; it does not validate runtime data. Types alone do not prove validity, conformance, or authenticity. See [support and limits](./docs/openapi.md#support-boundaries).
+- **Type safety.** Typed request inputs and responses that narrow by HTTP status.
+- **Web standards.** Built on Fetch, `Request`, `Response`, and native `ReadableStream`; consume streams with `for await`, readers, or pipes.
+- **Response handling.** Decoded results, typed `Response` objects, and SSE, JSONL, or NDJSON streams.
+- **Lightweight client.** No runtime dependencies, with shared request defaults and middleware across all three methods.
 
 ## Quick start
 
@@ -46,23 +43,27 @@ Choose how to consume a response:
 | `api.stream()` | Consume typed SSE messages or JSON line records from a native `ReadableStream`. |
 | `api.fetch()`  | Get a typed `Response` from any callable endpoint and read its body yourself.   |
 
-All three methods share typed request inputs and middleware. The [client guide](./docs/client.md) covers endpoint selection, response handling, and connection management.
+All three methods share typed request inputs and middleware.
 
-The generated module has no imports or runtime dependencies. Its `Endpoints` and `Schemas` [types also work with your own client](./docs/output.md).
+The generated module has no imports or runtime dependencies. Its `Endpoints` and `Schemas` [types also work with your own client](./docs/generated.md).
+
+The generated types describe the API; the client does not validate payloads against schemas. See [support and limits](./docs/openapi.md#support-boundaries).
 
 ## Requirements
 
 - **Generator:** Node.js 22 or later.
-- **Client:** a runtime with standard Fetch API globals.
+- **Client:** a runtime with standard Fetch and Web Streams globals.
 
-The generated module and client use ES modules. CommonJS is not supported. Generate the module with the same installed package used by your application; see [format compatibility](./docs/output.md#format-compatibility).
+The generated module and client use ES modules. CommonJS is not supported. The client accepts only its matching [contract format](./docs/generated.md#format-compatibility); generate with the package installed in your application.
 
 ## Documentation
 
-- [The generated module](./docs/output.md): `Endpoints`, `Webhooks`, `Callbacks`, `Schemas`, and the runtime `contract`.
-- [Client](./docs/client.md): typed calls, request encoding, responses, streams, and middleware.
+- [CLI](./docs/cli.md): command options, generated file checks, and output behavior.
+- [Client](./docs/client.md): requests, decoded results, typed responses, SSE/JSONL streams, and helper types.
+- [Middleware](./docs/middleware.md): HTTP wrappers, authentication, timeouts, and response ownership.
 - [OpenAPI support](./docs/openapi.md): supported versions, references, schemas, media types, compatibility rules, and approximations.
-- [CLI and programmatic API](./docs/cli.md): options, `--check`, `generate()`, cancellation, and diagnostics.
+- [Generator API](./docs/generator.md): `generate()`, loading, cancellation, and diagnostics.
+- [The generated module](./docs/generated.md): `Endpoints`, `Webhooks`, `Callbacks`, `Schemas`, and the runtime `contract`.
 
 ## Development
 

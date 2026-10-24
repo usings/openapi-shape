@@ -2,7 +2,7 @@
 
 `openapi-shape` generates one TypeScript module containing endpoint descriptions, named schemas, incoming webhook and callback types, and the runtime settings used by the client. The file has no imports or runtime dependencies.
 
-Endpoint types preserve request fields, response status keys, and media types from the description. The client derives call arguments, decoded results, and stream messages from these types. Generation resolves references, projects schemas for their use, and records runtime serialization settings. Neither the generated module nor the client validates schema values at runtime; see [support boundaries](./openapi.md#support-boundaries).
+Use the generated types directly or pass `contract` to the [Fetch client](./client.md).
 
 ## Example
 
@@ -79,7 +79,7 @@ export type PetPayload =
 export type CreatePetInput = EndpointArgs<Endpoints, "POST /pets">[0]
 ```
 
-Status ranges and `default` stay as declared in the generated module. The client applies [status precedence and empty-body rules](./client.md#status-handling) when deriving response types. Streaming media stays in this same `responses` shape. `api.stream()` derives SSE messages and JSON line records from the selected media through `EndpointStreamItem`; see [sequential content](./openapi.md#sequential-content) for whole-content and item schemas.
+Status ranges and `default` stay as declared; the client derives their [status precedence and empty-body rules](./client.md#status-handling). Streaming responses use the same media-keyed shape. See [sequential content](./openapi.md#sequential-content) for whole-content and item schemas.
 
 Operation summaries, IDs, deprecation markers and external documentation become JSDoc. Schema and parameter documentation stays attached to its projected type.
 
@@ -97,7 +97,7 @@ export type PetPayload = PetCreated["body"]["application/json"]
 export type Receipt = PetCreated["responses"]["200"]["content"]["application/json"]
 ```
 
-Incoming requests use the response-side schema view; responses you send use the request-side view. These types help write handlers. They do not parse bodies, validate payloads, or authenticate senders.
+Incoming requests use the response-side schema view; responses you send use the request-side view. Use these types when writing handlers.
 
 ## Schemas
 
@@ -113,7 +113,7 @@ Schemas in external components, under `$defs`, in standalone schema files, or wi
 
 JSDoc preserves titles, descriptions, deprecation, and constraints that TypeScript cannot express: `@format`, `@default`, `@minimum`, `@maximum`, `@exclusiveMinimum`, `@exclusiveMaximum`, `@multipleOf`, `@minLength`, `@maxLength`, `@pattern`, `@minItems`, `@maxItems`, `@uniqueItems`, `@minProperties`, `@maxProperties`, `@contentMediaType`, `@contentEncoding`, `@readOnly`, `@writeOnly`, and `@see`.
 
-Formats usually add documentation without changing the type. A `type: string` schema with `format: binary` remains a string in JSON and text inputs. Multipart variants use `Blob` for actual file parts; see [Binary content](./openapi.md#binary-content). A `date-time` remains a `string`, and an `int64` remains a `number`, with JavaScript's precision limits beyond 2^53. Convert these values in application code as needed.
+Formats usually add documentation without changing the type: `date-time` remains `string`, and `int64` remains `number`, with JavaScript's precision limits beyond 2^53. [Binary annotations](./openapi.md#binary-content) select different projections for JSON and multipart file parts; conversion belongs to application code.
 
 ### Input variants
 
@@ -156,11 +156,7 @@ This is OpenAPI 3.0's rule, applied in 3.1+ too ([Following the real API](./open
 | `contentType`                | The default request media type, including case and parameters. Absent when no default exists or the method cannot send a body. |
 | `bodyEncodings`              | Form field encodings keyed by full media type, including explicit and schema-derived settings.                                 |
 
-Form encodings use the selected media type, including its parameters. An explicit style overrides a field's content type. URL-encoded arrays with `repeat: true` encode each item separately; parameter `content` encodes the whole value. Missing settings use the client's [form field defaults](./client.md#form-field-defaults).
-
-`stream` includes explicit `text/event-stream`, `application/jsonl`, and `application/x-ndjson` declarations, retaining case and parameters. Entries are unique and follow response and media declaration order after applying status precedence. `HEAD`, 204, and 205 do not qualify, and a media declaration still qualifies when its schema is `never`. A registry entry such as `stream: ["text/event-stream", "application/x-ndjson; charset=utf-8"]` makes `accept` required for `api.stream()`. Every endpoint remains callable with `fetch`; endpoints with stream media are excluded from `result`.
-
-Connection settings belong to client configuration: `baseURL` selects the server, credentials come from headers or middleware, and the runtime manages cookies. Method and path come from each endpoint key. The contract stores serialization settings and supported streaming media; it contains no executable schemas or transport code.
+The registry stores only request serialization and supported streaming media. It has no executable schemas or transport code. Form behavior belongs to the [serialization reference](./client.md#serialization-reference); streaming endpoint selection and `accept` belong to the [client guide](./client.md#endpoint-and-media-selection). Configure servers, credentials, and middleware when creating a client.
 
 ### Format compatibility
 
