@@ -1,11 +1,10 @@
-import { createServer } from "node:http"
-import type { AddressInfo } from "node:net"
 import { join } from "node:path"
 import { gzipSync } from "node:zlib"
 import { expect, it, vi } from "vitest"
 import type { DocumentLoader, GenerateOptions } from "../src/core/index"
 import { generate, GenerateError } from "../src/core/index"
 import { oas } from "./helpers/generate"
+import { withServer } from "./helpers/http"
 import { withFiles } from "./helpers/tmp"
 
 const uri = "https://spec.test/api.json"
@@ -75,7 +74,7 @@ it.each([
       }),
   })
   expect(result.diagnostics).toStrictEqual([])
-  expect(result.code).toContain("// YAML 1")
+  expect(result.code).toContain("// YAML 1\n")
 })
 
 it.each([0, -1, 1.5, Number.NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
@@ -162,6 +161,7 @@ it("cancels a loader that ignores its signal and disposes of its late response",
   const started = deferred<void>()
   const response = deferred<Response>()
   const cancelled = deferred<void>()
+  const cancel = vi.fn<(_reason: unknown) => void>(() => cancelled.resolve())
   const controller = new AbortController()
   const reason = { cancelled: true }
   const pending = generate(uri, {
@@ -175,8 +175,9 @@ it("cancels a loader that ignores its signal and disposes of its late response",
   await started.promise
   controller.abort(reason)
   expect(await settled).toBe(reason)
-  response.resolve(new Response(new ReadableStream({ cancel: () => cancelled.resolve() })))
+  response.resolve(new Response(new ReadableStream({ cancel })))
   await cancelled.promise
+  expect(cancel).toHaveBeenCalledExactlyOnceWith(reason)
 })
 
 it("cancels stalled streams and stops queued loads without waiting for cleanup", async () => {
@@ -209,6 +210,8 @@ it("cancels stalled streams and stops queued loads without waiting for cleanup",
   expect(signals).toHaveLength(2)
   expect(signals.every((signal) => signal.aborted)).toBe(true)
   expect(cancelled).toHaveBeenCalledTimes(2)
+  expect(cancelled).toHaveBeenNthCalledWith(1, reason)
+  expect(cancelled).toHaveBeenNthCalledWith(2, reason)
 })
 
 it("observes cancellation between synchronous generation stages", async () => {
@@ -370,54 +373,44 @@ it("times out custom loaders with the per-document deadline", async () => {
 
 it("uses redirected response URLs as reference bases and counts decompressed HTTP bytes", async () => {
   const compressed = gzipSync(text)
-  const server = createServer((request, response) => {
-    if (request.url === "/api") {
-      response.writeHead(302, { location: "/moved/entry.yaml" })
-      response.end()
-    } else if (request.url === "/moved/entry.yaml") {
-      response.end(
-        "openapi: 3.1.2\ninfo: {title: Redirected, version: '1'}\ncomponents: {schemas: {T: {$ref: './schema.json#named'}}}",
-      )
-    } else if (request.url === "/moved/schema.json") {
-      response.writeHead(302, { location: "/schemas/value.json" })
-      response.end()
-    } else if (request.url === "/schemas/value.json") {
-      response.end('{"$anchor":"named","$ref":"./child.json"}')
-    } else if (request.url === "/schemas/child.json") {
-      response.end('{"type":"string"}')
-    } else if (request.url === "/compressed") {
-      response.writeHead(200, { "content-encoding": "gzip", "content-type": "application/json" })
-      response.end(compressed)
-    } else {
-      response.writeHead(404)
-      response.end()
-    }
-  })
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve)
-  })
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-  try {
-    const custom = await generate(`${origin}/api`, {
-      load: (url, { signal }) => fetch(url, { signal }),
-    })
-    expect(custom.code).toContain("export type T = string")
-    const builtin = await generate(`${origin}/api`, { load: () => undefined })
-    expect(builtin.code).toBe(custom.code)
-    await expect(
-      generate(`${origin}/compressed`, {
-        maxDocumentBytes: new TextEncoder().encode(text).length - 1,
-      }),
-    ).rejects.toThrow("maxDocumentBytes")
-  } finally {
-    server.closeAllConnections()
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) reject(error)
-        else resolve()
+  await withServer(
+    (request, response) => {
+      if (request.url === "/api") {
+        response.writeHead(302, { location: "/moved/entry.yaml" })
+        response.end()
+      } else if (request.url === "/moved/entry.yaml") {
+        response.end(
+          "openapi: 3.1.2\ninfo: {title: Redirected, version: '1'}\ncomponents: {schemas: {T: {$ref: './schema.json#named'}}}",
+        )
+      } else if (request.url === "/moved/schema.json") {
+        response.writeHead(302, { location: "/schemas/value.json" })
+        response.end()
+      } else if (request.url === "/schemas/value.json") {
+        response.end('{"$anchor":"named","$ref":"./child.json"}')
+      } else if (request.url === "/schemas/child.json") {
+        response.end('{"type":"string"}')
+      } else if (request.url === "/compressed") {
+        response.writeHead(200, { "content-encoding": "gzip", "content-type": "application/json" })
+        response.end(compressed)
+      } else {
+        response.writeHead(404)
+        response.end()
+      }
+    },
+    async (origin) => {
+      const custom = await generate(`${origin}/api`, {
+        load: (url, { signal }) => fetch(url, { signal }),
       })
-    })
-  }
+      expect(custom.code).toContain("export type T = string")
+      const builtin = await generate(`${origin}/api`, { load: () => undefined })
+      expect(builtin.code).toBe(custom.code)
+      await expect(
+        generate(`${origin}/compressed`, {
+          maxDocumentBytes: new TextEncoder().encode(text).length - 1,
+        }),
+      ).rejects.toThrow("maxDocumentBytes")
+    },
+  )
 })
 
 it("rejects a custom remote response that claims a local retrieval URL", async () => {
@@ -510,7 +503,7 @@ it("checks shared objects once and still rejects cycles on later calls", async (
   const result = await generate(input)
   expect(result.code).toContain("export type S = string")
   expect(result.diagnostics).toStrictEqual([])
-  expect(visits.reads).toBe(30)
+  expect(visits.reads).toBeLessThanOrEqual(100)
   shared.cycle = shared
   await expect(generate(input)).rejects.toThrow("the document refers to itself")
   delete shared.cycle

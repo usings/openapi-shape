@@ -7,7 +7,7 @@ import { createClient } from "../../src/client"
  */
 export function recorder<Api>(
   given: Contract<Api>,
-  options: ClientOptions = {},
+  options: Omit<ClientOptions, "fetch"> = {},
   respond: () => Response = () => new Response(null, { status: 204 }),
 ): { client: Client<Api>; sent: () => Request; requests: Request[] } {
   const requests: Request[] = []

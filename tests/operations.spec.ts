@@ -582,11 +582,80 @@ describe("parameters", () => {
       "invalid-parameter #/paths/~1r~1{id}/get/parameters/1/in",
       "invalid-parameter #/paths/~1r~1{id}/get/parameters/2",
       "invalid-parameter #/paths/~1r~1{id}/get/parameters/0",
-      "invalid-parameter #/paths/~1r~1{id}/get/parameters/3",
-      "invalid-parameter #/paths/~1r~1{id}/get/parameters/4",
       "invalid-parameter #/paths/~1r~1{id}/get/parameters",
     ])
   })
+
+  it.each([false, true])(
+    "never loads or compiles ignored query schemas (whole query first: %s)",
+    async (first) => {
+      const query = { name: "ignored", in: "query", schema: { $ref: "missing-query.json" } }
+      const whole = {
+        name: "whole",
+        in: "querystring",
+        content: { "text/plain": { schema: { type: "string" } } },
+      }
+      const duplicate = {
+        name: "other",
+        in: "querystring",
+        content: { "application/json": { schema: { $ref: "missing-whole.json" } } },
+      }
+      const calls: string[] = []
+      const result = await generate(
+        oas("3.2", {
+          paths: {
+            "/search": {
+              parameters: [query],
+              get: {
+                parameters: [...(first ? [whole, query] : [query, whole]), duplicate],
+                responses: ok,
+              },
+            },
+          },
+        }),
+        {
+          base: "https://spec.test/api.json",
+          load: (uri) => {
+            calls.push(uri)
+            return new Response(null, { status: 404 })
+          },
+        },
+      )
+      expect(calls).toStrictEqual([])
+      expect(entry(result.code, "GET /search")).toContain("query?: string")
+      expect(result.code).not.toContain("Schemas")
+      expect(result.diagnostics.map((d) => d.message)).toStrictEqual([
+        "Only one querystring parameter is allowed",
+        "A querystring parameter cannot be combined with query parameters; the query parameters are ignored",
+      ])
+    },
+  )
+
+  it.each(["application/octet-stream", "application/xml"])(
+    "keeps raw querystring media as URL text: %s",
+    async (mediaType) => {
+      const { code, diagnostics } = await generate(
+        oas("3.2", {
+          paths: {
+            "/search": {
+              get: {
+                parameters: [
+                  {
+                    name: "whole",
+                    in: "querystring",
+                    content: { [mediaType]: { schema: { type: "string", format: "binary" } } },
+                  },
+                ],
+                responses: ok,
+              },
+            },
+          },
+        }),
+      )
+      expect(diagnostics).toStrictEqual([])
+      expect(entry(code, "GET /search")).toContain("query?: string")
+    },
+  )
 
   it("types a 3.2 querystring parameter as the whole query", async () => {
     const result = await generate(

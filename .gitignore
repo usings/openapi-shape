@@ -1,4 +1,10 @@
+# system
 .DS_Store
 
+# cache
+.vitest
+.cache
+
+# dependencies & build
 node_modules
 dist

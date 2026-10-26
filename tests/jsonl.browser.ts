@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ClientOptions, Fetcher, StreamMessage } from "../src/client"
 import { createClient, StreamParseError, StreamResponseError } from "../src/client"
-import { readJsonLines } from "../src/client/ndjson-parser"
-import { collect } from "./helpers/streams"
+import { readJsonLines } from "../src/client/jsonl-parser"
+
+async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {
+  const values: T[] = []
+  for await (const item of items) values.push(item)
+  return values
+}
 
 function body(chunks: Uint8Array[], failure?: Error): ReadableStream<Uint8Array> {
   let index = 0
@@ -35,7 +40,7 @@ function api(options: ClientOptions = {}) {
     }
   }>(
     {
-      version: 5,
+      version: 6,
       endpoints: {
         "GET /records": { stream: ["application/x-ndjson"] },
         "GET /jsonl": { stream: ["application/jsonl"] },

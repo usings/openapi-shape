@@ -19,7 +19,7 @@ export function sseClient(options: ClientOptions = {}) {
     "GET /ordinary": ResultOperation
   }>(
     {
-      version: 5,
+      version: 6,
       endpoints: {
         "GET /events": { stream: ["text/event-stream"] },
         "POST /events/{id}": { stream: ["text/event-stream"] },
@@ -32,21 +32,4 @@ export function sseClient(options: ClientOptions = {}) {
 
 export function sseResponse(text = "data: hello\n\n"): Response {
   return new Response(text, { headers: { "content-type": "Text/Event-Stream; charset=utf-8" } })
-}
-
-export function bytes(chunks: Uint8Array[], failure?: Error): ReadableStream<Uint8Array> {
-  let index = 0
-  return new ReadableStream({
-    pull(controller) {
-      if (index < chunks.length) controller.enqueue(chunks[index++])
-      else if (failure) controller.error(failure)
-      else controller.close()
-    },
-  })
-}
-
-export async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {
-  const values: T[] = []
-  for await (const item of items) values.push(item)
-  return values
 }

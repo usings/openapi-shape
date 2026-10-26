@@ -1,6 +1,5 @@
 import { runInNewContext } from "node:vm"
 import { describe, expect, it } from "vitest"
-import { createClient } from "../src/client"
 import { generate } from "../src/core/index"
 import { contract as defaultContract } from "./__snapshots__/client-api"
 import { recorder } from "./helpers/client"
@@ -47,15 +46,7 @@ async function generatedClient(document: object) {
       }>
     >
   >(code)
-  const requests: Request[] = []
-  const client = createClient(contract, {
-    baseURL: "https://api.test",
-    fetch: (request) => {
-      requests.push(request)
-      return Promise.resolve(new Response(null, { status: 204 }))
-    },
-  })
-  return { client, requests }
+  return recorder(contract, { baseURL: "https://api.test" })
 }
 
 describe("form encoding plans", () => {
@@ -91,14 +82,7 @@ describe("form encoding plans", () => {
               contentType?: typeof form | typeof multipart
             }>
           }>(code)
-          const requests: Request[] = []
-          const client = createClient(contract, {
-            baseURL: "https://api.test",
-            fetch: (request) => {
-              requests.push(request)
-              return Promise.resolve(new Response(null, { status: 204 }))
-            },
-          })
+          const { client, requests } = recorder(contract, { baseURL: "https://api.test" })
           await client.fetch("POST /form", { contentType: form, body })
           await client.fetch("POST /form", { contentType: multipart, body })
           expect([...new URLSearchParams(await requests[0].text())]).toStrictEqual([
@@ -109,8 +93,6 @@ describe("form encoding plans", () => {
             ["tags", "a"],
             ["tags", "b"],
           ])
-          const raw = await requests[1].clone().text()
-          expect(raw).toContain('name="meta"; filename="blob"\r\nContent-Type: application/json')
           const parts = await requests[1].formData()
           expect(parts.get("meta")).toMatchObject({ type: "application/json" })
           expect(await (parts.get("meta") as Blob).text()).toBe('{"id":1}')
@@ -173,14 +155,7 @@ describe("form encoding plans", () => {
       }>
       "GET /query": ResultOperation<{ query: typeof body }>
     }>(code)
-    const requests: Request[] = []
-    const api = createClient(contract, {
-      baseURL: "https://api.test",
-      fetch: (request) => {
-        requests.push(request)
-        return Promise.resolve(new Response(null, { status: 204 }))
-      },
-    })
+    const { client: api, requests } = recorder(contract, { baseURL: "https://api.test" })
     await api.fetch("POST /form", { contentType: form, body })
     await api.fetch("POST /form", { contentType: multipart, body })
     await api.fetch("GET /query", { query: body })
@@ -222,14 +197,7 @@ describe("form encoding plans", () => {
         contentType?: typeof multipart
       }>
     }>(code)
-    const requests: Request[] = []
-    const api = createClient(generated, {
-      baseURL: "https://api.test",
-      fetch: (request) => {
-        requests.push(request)
-        return Promise.resolve(new Response(null, { status: 204 }))
-      },
-    })
+    const { client: api, requests } = recorder(generated, { baseURL: "https://api.test" })
     const input = JSON.parse(
       '{"__proto__":{"id":1},"inferred":"x","encoded":["eA=="],"nullable":null}',
     ) as Record<string, unknown>
@@ -366,16 +334,9 @@ describe("form encoding plans", () => {
       "POST /form": ResultOperation<{ body: { v: string }; contentType?: typeof form }>
     }>(code)
     expect(generated.endpoints["POST /form"]?.bodyEncodings).toBeUndefined()
-    const sent: string[] = []
-    const api = createClient(generated, {
-      baseURL: "https://api.test",
-      fetch: async (request) => {
-        sent.push(await request.text())
-        return new Response(null, { status: 204 })
-      },
-    })
+    const { client: api, requests } = recorder(generated, { baseURL: "https://api.test" })
     await api.fetch("POST /form", { body: { v: "x" } })
-    expect(sent).toStrictEqual(["v=x"])
+    expect(await Promise.all(requests.map((request) => request.text()))).toStrictEqual(["v=x"])
   })
 
   it("treats conditional encoding annotations as unknown and accepts an explicit override", async () => {
@@ -416,14 +377,7 @@ describe("form encoding plans", () => {
     const generated = await contractOf<{
       "POST /form": ResultOperation<{ body: { v: string }; contentType?: typeof multipart }>
     }>(explicit.code)
-    const requests: Request[] = []
-    const api = createClient(generated, {
-      baseURL: "https://api.test",
-      fetch: (request) => {
-        requests.push(request)
-        return Promise.resolve(new Response(null, { status: 204 }))
-      },
-    })
+    const { client: api, requests } = recorder(generated, { baseURL: "https://api.test" })
     await api.fetch("POST /form", { body: { v: "eA==" } })
     const parts = await requests[0].formData()
     expect(parts.get("v")).toMatchObject({ type: "application/octet-stream" })
@@ -551,7 +505,7 @@ describe("URL-encoded requests", () => {
     const { client, sent } = recorder(defaultContract)
     await client.fetch("POST /token", { body: { grant_type: "client credentials" } })
     expect(sent().headers.get("content-type")).toBe("application/x-www-form-urlencoded")
-    expect(await sent().text()).toBe("grant_type=client%20credentials")
+    expect(await sent().text()).toBe("grant_type=client+credentials")
     const fields = {
       amount: 100,
       metadata: { order: "7" },

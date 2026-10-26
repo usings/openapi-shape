@@ -2,7 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Fetcher, MiddlewareContext, StreamMessage } from "../src/client"
 import { StreamResponseError } from "../src/client"
 import { readEvents } from "../src/client/sse-parser"
-import { bytes, sseClient as client, sseResponse as response } from "./helpers/streams"
+import { sseClient as client, sseResponse as response } from "./helpers/streams"
+
+function bytes(chunks: Uint8Array[], failure?: Error): ReadableStream<Uint8Array> {
+  let index = 0
+  return new ReadableStream({
+    pull(controller) {
+      if (index < chunks.length) controller.enqueue(chunks[index++])
+      else if (failure) controller.error(failure)
+      else controller.close()
+    },
+  })
+}
 
 describe("SSE parser", () => {
   it("preserves events for every byte split, including UTF-8, BOM and CRLF", async () => {
@@ -315,7 +326,7 @@ describe("SSE connections", () => {
     }
   })
 
-  it("does not retry a middleware error and disposes a response obtained before that error", async () => {
+  it("does not retry a middleware error after middleware disposes its response", async () => {
     const failure = new TypeError("middleware bug")
     const cancel = vi.fn<() => void>()
     const fetch = vi.fn<Fetcher>().mockResolvedValue(
@@ -327,7 +338,8 @@ describe("SSE connections", () => {
       fetch,
       middleware: [
         async (request, next) => {
-          await next(request)
+          const received = await next(request)
+          await received.body?.cancel()
           throw failure
         },
       ],

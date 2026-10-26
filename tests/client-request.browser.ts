@@ -1,30 +1,14 @@
-import { runInNewContext } from "node:vm"
-import { describe, expect, it, vi } from "vitest"
-import type { Fetcher, Middleware, MiddlewareContext } from "../src/client"
-import { createClient, defineMiddleware } from "../src/client"
+import { describe, expect, it } from "vitest"
+import { createClient } from "../src/client"
 import type { BodyLike } from "../src/client/types"
 import { contract } from "./__snapshots__/client-api"
-import { recorder, shared, url } from "./helpers/client"
+import { recorder, url } from "./helpers/client"
 import type { ResultOperation } from "./helpers/contract"
 
-// A Node.js-style stream: an async iterable of bytes.
-async function* chunks(): AsyncGenerator<Uint8Array> {
-  yield await Promise.resolve(new Uint8Array([1]))
-}
-
-/** What `result` reads from a response with this body, content type, and status. */
-async function decoded(body: BodyInit | null, type?: string, status = 200): Promise<unknown> {
-  const headers = type === undefined ? undefined : { "content-type": type }
-  const { client } = recorder<{
-    "GET /x": ResultOperation
-  }>({ version: 5, endpoints: { "GET /x": {} } }, {}, () => new Response(body, { status, headers }))
-  const { data, error } = await client.result("GET /x")
-  return status < 300 ? data : error
-}
-
-/** A middleware, or a `fetch` option, that throws as it is called. */
-function refuse(): never {
-  throw new Error("no token")
+async function* uploadChunks() {
+  yield new Uint8Array([0, 65, 66, 0]).subarray(1, 3)
+  yield new Uint8Array()
+  yield new Uint8Array([67])
 }
 
 describe("contract validation", () => {
@@ -43,13 +27,13 @@ describe("contract validation", () => {
       null,
       { endpoints: {} },
       { version: 4, endpoints: {} },
-      { version: 6, endpoints: {} },
+      { version: 5, endpoints: {} },
       { version: "5", endpoints: {} },
-      { version: 5 },
-      { version: 5, endpoints: null },
-      { version: 5, endpoints: [] },
-      { version: 5, endpoints: false },
-      { version: 5, endpoints: "GET /a" },
+      { version: 6 },
+      { version: 6, endpoints: null },
+      { version: 6, endpoints: [] },
+      { version: 6, endpoints: false },
+      { version: 6, endpoints: "GET /a" },
     ]) {
       expect(() => createClient(given as never)).toThrow(TypeError)
       expect(() => createClient(given as never)).toThrow(
@@ -127,7 +111,7 @@ describe("requests", () => {
 
   it("splits endpoint keys at the first space and preserves custom method case", async () => {
     const { client, sent } = recorder<{ "customVerb /a b": ResultOperation }>({
-      version: 5,
+      version: 6,
       endpoints: { "customVerb /a b": {} },
     })
     await client.fetch("customVerb /a b")
@@ -166,13 +150,6 @@ describe("requests", () => {
     expect(Object.fromEntries(sent().headers)).toStrictEqual({ "x-trace": "call", "x-other": "o" })
     await client.fetch("GET /pets", { headers: [["x-trace", "entries"]] })
     expect(sent().headers.get("x-trace")).toBe("entries")
-    // Repeated names, as `new Headers()` keeps them.
-    const cookies = new Headers([
-      ["set-cookie", "a=1"],
-      ["set-cookie", "b=2"],
-    ])
-    await client.fetch("GET /pets", { headers: cookies })
-    expect(sent().headers.getSetCookie()).toStrictEqual(["a=1", "b=2"])
     // A Headers of another implementation, as undici's may be in Node.js.
     const foreign = {
       *[Symbol.iterator]() {
@@ -208,7 +185,7 @@ describe("parameters", () => {
       const { client, sent } = recorder<{
         "GET /a/{x}/{y}/{z}": ResultOperation<{ params: { x: string; y: string[]; z: object } }>
       }>({
-        version: 5,
+        version: 6,
         endpoints: {
           "GET /a/{x}/{y}/{z}": {},
         },
@@ -226,7 +203,7 @@ describe("parameters", () => {
         const { client, sent } = recorder<
           Record<string, ResultOperation<{ params: Record<string, unknown> }>>
         >({
-          version: 5,
+          version: 6,
           endpoints: {
             [endpoint]: {
               params: { [name]: { style: "matrix", allowReserved: true } },
@@ -238,7 +215,7 @@ describe("parameters", () => {
         const exploded = recorder<
           Record<string, ResultOperation<{ params: Record<string, unknown> }>>
         >({
-          version: 5,
+          version: 6,
           endpoints: {
             [endpoint]: {
               params: { [name]: { style: "matrix", explode: true } },
@@ -252,7 +229,7 @@ describe("parameters", () => {
         const simple = recorder<
           Record<string, ResultOperation<{ params: Record<string, unknown> }>>
         >({
-          version: 5,
+          version: 6,
           endpoints: {
             [endpoint]: {},
           },
@@ -269,7 +246,7 @@ describe("parameters", () => {
       const { client, sent } = recorder<
         Record<string, ResultOperation<{ params: Record<string, unknown> }>>
       >({
-        version: 5,
+        version: 6,
         endpoints: {
           "GET /files//prefix-{a/b}-{c/d}/": {},
           "GET /files/{a/b}/tail": {
@@ -287,34 +264,6 @@ describe("parameters", () => {
       }
     })
 
-    it("serializes cross-realm plain objects and Dates as ordinary parameter values", async () => {
-      const { client, sent } = recorder<{
-        "GET /files/{meta}": ResultOperation<{
-          params: { meta: object }
-          query: Record<string, unknown>
-        }>
-      }>({
-        version: 5,
-        endpoints: {
-          "GET /files/{meta}": {
-            query: { filter: { style: "deepObject" } },
-          },
-        },
-      })
-      const input = runInNewContext(
-        '({ params: { meta: { id: 1 } }, query: { filter: { items: ["x", "y"] }, when: new Date(0) }, headers: { "x-meta": { id: 1 } } })',
-      ) as {
-        params: { meta: object }
-        query: Record<string, unknown>
-        headers: Record<string, unknown>
-      }
-      await client.fetch("GET /files/{meta}", input)
-      expect(url(sent())).toBe(
-        "/files/id,1?filter[items][0]=x&filter[items][1]=y&when=1970-01-01T00%3A00%3A00.000Z",
-      )
-      expect(sent().headers.get("x-meta")).toBe("id,1")
-    })
-
     it.each(["toString", "constructor", "__proto__", "id"])(
       "requires an own path parameter named %s",
       async (name) => {
@@ -322,7 +271,7 @@ describe("parameters", () => {
         const { client, sent, requests } = recorder<
           Record<string, ResultOperation<{ params: Record<string, string> }>>
         >({
-          version: 5,
+          version: 6,
           endpoints: { [endpoint]: {} },
         })
         const inherited = Object.create({ [name]: "inherited" }) as Record<string, string>
@@ -348,7 +297,7 @@ describe("parameters", () => {
       const { client, sent } = recorder<{
         "GET /q?fixed=1": ResultOperation<{ query: Record<string, unknown> }>
       }>({
-        version: 5,
+        version: 6,
         endpoints: {
           "GET /q?fixed=1": {
             query: { compact: { explode: false } },
@@ -374,7 +323,7 @@ describe("parameters", () => {
       const { client, sent } = recorder<{
         "GET /q": ResultOperation<{ query: Record<string, unknown> }>
       }>({
-        version: 5,
+        version: 6,
         endpoints: {
           "GET /q": {
             query: { filter: { style: "deepObject" } },
@@ -406,7 +355,7 @@ describe("parameters", () => {
       const { client, sent } = recorder<{
         "GET /q": ResultOperation<{ query: Record<string, unknown> }>
       }>({
-        version: 5,
+        version: 6,
         endpoints: {
           "GET /q": {
             query: {
@@ -438,7 +387,7 @@ describe("parameters", () => {
       "GET /files/{path}": ResultOperation<{ params: { path: string } }>
       "GET /q": ResultOperation<{ query: Record<string, unknown> }>
     }>({
-      version: 5,
+      version: 6,
       endpoints: {
         "GET /files/{path}": {
           params: { path: { style: "simple", explode: false, allowReserved: true } },
@@ -504,7 +453,7 @@ describe("request bodies", () => {
     const { client, sent } = recorder<{
       "POST /text": ResultOperation<{ body?: string | BodyLike; contentType?: string }>
     }>({
-      version: 5,
+      version: 6,
       endpoints: {
         "POST /text": { contentType: "text/plain" },
       },
@@ -548,34 +497,56 @@ describe("request bodies", () => {
     })
     expect(sent().headers.get("content-type")).toBe("application/octet-stream")
     expect(new Uint8Array(await sent().arrayBuffer())).toStrictEqual(new Uint8Array([1, 2]))
-    // fetch takes no shared memory, and some runtimes would send it as text.
-    await client.fetch("POST /upload", {
-      contentType: "application/octet-stream",
-      body: new Uint8Array(shared([1, 2])),
-    })
-    expect(new Uint8Array(await sent().arrayBuffer())).toStrictEqual(new Uint8Array([1, 2]))
-    for (const body of [new ReadableStream(), chunks()]) {
-      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-      await client.fetch("POST /upload", { contentType: "application/octet-stream", body })
-      // Streaming request bodies go in half duplex.
-      expect((sent() as Request & { duplex?: string }).duplex).toBe("half")
-    }
   })
 
-  it.each([
-    "new Uint8Array([65, 66]).buffer",
-    "new Uint8Array([0, 65, 66, 0]).subarray(1, 3)",
-    "new DataView(new Uint8Array([0, 65, 66, 0]).buffer, 1, 2)",
-    "new Uint8Array(new SharedArrayBuffer(2)).map((_, i) => 65 + i).buffer",
-    "(() => { const b = new SharedArrayBuffer(2); new Uint8Array(b).set([65,66]); return b })()",
-  ])("passes cross-realm bytes through (%s)", async (expression) => {
+  it("sends async iterable request bodies as bytes in the browser", async () => {
     const { client, sent } = recorder(contract)
-    const body: unknown = runInNewContext(expression)
     await client.fetch("POST /upload", {
       contentType: "application/octet-stream",
-      body: body as ArrayBuffer,
+      body: uploadChunks(),
     })
-    expect(new Uint8Array(await sent().arrayBuffer())).toStrictEqual(new Uint8Array([65, 66]))
+    expect(await sent().text()).toBe("ABC")
+    expect(sent().headers.get("content-type")).toBe("application/octet-stream")
+  })
+
+  it("closes the async iterator when its request body is canceled", async () => {
+    const { client, sent } = recorder(contract)
+    let closed = false
+    async function* chunks() {
+      try {
+        yield new Uint8Array([65])
+        yield new Uint8Array([66])
+      } finally {
+        closed = true
+      }
+    }
+    await client.fetch("POST /upload", {
+      contentType: "application/octet-stream",
+      body: chunks(),
+    })
+    const reader = sent().body?.getReader()
+    try {
+      expect(await reader?.read()).toMatchObject({ value: new Uint8Array([65]) })
+    } finally {
+      await reader?.cancel("finished")
+      reader?.releaseLock()
+    }
+    expect(closed).toBe(true)
+  })
+
+  it("propagates async iterator failures while reading the request body", async () => {
+    const { client, sent } = recorder(contract)
+    const failure = new Error("Upload failed")
+    async function* chunks() {
+      yield new Uint8Array([65])
+      throw failure
+    }
+    await client.fetch("POST /upload", {
+      contentType: "application/octet-stream",
+      body: chunks(),
+    })
+    // Native Request can replace a source error with its own transport TypeError.
+    await expect(sent().arrayBuffer()).rejects.toBeInstanceOf(Error)
   })
 
   it.each([
@@ -591,7 +562,7 @@ describe("request bodies", () => {
     const { client, sent } = recorder<{
       "POST /json": ResultOperation<{ body: unknown | BodyLike; contentType?: "application/json" }>
     }>({
-      version: 5,
+      version: 6,
       endpoints: { "POST /json": {} },
     })
     const body = { [Symbol.toStringTag]: tag, value: "kept" }
@@ -604,7 +575,7 @@ describe("request bodies", () => {
       "POST /x": ResultOperation<{ body: string | BodyLike; contentType?: string }>
       "POST /t": ResultOperation<{ body: string | BodyLike; contentType?: string }>
     }>({
-      version: 5,
+      version: 6,
       endpoints: {
         "POST /x": { contentType: "application/xml" },
         "POST /t": { contentType: "text/plain" },
@@ -638,7 +609,7 @@ describe("request bodies", () => {
           | "multipart/form-data"
       }>
     }>({
-      version: 5,
+      version: 6,
       endpoints: {
         "POST /m": {
           query: { j: { contentType: "application/json" } },
@@ -680,7 +651,7 @@ describe("request bodies", () => {
     const { client, requests } = recorder<{
       "POST /json": ResultOperation<{ body: unknown | BodyLike; contentType?: "application/json" }>
     }>({
-      version: 5,
+      version: 6,
       endpoints: { "POST /json": {} },
     })
     await expect(client.fetch("POST /json", { body: { nested: blob } })).rejects.toThrow(
@@ -690,383 +661,23 @@ describe("request bodies", () => {
   })
 })
 
-describe("responses", () => {
-  it("hands the request to the fetch option, called unbound, and resolves to its response", async () => {
-    const answer = new Response("{}", { status: 404 })
-    const client = createClient(contract, {
-      baseURL: "https://api.test",
-      // A browser's fetch refuses to be called on another object.
-      fetch(this: unknown, request) {
-        expect(this).toBeUndefined()
-        expect(request.url).toBe("https://api.test/pets/1")
-        return Promise.resolve(answer)
-      },
-    })
-    expect(await client.fetch("GET /pets/{id}", { params: { id: 1 } })).toBe(answer)
-  })
-
-  it.each([
-    ['{"id":1}', "application/json; charset=utf-8", { id: 1 }],
-    ['{"id":1}', "application/problem+json", { id: 1 }],
-    ["hello", "text/plain", "hello"],
-    // An empty text body is still text.
-    ["", "text/plain", ""],
-    ["", "application/json", undefined],
-    [" \n", "application/json", undefined],
-    [null, undefined, undefined],
-  ])("reads a body by its content type (%#)", async (body, type, expected) => {
-    expect(await decoded(body, type)).toStrictEqual(expected)
-    // A failure's error is never undefined: without a body, it is null.
-    expect(await decoded(body, type, 500)).toStrictEqual(expected ?? null)
-  })
-
-  it("reads no content as undefined, and other content as a Blob", async () => {
-    expect(await decoded(null, "application/json", 204)).toBeUndefined()
-    expect(await decoded(null, "application/json", 205)).toBeUndefined()
-    expect(await decoded(null, "application/json", 304)).toBeNull()
-    // A body where none can be is still consumed, so that the connection is free.
-    const { client } = recorder<{ "HEAD /x": ResultOperation }>(
-      { version: 5, endpoints: { "HEAD /x": {} } },
-      {},
-      () => new Response("x", { status: 200, headers: { "content-type": "application/json" } }),
-    )
-    const { data, response } = await client.result("HEAD /x")
-    expect(data).toBeUndefined()
-    expect(response.bodyUsed).toBe(true)
-    expect(await decoded("abc", "image/png")).toBeInstanceOf(Blob)
-    expect(await decoded(new Blob(["abc"]))).toBeInstanceOf(Blob)
-    // Event streams and JSON sequences are not parsed: `fetch` streams them.
-    expect(await decoded("data: x\n\n", "text/event-stream")).toBe("data: x\n\n")
-    expect(await decoded('{"a":1}\n', "application/jsonl")).toBeInstanceOf(Blob)
-  })
-
-  it("gives the data of a success and the error of a failure, with the status, its body read", async () => {
-    let status = 200
-    const { client } = recorder(
-      contract,
-      {},
-      () =>
-        new Response(status === 200 ? '{"id":1,"name":"Rex"}' : '{"message":"nope"}', {
-          status,
-          headers: { "content-type": "application/json" },
-        }),
-    )
-    const found = await client.result("GET /pets/{id}", { params: { id: 1 } })
-    expect(found).toMatchObject({ data: { id: 1, name: "Rex" }, error: undefined, status: 200 })
-    status = 404
-    const missing = await client.result("GET /pets/{id}", { params: { id: 1 } })
-    expect(missing).toMatchObject({ data: undefined, error: { message: "nope" }, status: 404 })
-    // The body is read, so the connection is free again.
-    expect(missing.response.bodyUsed).toBe(true)
-  })
-
-  it("rejects a body that does not decode, as a network failure does", async () => {
-    const { client } = recorder(
-      contract,
-      {},
-      () =>
-        new Response("<html>", { status: 502, headers: { "content-type": "application/json" } }),
-    )
-    await expect(client.result("GET /pets")).rejects.toThrow(
-      "The 502 response is not the JSON it says",
-    )
-  })
-})
-
-describe("middleware", () => {
-  it("snapshots the chain and isolates contexts across concurrent client methods", async () => {
-    const ready = Promise.withResolvers<void>()
-    const seen: MiddlewareContext[] = []
-    const observe: Middleware = async (request, next, context) => {
-      const received = await next(request)
-      expect(Object.isFrozen(context)).toBe(true)
-      seen.push(context)
-      return received
-    }
-    const middleware = [observe]
-    const api = createClient(contract, {
-      baseURL: "https://api.test",
-      middleware,
-      fetch: async (request) => {
-        await ready.promise
-        return request.url.endsWith("/events")
-          ? new Response("data: hello\n\n", { headers: { "content-type": "text/event-stream" } })
-          : Response.json({ id: 1, name: "Milo" })
-      },
-    })
-    middleware[0] = () => Promise.reject(new Error("changed configuration"))
-    const fetched = api.fetch("GET /pets/{id}", { params: { id: 1 } })
-    const result = api.result("GET /pets/{id}", { params: { id: 2 } })
-    const reader = api.stream("GET /events", { retry: false }).getReader()
-    const reading = reader.read()
-    ready.resolve()
-    await Promise.all([fetched, result, reading])
-    expect(seen.toSorted((a, b) => a.kind.localeCompare(b.kind))).toStrictEqual([
-      { endpoint: "GET /pets/{id}", kind: "fetch" },
-      { endpoint: "GET /pets/{id}", kind: "result" },
-      { endpoint: "GET /events", kind: "stream" },
-    ])
-    const fetchedResponse = await fetched
-    await fetchedResponse.body?.cancel()
-    await reader.cancel()
-  })
-
-  it.each(["fetch", "result"] as const)(
-    "cleans an undelivered response and preserves a middleware error in %s",
-    async (kind) => {
-      const failure = new Error("after response")
-      const cancel = vi.fn<() => void>()
-      const api = createClient(contract, {
-        baseURL: "https://api.test",
-        middleware: [
-          async (request, next) => {
-            await next(request)
-            throw failure
-          },
-        ],
-        fetch: () => Promise.resolve(new Response(new ReadableStream({ cancel }))),
-      })
-      await expect(api[kind]("GET /pets")).rejects.toBe(failure)
-      expect(cancel).toHaveBeenCalledOnce()
+it("uses form encoding for a whole form query and URL encoding for ordinary parameters", async () => {
+  const { client, requests } = recorder<{
+    "GET /form": ResultOperation<{ query: { foo: string } | string }>
+    "GET /ordinary": ResultOperation<{ query: { foo: string } }>
+  }>({
+    version: 6,
+    endpoints: {
+      "GET /form": { querystring: "application/x-www-form-urlencoded" },
+      "GET /ordinary": {},
     },
-  )
-
-  it.each(["fetch", "result"] as const)(
-    "retires transport and intermediate middleware responses before handing off %s",
-    async (kind) => {
-      const transportCancel = vi.fn<() => void>()
-      const middleCancel = vi.fn<() => void>()
-      const selected = Response.json({ id: 1, name: "Milo" })
-      const api = createClient(contract, {
-        baseURL: "https://api.test",
-        middleware: [
-          async (request, next) => {
-            await next(request)
-            return selected
-          },
-          async (request, next) => {
-            await next(request)
-            return new Response(new ReadableStream({ cancel: middleCancel }))
-          },
-        ],
-        fetch: () => Promise.resolve(new Response(new ReadableStream({ cancel: transportCancel }))),
-      })
-      const answer = await api[kind]("GET /pets/{id}", { params: { id: 1 } })
-      expect(transportCancel).toHaveBeenCalledOnce()
-      expect(middleCancel).toHaveBeenCalledOnce()
-      const data = answer instanceof Response ? await answer.json() : answer.data
-      expect(data).toStrictEqual({ id: 1, name: "Milo" })
-    },
-  )
-
-  it("keeps a selected response body alive when middleware wraps the same stream", async () => {
-    const original = new Response('"kept"', { headers: { "content-type": "application/json" } })
-    const api = createClient(contract, {
-      baseURL: "https://api.test",
-      middleware: [
-        async (request, next) => {
-          const received = await next(request)
-          return new Response(received.body)
-        },
-      ],
-      fetch: () => Promise.resolve(original),
-    })
-    const selected = await api.fetch("GET /pets")
-    expect(selected.body).toBe(original.body)
-    expect(await selected.json()).toBe("kept")
   })
-
-  it("cancels a late next response without canceling the selected response", async () => {
-    const pending = Promise.withResolvers<Response>()
-    const cancel = vi.fn<() => void>()
-    let late: Promise<Response> | undefined
-    let attempts = 0
-    const api = createClient(contract, {
-      baseURL: "https://api.test",
-      middleware: [
-        (request, next) => {
-          const selected = next(request.clone())
-          late = next(request)
-          return selected
-        },
-      ],
-      fetch: () =>
-        ++attempts === 1 ? Promise.resolve(Response.json("selected")) : pending.promise,
-    })
-    const selected = await api.fetch("GET /pets")
-    pending.resolve(new Response(new ReadableStream({ cancel })))
-    await late
-    expect(cancel).toHaveBeenCalledOnce()
-    expect(await selected.json()).toBe("selected")
-  })
-
-  it.each(["fetch", "result"] as const)(
-    "aborts pending %s middleware and retires its late transport response",
-    async (kind) => {
-      const pending = Promise.withResolvers<Response>()
-      const started = Promise.withResolvers<void>()
-      const canceled = Promise.withResolvers<void>()
-      const abort = new AbortController()
-      const failure = { reason: "stop" }
-      const api = createClient(contract, {
-        baseURL: "https://api.test",
-        fetch: () => {
-          started.resolve()
-          return pending.promise
-        },
-      })
-      const result = api[kind]("GET /pets", { signal: abort.signal }).catch(
-        (error: unknown) => error,
-      )
-      await started.promise
-      abort.abort(failure)
-      expect(await result).toBe(failure)
-      pending.resolve(
-        new Response(
-          new ReadableStream({
-            cancel() {
-              canceled.resolve()
-            },
-          }),
-        ),
-      )
-      await canceled.promise
-    },
-  )
-
-  it("blocks a retained next after cancellation even if its request replaces the signal", async () => {
-    const fetch = vi.fn<Fetcher>()
-    const abort = new AbortController()
-    let resume: Fetcher | undefined
-    const api = createClient(contract, {
-      baseURL: "https://api.test",
-      middleware: [
-        (_request, next) => {
-          resume = next
-          return Promise.resolve(Response.json([]))
-        },
-      ],
-      fetch,
-    })
-    const selected = await api.fetch("GET /pets", { signal: abort.signal })
-    const failure = new Error("finished")
-    abort.abort(failure)
-    await expect(resume?.(new Request("https://api.test/pets"))).rejects.toBe(failure)
-    expect(fetch).not.toHaveBeenCalled()
-    await selected.body?.cancel()
-  })
-
-  it("leaves result decoding outside the HTTP middleware error boundary", async () => {
-    const caught = vi.fn<() => void>()
-    const api = createClient(contract, {
-      baseURL: "https://api.test",
-      middleware: [
-        async (request, next) => {
-          try {
-            return await next(request)
-          } catch (error) {
-            caught()
-            throw error
-          }
-        },
-      ],
-      fetch: () =>
-        Promise.resolve(new Response("{bad}", { headers: { "content-type": "application/json" } })),
-    })
-    await expect(api.result("GET /pets")).rejects.toBeInstanceOf(SyntaxError)
-    expect(caught).not.toHaveBeenCalled()
-  })
-
-  it("wraps sending, the first outermost, with the fetch option after the last", async () => {
-    const answered: string[] = []
-    const via = (name: string): Middleware =>
-      defineMiddleware(async (request, next) => {
-        request.headers.append("x-via", name)
-        const response = await next(request)
-        answered.push(name)
-        return response
-      })
-    const { client, sent } = recorder(contract, { middleware: [via("outer"), via("inner")] })
-    await client.fetch("GET /pets")
-    expect(sent().headers.get("x-via")).toBe("outer, inner")
-    expect(answered).toStrictEqual(["inner", "outer"])
-  })
-
-  it("sends what a middleware passes on, and again each time it calls next", async () => {
-    let tries = 0
-    const passed: string[] = []
-    const { client, requests } = recorder(
-      contract,
-      {
-        middleware: [
-          // A retry: the second try sends the request the first one did not use up.
-          async (request, next) => {
-            const first = await next(request.clone())
-            if (first.status !== 503) return first
-            await first.body?.cancel()
-            return next(request)
-          },
-          (request, next) => {
-            passed.push(request.method)
-            return next(new Request(request, { headers: { "x-try": String(passed.length) } }))
-          },
-        ],
-      },
-      () => new Response(null, { status: ++tries === 1 ? 503 : 204 }),
-    )
-    const response = await client.fetch("GET /pets")
-    expect(response.status).toBe(204)
-    expect(passed).toStrictEqual(["GET", "GET"])
-    expect(requests.map((request) => request.headers.get("x-try"))).toStrictEqual(["1", "2"])
-  })
-
-  it("reads the body of the response the middleware pass on", async () => {
-    const seen: unknown[] = []
-    const { client } = recorder(
-      contract,
-      {
-        middleware: [
-          async (request, next) => {
-            const response = await next(request)
-            seen.push(await response.clone().json())
-            return response
-          },
-        ],
-      },
-      () => Response.json({ id: 1, name: "Rex" }),
-    )
-    const { data } = await client.result("GET /pets/{id}", { params: { id: 1 } })
-    expect(data).toStrictEqual({ id: 1, name: "Rex" })
-    expect(seen).toStrictEqual([data])
-  })
-
-  it("takes a middleware's own answer, sending nothing", async () => {
-    const { client, requests } = recorder(contract, {
-      middleware: [() => Promise.resolve(Response.json({ id: 1, name: "Rex" }))],
-    })
-    const { data } = await client.result("GET /pets/{id}", { params: { id: 1 } })
-    expect(data).toStrictEqual({ id: 1, name: "Rex" })
-    expect(requests).toStrictEqual([])
-  })
-
-  it("rejects what a middleware throws", async () => {
-    const { client } = recorder(contract, { middleware: [refuse] })
-    await expect(client.fetch("GET /pets")).rejects.toThrow("no token")
-    await expect(client.result("GET /pets")).rejects.toThrow("no token")
-  })
-
-  it("rejects next, never throws from it, whatever throws inside", async () => {
-    const fallback = defineMiddleware((request, next) =>
-      next(request).catch(() => new Response(null, { status: 503 })),
-    )
-    for (const options of [
-      { middleware: [fallback, refuse] },
-      { middleware: [fallback], fetch: refuse },
-    ]) {
-      const client = createClient(contract, { baseURL: "https://x.test", ...options })
-      // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
-      const response = await client.fetch("GET /pets")
-      expect(response.status).toBe(503)
-    }
-  })
+  await client.fetch("GET /form", { query: { foo: "a + b!~'()*" } })
+  await client.fetch("GET /ordinary", { query: { foo: "a + b!~'()*" } })
+  await client.fetch("GET /form", { query: "foo=a+b" })
+  expect(requests.map((request) => url(request))).toStrictEqual([
+    "/form?foo=a+%2B+b%21%7E%27%28%29*",
+    "/ordinary?foo=a%20%2B%20b%21~%27%28%29%2A",
+    "/form?foo=a+b",
+  ])
 })

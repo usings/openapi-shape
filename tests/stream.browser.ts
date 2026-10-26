@@ -302,7 +302,7 @@ describe("subscription cancellation", () => {
   })
 })
 
-it("retires an unused middleware clone branch before a subscription ends", async () => {
+it("keeps a middleware-owned clone branch readable after response handoff", async () => {
   const original = response("data: live\n\n")
   const api = client({
     fetch: () => Promise.resolve(original),
@@ -316,9 +316,12 @@ it("retires an unused middleware clone branch before a subscription ends", async
   const reader = api.stream("GET /events").getReader()
   expect(await reader.read()).toMatchObject({ value: { data: "live" } })
   const unused = original.body?.getReader()
-  expect(await unused?.read()).toMatchObject({ done: true })
+  expect(await unused?.read()).toMatchObject({
+    value: new TextEncoder().encode("data: live\n\n"),
+    done: false,
+  })
+  await Promise.all([unused?.cancel(), reader.cancel()])
   unused?.releaseLock()
-  await reader.cancel()
 })
 
 it("cleans responses when abort races every transport completion boundary", async () => {

@@ -39,10 +39,12 @@
     "release": "bumpp",
     "build": "tsdown",
     "test": "vitest",
-    "verify": "pnpm test --run && pnpm typecheck && pnpm lint && pnpm format --check",
-    "typecheck": "tsc --noEmit",
+    "test:node": "vitest run --project=node",
+    "test:browser": "vitest run --project=browser",
     "lint": "oxlint",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "typecheck": "tsc --noEmit",
+    "verify": "pnpm test --run && pnpm typecheck && pnpm lint && pnpm format --check"
   },
   "dependencies": {
     "citty": "^0.2.2",
@@ -52,6 +54,7 @@
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@types/node": "^26.6.5",
+    "@vitest/browser-playwright": "^5.0.5",
     "bumpp": "^12.3.0",
     "lefthook": "^2.2.2",
     "oxfmt": "^0.74.0",

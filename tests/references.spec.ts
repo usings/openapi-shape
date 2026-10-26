@@ -1,10 +1,9 @@
-import { createServer } from "node:http"
-import type { AddressInfo } from "node:net"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 import { GenerateError, generate } from "../src/core/index"
 import { codes, declaration, entry, gen, oas } from "./helpers/generate"
+import { withServer } from "./helpers/http"
 import { withFiles } from "./helpers/tmp"
 import { expectPassesTsc } from "./helpers/tsc"
 
@@ -20,27 +19,35 @@ async function errorsOf(promise: Promise<unknown>): Promise<string[]> {
 const claims = (n: number) => ({ $id: `https://spec.test/${n}.json`, type: "number" })
 
 /** Serve documents by path on 127.0.0.1 for the duration of `fn`. */
-async function serving<T>(
+function serving<T>(
   documents: Record<string, object>,
   fn: (origin: string) => Promise<T>,
 ): Promise<T> {
-  const server = createServer((request, response) => {
+  return withServer((request, response) => {
     const path = request.url ?? "/"
     response.setHeader("content-type", "application/json")
     response.end(JSON.stringify(documents[path] ?? {}))
-  })
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve)
-  })
-  try {
-    const { port } = server.address() as AddressInfo
-    return await fn(`http://127.0.0.1:${port}`)
-  } finally {
-    server.close()
-  }
+  }, fn)
 }
 
 describe("reference resolution", () => {
+  it.each(["a~2b", "a~", "a~~0"])("rejects malformed JSON Pointer escapes: %s", async (name) => {
+    const doc = oas("3.1", {
+      components: {
+        schemas: {
+          Root: {
+            $defs: { [name]: { type: "number" } },
+            $ref: `#/components/schemas/Root/$defs/${name}`,
+          },
+        },
+      },
+    })
+    await expect(generate(doc)).rejects.toThrow("invalid JSON Pointer")
+    const root = (doc.components as { schemas: { Root: { $ref: string } } }).schemas.Root
+    root.$ref = `#/components/schemas/Root/$defs/${name.replaceAll("~", "~0")}`
+    expect(declaration(await gen(doc), "Root")).toBe("number")
+  })
+
   describe("references across documents", () => {
     it.each([undefined, "https://schemas.test/value"])(
       "resolves redirected document anchors through retrieval aliases (schema id: %s)",
@@ -470,8 +477,7 @@ describe("reference resolution", () => {
                 properties: { t: { $ref: "defs.json#/$defs/T" } },
                 $defs: { "a~b": { type: "object", properties: { p: nested } } },
               },
-              // A pointer `parsePointer` reads leniently, as the key "a~b".
-              Lib: { $ref: "#/components/schemas/Pet/$defs/a~b" },
+              Lib: { $ref: "#/components/schemas/Pet/$defs/a~0b" },
             },
           },
         }),
@@ -833,25 +839,21 @@ describe("reference resolution", () => {
     })
 
     it("does not let remote documents read local files", async () => {
-      const server = createServer((_, response) => {
-        response.setHeader("content-type", "application/json")
-        response.end(
-          JSON.stringify(
-            oas("3.1", { components: { schemas: { A: { $ref: "file:///etc/hosts" } } } }),
-          ),
-        )
-      })
-      await new Promise<void>((resolve) => {
-        server.listen(0, "127.0.0.1", resolve)
-      })
-      try {
-        const { port } = server.address() as AddressInfo
-        expect(await errorsOf(generate(`http://127.0.0.1:${port}/openapi.json`))).toStrictEqual([
-          "unresolved-ref #/components/schemas/A/$ref",
-        ])
-      } finally {
-        server.close()
-      }
+      await withServer(
+        (_, response) => {
+          response.setHeader("content-type", "application/json")
+          response.end(
+            JSON.stringify(
+              oas("3.1", { components: { schemas: { A: { $ref: "file:///etc/hosts" } } } }),
+            ),
+          )
+        },
+        async (origin) => {
+          expect(await errorsOf(generate(`${origin}/openapi.json`))).toStrictEqual([
+            "unresolved-ref #/components/schemas/A/$ref",
+          ])
+        },
+      )
     })
 
     it("schema references may form cycles through properties", async () => {
@@ -908,35 +910,31 @@ describe("reference discovery", () => {
 
   it("does not let a remote document's $self claim a local file", async () => {
     await withFiles({ "local.json": { type: "integer" } }, async (dir) => {
-      const server = createServer((_, response) => {
-        response.setHeader("content-type", "application/json")
-        response.end(
-          JSON.stringify(
-            oas("3.2", {
-              $self: pathToFileURL(join(dir, "local.json")).href,
-              components: { schemas: { Evil: { type: "string" } } },
-            }),
-          ),
-        )
-      })
-      await new Promise<void>((resolve) => {
-        server.listen(0, "127.0.0.1", resolve)
-      })
-      try {
-        const { port } = server.address() as AddressInfo
-        const doc = oas("3.1", {
-          components: {
-            schemas: {
-              Remote: { $ref: `http://127.0.0.1:${port}/openapi.json#/components/schemas/Evil` },
-              Local: { $ref: "local.json" },
+      await withServer(
+        (_, response) => {
+          response.setHeader("content-type", "application/json")
+          response.end(
+            JSON.stringify(
+              oas("3.2", {
+                $self: pathToFileURL(join(dir, "local.json")).href,
+                components: { schemas: { Evil: { type: "string" } } },
+              }),
+            ),
+          )
+        },
+        async (origin) => {
+          const doc = oas("3.1", {
+            components: {
+              schemas: {
+                Remote: { $ref: `${origin}/openapi.json#/components/schemas/Evil` },
+                Local: { $ref: "local.json" },
+              },
             },
-          },
-        })
-        const code = await gen(doc, { base: join(dir, "openapi.json") })
-        expect(declaration(code, "Local")).toBe("number")
-      } finally {
-        server.close()
-      }
+          })
+          const code = await gen(doc, { base: join(dir, "openapi.json") })
+          expect(declaration(code, "Local")).toBe("number")
+        },
+      )
     })
   })
 

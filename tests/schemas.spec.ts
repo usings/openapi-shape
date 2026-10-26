@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vitest"
 import { generate } from "../src/core/index"
 import { codes, declaration, gen, typeOf, withSchemas } from "./helpers/generate"
-import { expectPassesTsc } from "./helpers/tsc"
+import type { Version } from "./helpers/generate"
+import { expectPassesTsc, typecheck } from "./helpers/tsc"
+
+/** Compare consumer types; spelling and layout are covered by the output snapshots. */
+async function schemaTypes(
+  cases: Array<[unknown, string]>,
+  version: Version = "3.1",
+): Promise<string> {
+  const code = await gen(
+    withSchemas(version, Object.fromEntries(cases.map(([schema], i) => [`S${i}`, schema]))),
+  )
+  return typecheck({
+    "api.ts": code,
+    "use.ts": `import type { Schemas } from "./api"
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false
+type Assert<T extends true> = T
+${cases.map(([, expected], i) => `type Case${i} = Assert<Equal<Schemas.S${i}, ${expected}>>`).join("\n")}
+`,
+  })
+}
 
 // OpenAPI 3.1 and 3.2 Schema Objects are JSON Schema 2020-12.
 
@@ -22,40 +41,44 @@ function level(next: string) {
 
 describe("schema values", () => {
   describe("values", () => {
-    it.each([
-      [true, "unknown"],
-      [false, "never"],
-      [{}, "unknown"],
-      [{ description: "only annotations" }, "unknown"],
-      [{ type: "string" }, "string"],
-      [{ type: "integer" }, "number"],
-      [{ type: "number" }, "number"],
-      [{ type: "boolean" }, "boolean"],
-      [{ type: "null" }, "null"],
-      [{ type: ["string", "null"] }, "string | null"],
-      [{ type: ["integer", "string"] }, "number | string"],
-      [{ type: [] }, "never"],
-    ])("%j → %s", async (schema, expected) => {
-      expect(await typeOf(schema)).toBe(expected)
+    it("projects primitive types", async () => {
+      expect(
+        await schemaTypes([
+          [true, "unknown"],
+          [false, "never"],
+          [{}, "unknown"],
+          [{ description: "only annotations" }, "unknown"],
+          [{ type: "string" }, "string"],
+          [{ type: "integer" }, "number"],
+          [{ type: "number" }, "number"],
+          [{ type: "boolean" }, "boolean"],
+          [{ type: "null" }, "null"],
+          [{ type: ["string", "null"] }, "string | null"],
+          [{ type: ["integer", "string"] }, "number | string"],
+          [{ type: [] }, "never"],
+        ]),
+      ).toBe("")
     })
 
-    it.each([
-      [{ const: "a" }, '"a"'],
-      [{ const: null }, "null"],
-      [{ const: { "kind": "x", "n-1": [1, true] } }, '{ kind: "x"; "n-1": [1, true] }'],
-      [{ enum: ["a", 1, null, false] }, '"a" | 1 | null | false'],
-      [{ enum: [true, false] }, "boolean"],
-      [{ enum: ["a", "a"] }, '"a"'],
-      [{ enum: [] }, "never"],
-      // `type` and `enum`/`const` both apply: values of other types are impossible.
-      [{ type: "string", enum: ["a", 1, null] }, '"a"'],
-      [{ type: ["string", "null"], enum: ["a", null] }, '"a" | null'],
-      [{ type: "integer", enum: [1, 1.5] }, "1"],
-      [{ type: "string", const: 1 }, "never"],
-      [{ const: "a", enum: ["a", "b"] }, '"a"'],
-      [{ const: "c", enum: ["a", "b"] }, "never"],
-    ])("%j → %s", async (schema, expected) => {
-      expect(await typeOf(schema)).toBe(expected)
+    it("projects literals and intersects their declared types", async () => {
+      expect(
+        await schemaTypes([
+          [{ const: "a" }, '"a"'],
+          [{ const: null }, "null"],
+          [{ const: { "kind": "x", "n-1": [1, true] } }, '{ kind: "x"; "n-1": [1, true] }'],
+          [{ enum: ["a", 1, null, false] }, '"a" | 1 | null | false'],
+          [{ enum: [true, false] }, "boolean"],
+          [{ enum: ["a", "a"] }, '"a"'],
+          [{ enum: [] }, "never"],
+          // `type` and `enum`/`const` both apply: values of other types are impossible.
+          [{ type: "string", enum: ["a", 1, null] }, '"a"'],
+          [{ type: ["string", "null"], enum: ["a", null] }, '"a" | null'],
+          [{ type: "integer", enum: [1, 1.5] }, "1"],
+          [{ type: "string", const: 1 }, "never"],
+          [{ const: "a", enum: ["a", "b"] }, '"a"'],
+          [{ const: "c", enum: ["a", "b"] }, "never"],
+        ]),
+      ).toBe("")
     })
 
     it("keeps formats as documentation and projects binary values as JSON strings", async () => {
@@ -78,44 +101,46 @@ describe("schema values", () => {
   })
 
   describe("arrays", () => {
-    it.each([
-      [{ type: "array", items: { type: "string" } }, "string[]"],
-      [{ type: "array" }, "unknown[]"],
-      [
-        { type: "array", items: { anyOf: [{ type: "string" }, { type: "number" }] } },
-        "(string | number)[]",
-      ],
-      [{ type: "array", items: false }, "[]"],
-      // prefixItems constrain only the elements that exist; minItems makes them required.
-      [
-        { type: "array", prefixItems: [{ type: "string" }, { type: "number" }] },
-        "[string?, number?, ...unknown[]]",
-      ],
-      [
-        {
-          type: "array",
-          prefixItems: [{ type: "string" }, { type: "number" }],
-          minItems: 1,
-          items: false,
-        },
-        "[string, number?]",
-      ],
-      [
-        {
-          type: "array",
-          prefixItems: [{ type: "string" }],
-          minItems: 1,
-          items: { type: "boolean" },
-        },
-        "[string, ...boolean[]]",
-      ],
-      // The pre-2020-12 tuple form is unambiguous, so it is read as one.
-      [
-        { type: "array", items: [{ type: "string" }], additionalItems: false, minItems: 1 },
-        "[string]",
-      ],
-    ])("%j → %s", async (schema, expected) => {
-      expect(await typeOf(schema)).toBe(expected)
+    it("projects arrays, optional tuple items and rest items", async () => {
+      expect(
+        await schemaTypes([
+          [{ type: "array", items: { type: "string" } }, "string[]"],
+          [{ type: "array" }, "unknown[]"],
+          [
+            { type: "array", items: { anyOf: [{ type: "string" }, { type: "number" }] } },
+            "(string | number)[]",
+          ],
+          [{ type: "array", items: false }, "[]"],
+          // prefixItems constrain only the elements that exist; minItems makes them required.
+          [
+            { type: "array", prefixItems: [{ type: "string" }, { type: "number" }] },
+            "[string?, number?, ...unknown[]]",
+          ],
+          [
+            {
+              type: "array",
+              prefixItems: [{ type: "string" }, { type: "number" }],
+              minItems: 1,
+              items: false,
+            },
+            "[string, number?]",
+          ],
+          [
+            {
+              type: "array",
+              prefixItems: [{ type: "string" }],
+              minItems: 1,
+              items: { type: "boolean" },
+            },
+            "[string, ...boolean[]]",
+          ],
+          // The pre-2020-12 tuple form is unambiguous, so it is read as one.
+          [
+            { type: "array", items: [{ type: "string" }], additionalItems: false, minItems: 1 },
+            "[string]",
+          ],
+        ]),
+      ).toBe("")
     })
   })
 
@@ -143,28 +168,30 @@ describe("schema values", () => {
       )
     })
 
-    it.each([
-      [{ type: "object" }, "{\n  [key: string]: unknown\n}"],
-      [{ type: "object", additionalProperties: true }, "{\n  [key: string]: unknown\n}"],
-      [
-        { type: "object", additionalProperties: { type: "string" } },
-        "{\n  [key: string]: string\n}",
-      ],
-      [
-        { type: "object", properties: { a: { type: "string" } }, additionalProperties: false },
-        "{\n  a?: string\n}",
-      ],
-      // An index signature must admit every declared property, including absent optional ones.
-      [
-        {
-          type: "object",
-          properties: { a: { type: "boolean" } },
-          additionalProperties: { type: "string" },
-        },
-        "{\n  a?: boolean\n  [key: string]: string | boolean | undefined\n}",
-      ],
-    ])("%j", async (schema, expected) => {
-      expect(await typeOf(schema)).toBe(expected)
+    it("projects object index signatures", async () => {
+      expect(
+        await schemaTypes([
+          [{ type: "object" }, "{\n  [key: string]: unknown\n}"],
+          [{ type: "object", additionalProperties: true }, "{\n  [key: string]: unknown\n}"],
+          [
+            { type: "object", additionalProperties: { type: "string" } },
+            "{\n  [key: string]: string\n}",
+          ],
+          [
+            { type: "object", properties: { a: { type: "string" } }, additionalProperties: false },
+            "{\n  a?: string\n}",
+          ],
+          // An index signature must admit every declared property, including absent optional ones.
+          [
+            {
+              type: "object",
+              properties: { a: { type: "boolean" } },
+              additionalProperties: { type: "string" },
+            },
+            "{\n  a?: boolean\n  [key: string]: string | boolean | undefined\n}",
+          ],
+        ]),
+      ).toBe("")
     })
 
     it("quotes property names that are not identifiers", async () => {
@@ -198,16 +225,21 @@ describe("OpenAPI compatibility", () => {
   // OpenAPI 3.0 Schema Objects: an extended subset of JSON Schema Wright-00.
 
   describe("nullable: the schema also admits null", () => {
-    it.each([
-      [{ type: "string", nullable: true }, "string | null"],
-      [
-        { type: "object", nullable: true, properties: { a: { type: "integer" } } },
-        "{ a?: number } | null",
-      ],
-      [{ type: "string", nullable: true, enum: ["a", null] }, '"a" | null'],
-      [{ type: "string", nullable: false }, "string"],
-    ])("%j → %s", async (schema, expected) => {
-      expect(await typeOf(schema, "3.0")).toBe(expected)
+    it("projects nullable values in OpenAPI 3.0", async () => {
+      expect(
+        await schemaTypes(
+          [
+            [{ type: "string", nullable: true }, "string | null"],
+            [
+              { type: "object", nullable: true, properties: { a: { type: "integer" } } },
+              "{ a?: number } | null",
+            ],
+            [{ type: "string", nullable: true, enum: ["a", null] }, '"a" | null'],
+            [{ type: "string", nullable: false }, "string"],
+          ],
+          "3.0",
+        ),
+      ).toBe("")
     })
 
     it("admits null where 3.0.3+ would not", async () => {

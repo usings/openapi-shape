@@ -1,9 +1,31 @@
+import { playwright } from "@vitest/browser-playwright"
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
   test: {
-    include: ["tests/**/*.test.ts"],
-    // Many tests launch tsc; allow for compiler startup and contention on CI runners.
-    testTimeout: 30_000,
+    projects: [
+      {
+        test: {
+          name: "node",
+          environment: "node",
+          include: ["tests/**/*.spec.ts"],
+          testTimeout: 30_000,
+        },
+      },
+      {
+        test: {
+          name: "browser",
+          include: ["tests/**/*.browser.ts"],
+          globalSetup: ["tests/helpers/browser.ts"],
+          testTimeout: 30_000,
+          browser: {
+            enabled: true,
+            headless: true,
+            provider: playwright(),
+            instances: [{ browser: "chromium" }],
+          },
+        },
+      },
+    ],
   },
 })

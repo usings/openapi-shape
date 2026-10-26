@@ -1,29 +1,8 @@
-import { createServer } from "node:http"
-import type { RequestListener, ServerResponse } from "node:http"
-import type { AddressInfo } from "node:net"
+import type { ServerResponse } from "node:http"
 import { expect, it } from "vitest"
 import { createClient } from "../src/client"
 import type { ClientOptions, StreamMessage } from "../src/client"
-
-async function withServer(
-  handler: RequestListener,
-  run: (url: string) => Promise<void>,
-): Promise<void> {
-  const server = createServer(handler)
-  try {
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject)
-      server.listen(0, "127.0.0.1", resolve)
-    })
-    const { port } = server.address() as AddressInfo
-    await run(`http://127.0.0.1:${port}`)
-  } finally {
-    server.closeAllConnections()
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve())
-    })
-  }
-}
+import { withServer } from "./helpers/http"
 
 function events(baseURL: string, options: ClientOptions = {}) {
   return createClient<{
@@ -33,7 +12,7 @@ function events(baseURL: string, options: ClientOptions = {}) {
     }
   }>(
     {
-      version: 5,
+      version: 6,
       endpoints: {
         "POST /events": { stream: ["text/event-stream"], contentType: "multipart/form-data" },
       },
@@ -159,7 +138,7 @@ it("reads native JSONL HTTP chunks and the final record without a newline", asyn
       const api = createClient<{
         "GET /records": { responses: { 200: { content: { "application/jsonl": unknown[] } } } }
       }>(
-        { version: 5, endpoints: { "GET /records": { stream: ["application/jsonl"] } } },
+        { version: 6, endpoints: { "GET /records": { stream: ["application/jsonl"] } } },
         { baseURL: url },
       )
       const items: unknown[] = []
@@ -167,4 +146,32 @@ it("reads native JSONL HTTP chunks and the final record without a newline", asyn
       expect(items).toStrictEqual([{ text: "雪😀" }, null])
     },
   )
+})
+
+it("delivers a native JSON sequence record before EOF and cancels its live response", async () => {
+  const closed = Promise.withResolvers<void>()
+  let requests = 0
+  await withServer(
+    (request, response) => {
+      requests++
+      expect(request.headers.accept).toBe("application/json-seq")
+      response.on("close", () => closed.resolve())
+      response.writeHead(200, { "content-type": "application/json-seq" })
+      response.write('\x1e{\n"text":"雪😀"\n}\n')
+    },
+    async (url) => {
+      const api = createClient<{
+        "GET /records": { responses: { 200: { content: { "application/json-seq": unknown[] } } } }
+      }>(
+        { version: 6, endpoints: { "GET /records": { stream: ["application/json-seq"] } } },
+        { baseURL: url },
+      )
+      const reader = api.stream("GET /records").getReader()
+      expect(await reader.read()).toMatchObject({ value: { text: "雪😀" } })
+      await reader.cancel("finished")
+      await closed.promise
+      expect(await reader.read()).toMatchObject({ done: true })
+    },
+  )
+  expect(requests).toBe(1)
 })

@@ -20,7 +20,9 @@ type Read = "json" | "text" | "blob"
  */
 type Write = "value" | "string" | "ready"
 
-const MEDIA: Array<[mediaType: string, read: Read, write: Write, stream?: "sse" | "ndjson"]> = [
+const MEDIA: Array<
+  [mediaType: string, read: Read, write: Write, stream?: "sse" | "jsonl" | "json-seq"]
+> = [
   ["application/json", "json", "value"],
   ["application/problem+json", "json", "value"],
   ["APPLICATION/Problem+JSON; p=*", "json", "value"],
@@ -31,9 +33,9 @@ const MEDIA: Array<[mediaType: string, read: Read, write: Write, stream?: "sse" 
   ["text/event-stream", "text", "ready", "sse"],
   ["application/x-www-form-urlencoded", "blob", "value"],
   ["multipart/form-data", "blob", "value"],
-  ["application/jsonl", "json", "ready", "ndjson"],
-  ["APPLICATION/X-NDJSON; charset=utf-8", "json", "ready", "ndjson"],
-  ["application/json-seq", "blob", "ready"],
+  ["application/jsonl", "json", "ready", "jsonl"],
+  ["APPLICATION/X-NDJSON; charset=utf-8", "json", "ready", "jsonl"],
+  ["application/json-seq", "json", "ready", "json-seq"],
   ["application/example+json-seq", "blob", "ready"],
   ["application/xml", "blob", "ready"],
   ["application/octet-stream", "blob", "ready"],
@@ -47,7 +49,8 @@ const description = oas("3.1", {
     MEDIA.map(([mediaType, , , stream], i) => {
       const content = {
         [mediaType]: {
-          schema: stream === "ndjson" ? { type: "array", items: recordSchema } : recordSchema,
+          schema:
+            stream && stream !== "sse" ? { type: "array", items: recordSchema } : recordSchema,
         },
       }
       return [
@@ -183,7 +186,12 @@ describe("media types", () => {
           sent.push(request)
           const read = MEDIA[i][1]
           const headers = { "content-type": mediaType }
-          const body = stream === "sse" ? "data: x\n\n" : BODY[read]
+          const body =
+            stream === "sse"
+              ? "data: x\n\n"
+              : stream === "json-seq"
+                ? `\x1e${BODY[read]}\n`
+                : BODY[read]
           return Promise.resolve(new Response(body, { status: 200, headers }))
         },
       })
@@ -595,10 +603,11 @@ void api.stream("POST /r", { body: [1, 2] })
     ],
     [{ schema: { type: "integer" } }, "unknown"],
     [{}, "unknown"],
-  ])("distinguishes whole sequence schemas from item schemas: %j", async (media, expected) => {
-    expect(
-      await contentTypeErrors("application/x-ndjson", media, expected, "3.2", "EndpointStreamItem"),
-    ).toBe("")
+  ])("distinguishes whole sequence schemas from item schemas: %j", async (schema, expected) => {
+    for (const media of ["application/x-ndjson", "application/json-seq"]) {
+      // oxlint-disable-next-line no-await-in-loop -- each media independently checks generated item types
+      expect(await contentTypeErrors(media, schema, expected, "3.2", "EndpointStreamItem")).toBe("")
+    }
   })
 
   it("preserves referenced whole sequence schemas and gives itemSchema precedence", async () => {
@@ -695,7 +704,9 @@ const items: Equal<EndpointStreamItem<Endpoints, "GET /items">, { id: number }> 
       }),
     )
     const { endpoints } = await contractOf(code)
-    expect(endpoints["GET /streams"]).toStrictEqual({ stream: [jsonl, sse, ndjson] })
+    expect(endpoints["GET /streams"]).toStrictEqual({
+      stream: [jsonl, sse, ndjson, "application/json-seq"],
+    })
     expect(endpoints["GET /fallback"]).toStrictEqual({ stream: [ndjson] })
     expect(endpoints["HEAD /head"]).toStrictEqual({})
     expect(endpoints["GET /shadowed"]).toStrictEqual({})

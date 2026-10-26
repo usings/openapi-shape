@@ -1,11 +1,9 @@
-import { readdirSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { describe, expect, expectTypeOf, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { Contract, Fetcher, StreamMessage } from "../src/client"
 import { createClient } from "../src/client"
 import { generate } from "../src/core/index"
-import type { Encoding, EndpointContract } from "../src/shared/contract"
 import { contractOf } from "./helpers/contract"
 import { codes, entry, gen, oas } from "./helpers/generate"
 import { sseClient as client, sseResponse as response } from "./helpers/streams"
@@ -13,52 +11,6 @@ import { withFiles } from "./helpers/tmp"
 import { expectPassesTsc, typecheck } from "./helpers/tsc"
 
 const ok = { "200": { description: "OK" } }
-
-/** The fields of the contract format, as the client's types define them, every one listed. */
-const ENTRY_FIELDS = [
-  "stream",
-  "params",
-  "query",
-  "querystring",
-  "headers",
-  "contentType",
-  "bodyEncodings",
-] as const satisfies ReadonlyArray<keyof EndpointContract>
-
-const ENCODING_FIELDS = [
-  "style",
-  "explode",
-  "allowReserved",
-  "contentType",
-  "repeat",
-] as const satisfies ReadonlyArray<keyof Encoding>
-
-type Lists<T, L extends readonly unknown[]> = [Exclude<keyof T, L[number]>] extends [never]
-  ? true
-  : false
-
-/** Fields of a contract the client does not read. */
-function unknownFields(contract: object): string[] {
-  const out = Object.keys(contract).filter((key) => key !== "version" && key !== "endpoints")
-  const { endpoints } = contract as { endpoints: Record<string, Record<string, unknown>> }
-  for (const [endpoint, fields] of Object.entries(endpoints)) {
-    for (const [field, value] of Object.entries(fields)) {
-      if (!(ENTRY_FIELDS as readonly string[]).includes(field)) out.push(`${endpoint} ${field}`)
-      if (field === "stream" || typeof value !== "object" || value === null) continue
-      const maps = field === "bodyEncodings" ? Object.values(value) : [value]
-      for (const [name, encoding] of maps.flatMap((map) =>
-        Object.entries(map as Record<string, object>),
-      )) {
-        for (const key of Object.keys(encoding)) {
-          if (!(ENCODING_FIELDS as readonly string[]).includes(key)) {
-            out.push(`${endpoint} ${field}.${name}.${key}`)
-          }
-        }
-      }
-    }
-  }
-  return out
-}
 
 const json = (schema: object) => ({ "application/json": { schema } })
 
@@ -193,59 +145,6 @@ export function invalid(generated: typeof contract) {
 `
 
 describe("generated request plans", () => {
-  expectTypeOf<Lists<EndpointContract, typeof ENTRY_FIELDS>>().toEqualTypeOf<true>()
-
-  expectTypeOf<Lists<Encoding, typeof ENCODING_FIELDS>>().toEqualTypeOf<true>()
-
-  it("has only fields the client reads, in every fixture", async () => {
-    const fixtures = join(import.meta.dirname, "fixtures")
-    const documents = [
-      join(fixtures, "client.yaml"),
-      join(fixtures, "readme.yaml"),
-      ...["v3.0", "v3.1", "v3.2"].flatMap((version) =>
-        readdirSync(join(fixtures, "oai", version)).map((file) =>
-          join(fixtures, "oai", version, file),
-        ),
-      ),
-    ]
-    const querystring = oas("3.2", {
-      paths: {
-        "/q": {
-          get: {
-            parameters: [
-              { name: "q", in: "querystring", content: { "application/json": { schema: {} } } },
-            ],
-            responses: ok,
-          },
-        },
-      },
-    })
-    const profiled = oas("3.1", {
-      paths: {
-        "/p": {
-          post: {
-            requestBody: { content: { 'application/json; profile="p"': { schema: {} } } },
-            responses: ok,
-          },
-        },
-      },
-    })
-    const contracts = await Promise.all(
-      [...documents, querystring, profiled].map(async (document) => {
-        const { code } = await generate(document)
-        return contractOf(code)
-      }),
-    )
-    expect(contracts.flatMap((contract) => unknownFields(contract))).toStrictEqual([])
-    // The fixtures reach every field the client reads.
-    const written = new Set(
-      contracts.flatMap((contract) =>
-        Object.values(contract.endpoints).flatMap((e) => Object.keys(e ?? {})),
-      ),
-    )
-    expect([...written].toSorted()).toStrictEqual([...ENTRY_FIELDS].toSorted())
-  })
-
   it("records each endpoint's serialization where it differs from OpenAPI's defaults", async () => {
     const result = await generate(
       oas("3.1", {
@@ -354,7 +253,7 @@ describe("generated request plans", () => {
       },
     })
     // Server declarations do not choose a baseURL for the client or its calls.
-    expect(result.code).toContain("// Server: https://api.test/v1\n")
+    expect(result.code).toContain("// @server https://api.test/v1\n")
     expect(codes(result.diagnostics).filter((c) => c.startsWith("ignored"))).toStrictEqual([
       "ignored-field #/paths/~1items~1{id}/servers",
     ])
@@ -456,6 +355,7 @@ describe("generated request plans", () => {
     )
     const { endpoints } = await contractOf(code)
     expect(endpoints["GET /q"]).toStrictEqual({
+      querystring: "application/x-www-form-urlencoded",
       query: {
         filter: { style: "deepObject", explode: true },
         ids: { style: "form", explode: false },

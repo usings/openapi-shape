@@ -95,6 +95,45 @@ const directionalPost = (schema: unknown) => ({
 })
 
 describe("transport and direction projections", () => {
+  it("keeps raw media content as Blob while projecting schema binary annotations as strings", async () => {
+    const code = await gen(
+      oas("3.1", {
+        components: { schemas: { Blob: { type: "string" }, Bytes: binary } },
+        paths: {
+          "/file": {
+            post: {
+              requestBody: {
+                content: {
+                  "application/octet-stream": { schema: ref("Bytes") },
+                  "application/json": { schema: ref("Bytes") },
+                  "multipart/form-data": {
+                    schema: { type: "object", properties: { file: ref("Bytes") } },
+                  },
+                },
+              },
+              responses: {
+                "200": { description: "File", content: { "image/png": { schema: ref("Bytes") } } },
+              },
+            },
+          },
+        },
+      }),
+    )
+    expect(entry(code, "POST /file")).toContain('"image/png": Blob')
+    expect(declaration(code, "Bytes")).toContain("string")
+    await expectPassesTsc(
+      code,
+      `
+import type { Endpoints, Schemas } from "./file0"
+export const response: Endpoints["POST /file"]["responses"]["200"]["content"]["image/png"] = new Blob([])
+export const request: NonNullable<Endpoints["POST /file"]["body"]>["application/octet-stream"] = new Blob([])
+export const json: Schemas.Bytes = "encoded"
+// @ts-expect-error Raw media content is not a JSON string projection.
+export const invalid: typeof response = "encoded"
+`,
+    )
+  })
+
   describe("readOnly and writeOnly: `required` applies to one side only", () => {
     it("emits request-side variants where requiredness differs, transitively", async () => {
       const code = await gen(readWriteDoc("3.0"))
