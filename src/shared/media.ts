@@ -7,19 +7,23 @@ export function mediaTypeEssence(mediaType: string): string {
     .toLowerCase()
 }
 
+const streamFormats = {
+  "text/event-stream": "sse",
+  "application/jsonl": "jsonl",
+  "application/x-ndjson": "jsonl",
+  "application/json-seq": "json-seq",
+} as const
+
+/** Media essences supported by both stream selection types and runtime decoding. */
+export type StreamingEssence = keyof typeof streamFormats
+type StreamFormat = (typeof streamFormats)[StreamingEssence]
+
 /** The streaming formats this client decodes. */
-export function streamFormat(mediaType: string): "sse" | "jsonl" | "json-seq" | undefined {
-  switch (mediaTypeEssence(mediaType)) {
-    case "text/event-stream":
-      return "sse"
-    case "application/jsonl":
-    case "application/x-ndjson":
-      return "jsonl"
-    case "application/json-seq":
-      return "json-seq"
-    default:
-      return undefined
-  }
+export function streamFormat(mediaType: string): StreamFormat | undefined {
+  const essence = mediaTypeEssence(mediaType)
+  return Object.hasOwn(streamFormats, essence)
+    ? streamFormats[essence as StreamingEssence]
+    : undefined
 }
 
 /** `…/json` and `…/…+json`, from an already normalized essence. */

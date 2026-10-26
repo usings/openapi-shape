@@ -1,3 +1,4 @@
+import type { StreamingEssence } from "../shared/media"
 import type { StreamMessage } from "./sse-parser"
 
 /**
@@ -74,12 +75,6 @@ export type StreamEndpoint<E> = {
 
 /** Endpoints whose bodies result() can read to completion. */
 export type ResultEndpoint<E> = Exclude<Endpoint<E>, StreamEndpoint<E>>
-
-type StreamingEssence =
-  | "text/event-stream"
-  | "application/jsonl"
-  | "application/x-ndjson"
-  | "application/json-seq"
 
 type StreamsIn<Shape> = Shape extends { content: infer Content }
   ? {
