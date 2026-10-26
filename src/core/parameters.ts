@@ -1,5 +1,6 @@
 import { mergeAnnotations, objectAnnotations, schemaAnnotations } from "./annotations"
 import type { BuildContext } from "./build-context"
+import { selectParameterValue } from "./content-sources"
 import { typeOfContent } from "./content-types"
 import type { DocumentNode } from "./documents"
 import { encodingOf } from "./encoding"
@@ -8,14 +9,10 @@ import { classifyMediaType } from "./media-types"
 import type { Annotations, Field, Operation, Type } from "./model"
 import { UNKNOWN } from "./model"
 import { isRecord } from "./object"
-import { selectParameters } from "./operation-rules"
+import { selectParameterSources } from "./operation-sources"
 import type { Resolved } from "./references"
-import { resolveObject } from "./references"
+import { reportSourceIssues, resolveObject } from "./references"
 import type { SchemaBuilder } from "./schemas"
-
-const LOCATIONS = new Set(["path", "query", "header", "cookie"])
-// "SHALL be ignored" (all versions, Parameter Object `name`).
-const IGNORED_HEADERS = new Set(["accept", "content-type", "authorization"])
 
 type Location = "path" | "query" | "header" | "cookie"
 /** The locations the client sends parameters in, and so encodes them for. */
@@ -34,47 +31,12 @@ export class ParameterBuilder {
   ) {}
 
   parameters(shared: DocumentNode | undefined, own: DocumentNode) {
-    const byKey = new Map<string, { at: Resolved; value: Record<string, unknown> }>()
-    for (const list of [shared, own]) {
-      if (list === undefined || !Array.isArray(list.value)) continue
-      const local = new Set<string>()
-      list.value.forEach((_, i) => {
-        const at = resolveObject(this.context, this.context.documents.child(list, i))
-        if (at === undefined) return
-        const value = at.node.value
-        if (!isRecord(value) || typeof value.name !== "string" || typeof value.in !== "string") {
-          this.context.warn(
-            "invalid-parameter",
-            'A parameter needs string "name" and "in" fields',
-            at.node,
-          )
-          return
-        }
-        // `in: querystring` is 3.2's, applied in earlier versions too.
-        const location = value.in
-        if (!LOCATIONS.has(location) && location !== "querystring") {
-          this.context.warn(
-            "invalid-parameter",
-            `Unknown parameter location "${location}"`,
-            at.node,
-            "in",
-          )
-          return
-        }
-        if (location === "header" && IGNORED_HEADERS.has(value.name.toLowerCase())) return
-        // Header names are case-insensitive; other parameter names are not.
-        const key = `${location}:${location === "header" ? value.name.toLowerCase() : value.name}`
-        if (local.has(key)) {
-          this.context.warn(
-            "invalid-parameter",
-            `Duplicate ${location} parameter "${value.name}"`,
-            at.node,
-          )
-        }
-        local.add(key)
-        byKey.set(key, { at, value })
-      })
-    }
+    const { parameters, selected, issues } = selectParameterSources(
+      this.context.documents,
+      shared,
+      own,
+    )
+    reportSourceIssues(this.context, issues)
 
     const out = {
       path: [] as Field[],
@@ -83,9 +45,8 @@ export class ParameterBuilder {
       cookie: [] as Field[],
       querystring: undefined as Operation["querystring"],
     }
-    const selected = new Set(selectParameters(byKey.values()))
     let ignoredQuery = false
-    for (const parameter of byKey.values()) {
+    for (const parameter of parameters) {
       const { at, value } = parameter
       if (!selected.has(parameter)) {
         if (value.in === "query") ignoredQuery = true
@@ -162,8 +123,9 @@ export class ParameterBuilder {
         node,
       )
     }
-    if (hasSchema) return this.schemas.type(this.context.documents.child(node, "schema"))
-    if (content.length > 0) {
+    const source = selectParameterValue(this.context.documents, node)
+    if (source.kind === "schema") return this.schemas.type(source.node)
+    if (source.kind === "content") {
       if (content.length > 1) {
         this.context.warn(
           "invalid-parameter",
@@ -172,13 +134,15 @@ export class ParameterBuilder {
           "content",
         )
       }
-      const media = resolveObject(
-        this.context,
-        this.context.documents.child(node, "content", content[0]),
-      )
+      const media = resolveObject(this.context, source.node)
       if (media === undefined) return UNKNOWN
       // The 3.2 querystring uses body encodings, but raw media still travels as URL text.
-      const type = typeOfContent(this.schemas, media.node, content[0], value.in !== "querystring")
+      const type = typeOfContent(
+        this.schemas,
+        media.node,
+        source.mediaType,
+        value.in !== "querystring",
+      )
       return type.kind === "blob" ? { kind: "string" } : type
     }
     this.context.warn("invalid-parameter", `A ${what} needs "schema" or "content"`, node)

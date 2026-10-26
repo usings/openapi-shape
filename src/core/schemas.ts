@@ -1,6 +1,6 @@
 import { schemaAnnotations } from "./annotations"
 import type { BuildContext } from "./build-context"
-import { narrowDiscriminated, parentDiscriminators } from "./discriminators"
+import { createDiscriminatorAnalysis } from "./discriminators"
 import { componentNameOf, identity } from "./document-nodes"
 import type { DocumentNode } from "./documents"
 import { parsePointer } from "./json-pointer"
@@ -42,6 +42,7 @@ interface DeclarationState {
  */
 export class SchemaBuilder {
   readonly declarations: Declaration[] = []
+  private readonly discriminators: ReturnType<typeof createDiscriminatorAnalysis>
   private readonly byIdentity = new Map<string, DeclarationState>()
   private readonly states = new Map<Declaration, DeclarationState>()
   private readonly queue: DeclarationState[] = []
@@ -53,7 +54,9 @@ export class SchemaBuilder {
   constructor(
     readonly context: BuildContext,
     private readonly repeated = new Set<string>(),
-  ) {}
+  ) {
+    this.discriminators = createDiscriminatorAnalysis(context)
+  }
 
   /** Declare every `components.schemas` entry of the entry document, in order. */
   declareComponents(): void {
@@ -85,7 +88,12 @@ export class SchemaBuilder {
       if (state.componentName !== undefined) {
         const selfIds = [identity(state.node)]
         if (state.origin) selfIds.push(identity(state.origin))
-        type = parentDiscriminators(this, state.node, state.componentName, type, selfIds)
+        type = this.discriminators.parentDiscriminators(
+          state.node,
+          state.componentName,
+          type,
+          selfIds,
+        )
       }
       state.decl.type = type
       state.decl.location = this.context.documents.locate(state.node.document, state.node.pointer)
@@ -166,7 +174,7 @@ export class SchemaBuilder {
         this.type(this.context.documents.child(node, keyword, i)),
       )
       if (keyword === "allOf") parts.push(...types)
-      else parts.push(union(narrowDiscriminated(this, node, keyword, types)))
+      else parts.push(union(this.discriminators.narrowDiscriminated(node, keyword, types)))
     }
     parts.push(this.conditional(node, schema))
     return this.intersect(parts, node)

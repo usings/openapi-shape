@@ -1,10 +1,10 @@
+import { selectContentSource, selectParameterValue } from "./content-sources"
 import { componentNameOf, identity } from "./document-nodes"
 import type { DocumentNode, DocumentSet } from "./documents"
-import { classifyMediaType } from "./media-types"
 import { isRecord } from "./object"
-import { METHODS, selectParameters } from "./operation-rules"
-import { referencesOf } from "./references"
-import { aliasReference, describesRawBytes } from "./schema-rules"
+import { selectOperations, selectParameterSources, selectPathItem } from "./operation-sources"
+import { inspectObject, referencesOf } from "./references"
+import { aliasReference } from "./schema-rules"
 
 /**
  * Discover the reference graph before compiling types. Work items describe semantic positions,
@@ -79,21 +79,14 @@ class ReferenceDiscovery {
 
   /** Undefined means loading; null means invalid (reported during compilation). */
   private object(node: DocumentNode): DocumentNode | null | undefined {
-    const seen = new Set<string>()
-    let current = node
-    while (isRecord(current.value) && typeof current.value.$ref === "string") {
-      if (seen.has(identity(current))) return null
-      seen.add(identity(current))
-      const result = this.documents.resolve(current.value.$ref, current)
-      if (result.kind === "pending") return undefined
-      if (result.kind === "error") {
-        // A later dictionary promotion may expose a previously missing anchor.
-        this.retry = true
-        return null
-      }
-      current = result.node
+    const result = inspectObject(this.documents, node)
+    if (result.kind === "pending") return undefined
+    if (result.kind === "error") {
+      // A later dictionary promotion may expose a previously missing anchor.
+      if (result.issue.code === "unresolved-ref") this.retry = true
+      return null
     }
-    return current
+    return result.value.node
   }
 
   private reference(node: DocumentNode, keyword: string, ref: string, compile = true): void {
@@ -244,31 +237,13 @@ class ReferenceDiscovery {
 
   private pathItem(node: DocumentNode): void {
     this.task("path-item", node, () => {
-      const fields = new Map<string, DocumentNode>()
-      const seen = new Set<string>()
-      let current = node
-      while (isRecord(current.value)) {
-        if (seen.has(identity(current))) return true
-        seen.add(identity(current))
-        for (const key of Object.keys(current.value)) {
-          if (!fields.has(key)) fields.set(key, this.documents.child(current, key))
-        }
-        if (typeof current.value.$ref !== "string") break
-        const result = this.documents.resolve(current.value.$ref, current)
-        if (result.kind !== "found") return false
-        current = result.node
-      }
+      const result = selectPathItem(this.documents, node)
+      if (result.kind === "pending") return false
+      if (result.kind === "error") return result.issue.code === "circular-ref"
+      const { fields } = result.value
       const shared = fields.get("parameters")
-      for (const method of METHODS) {
-        const operation = fields.get(method)
-        if (operation) this.operation(operation, shared)
-      }
-      const additional = fields.get("additionalOperations")
-      if (additional)
-        this.each(additional, (operation) => {
-          const name = operation.pointer.slice(operation.pointer.lastIndexOf("/") + 1)
-          if (!METHODS.includes(name.toLowerCase())) this.operation(operation, shared)
-        })
+      for (const [, operation] of selectOperations(this.documents, fields).methods)
+        this.operation(operation, shared)
       return true
     })
   }
@@ -276,30 +251,14 @@ class ReferenceDiscovery {
   private operation(node: DocumentNode, shared?: DocumentNode): void {
     this.task(`operation:${shared ? identity(shared) : ""}`, node, () => {
       if (!isRecord(node.value)) return true
-      const parameters = new Map<string, DocumentNode>()
-      let pending = false
-      for (const list of [shared, this.documents.child(node, "parameters")]) {
-        if (!list || !Array.isArray(list.value)) continue
-        for (const [i] of list.value.entries()) {
-          const target = this.object(this.documents.child(list, i))
-          if (target === undefined) pending = true
-          if (!target || !isRecord(target.value)) continue
-          const value = target.value
-          if (typeof value.name !== "string" || typeof value.in !== "string") continue
-          if (!["path", "query", "header", "cookie", "querystring"].includes(value.in)) continue
-          if (
-            value.in === "header" &&
-            ["accept", "content-type", "authorization"].includes(value.name.toLowerCase())
-          )
-            continue
-          parameters.set(
-            `${value.in}:${value.in === "header" ? value.name.toLowerCase() : value.name}`,
-            target,
-          )
-        }
-      }
-      if (!pending)
-        for (const target of selectParameters(parameters.values())) this.parameter(target)
+      const selection = selectParameterSources(
+        this.documents,
+        shared,
+        this.documents.child(node, "parameters"),
+      )
+      if (selection.issues.some((issue) => issue.code === "unresolved-ref")) this.retry = true
+      if (!selection.pending)
+        for (const parameter of selection.selected) this.parameter(parameter.at.node)
       this.container(this.documents.child(node, "requestBody"), "body")
       this.each(
         this.documents.child(node, "responses"),
@@ -314,7 +273,7 @@ class ReferenceDiscovery {
           return true
         })
       })
-      return !pending
+      return !selection.pending
     })
   }
 
@@ -323,16 +282,10 @@ class ReferenceDiscovery {
       const target = this.object(node)
       if (target === undefined) return false
       if (!target || !isRecord(target.value)) return true
-      if ("schema" in target.value) this.schema(this.documents.child(target, "schema"))
-      else if (isRecord(target.value.content)) {
-        const [mediaType] = Object.keys(target.value.content)
-        if (mediaType !== undefined)
-          this.media(
-            this.documents.child(target, "content", mediaType),
-            mediaType,
-            target.value.in !== "querystring",
-          )
-      }
+      const source = selectParameterValue(this.documents, target)
+      if (source.kind === "schema") this.schema(source.node)
+      else if (source.kind === "content")
+        this.media(source.node, source.mediaType, target.value.in !== "querystring")
       return true
     })
   }
@@ -364,39 +317,9 @@ class ReferenceDiscovery {
       const target = this.object(node)
       if (target === undefined) return false
       if (!target || !isRecord(target.value)) return true
-      const kind = classifyMediaType(mediaType)
-      if (parameter && kind !== "json") return true
-      if (kind === "binary") return true
-      const keyword =
-        !parameter && (kind === "events" || kind === "sequence") && "itemSchema" in target.value
-          ? "itemSchema"
-          : "schema"
-      const schema = this.documents.child(target, keyword)
-      if (keyword === "schema" && (kind === "text" || kind === "events")) {
-        let current = schema
-        const seen = new Set<string>()
-        for (let alias = aliasReference(current); alias; alias = aliasReference(current)) {
-          const result = this.documents.resolveSchema(alias[1], current)
-          if (result.kind !== "found") return false
-          if (seen.has(identity(result.node))) break
-          seen.add(identity(result.node))
-          current = result.node
-        }
-        const value = current.value
-        if (!isRecord(value) || describesRawBytes(current)) return true
-        const values = Array.isArray(value.enum)
-          ? value.enum
-          : "const" in value
-            ? [value.const]
-            : []
-        if (
-          value.type !== undefined
-            ? value.type !== "string"
-            : values.length === 0 || !values.every((item) => typeof item === "string")
-        )
-          return true
-      }
-      this.schema(schema)
+      const { source } = selectContentSource(this.documents, target, mediaType, parameter)
+      if (source.kind === "unresolved") return false
+      if (source.kind === "schema" || source.kind === "items") this.schema(source.node)
       return true
     })
   }

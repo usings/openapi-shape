@@ -1,6 +1,7 @@
 import type { BuildContext } from "./build-context"
+import type { DiagnosticCode } from "./diagnostics"
 import { identity } from "./document-nodes"
-import type { DocumentNode } from "./documents"
+import type { DocumentNode, DocumentSet } from "./documents"
 import { isRecord } from "./object"
 
 export interface Resolved {
@@ -8,6 +9,27 @@ export interface Resolved {
   /** 3.1+: `summary`/`description` next to `$ref` override the target's. */
   summary?: string
   description?: string
+}
+
+/** A source problem retained until compilation, when diagnostics are emitted in source order. */
+export interface SourceIssue {
+  severity: "error" | "warning"
+  code: DiagnosticCode
+  message: string
+  node: DocumentNode
+  key?: string
+}
+
+export type SourceResult<T> =
+  | { kind: "found"; value: T }
+  | { kind: "pending" }
+  | { kind: "error"; issue: SourceIssue }
+
+export function reportSourceIssues(context: BuildContext, issues: SourceIssue[]): void {
+  for (const issue of issues) {
+    if (issue.severity === "error") context.error(issue.code, issue.message, issue.node, issue.key)
+    else context.warn(issue.code, issue.message, issue.node, issue.key)
+  }
 }
 
 /** A schema's references, `$ref` first; `$dynamicRef` is resolved statically, as if it were `$ref`. */
@@ -27,6 +49,13 @@ export function referencesOf(schema: unknown): Array<["$ref" | "$dynamicRef", st
  * resolved (already reported) or its document is still loading.
  */
 export function resolveObject(context: BuildContext, node: DocumentNode): Resolved | undefined {
+  const result = inspectObject(context.documents, node)
+  if (result.kind === "error") reportSourceIssues(context, [result.issue])
+  return result.kind === "found" ? result.value : undefined
+}
+
+/** Follow the same Reference Object chain during discovery and compilation, without reporting. */
+export function inspectObject(documents: DocumentSet, node: DocumentNode): SourceResult<Resolved> {
   const out: Resolved = { node }
   const seen = new Set<string>()
   let current = node
@@ -42,23 +71,34 @@ export function resolveObject(context: BuildContext, node: DocumentNode): Resolv
     }
     const id = identity(current)
     if (seen.has(id)) {
-      context.error("circular-ref", `Reference cycle through "${ref}"`, node, "$ref")
-      return undefined
+      return {
+        kind: "error",
+        issue: {
+          severity: "error",
+          code: "circular-ref",
+          message: `Reference cycle through "${ref}"`,
+          node,
+          key: "$ref",
+        },
+      }
     }
     seen.add(id)
-    const resolution = context.documents.resolve(ref, current)
-    if (resolution.kind === "pending") return undefined
+    const resolution = documents.resolve(ref, current)
+    if (resolution.kind === "pending") return resolution
     if (resolution.kind === "error") {
-      context.error(
-        "unresolved-ref",
-        `Cannot resolve $ref "${ref}": ${resolution.message}`,
-        current,
-        "$ref",
-      )
-      return undefined
+      return {
+        kind: "error",
+        issue: {
+          severity: "error",
+          code: "unresolved-ref",
+          message: `Cannot resolve $ref "${ref}": ${resolution.message}`,
+          node: current,
+          key: "$ref",
+        },
+      }
     }
     current = resolution.node
   }
   out.node = current
-  return out
+  return { kind: "found", value: out }
 }

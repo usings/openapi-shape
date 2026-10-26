@@ -49,6 +49,78 @@ describe("reference resolution", () => {
   })
 
   describe("references across documents", () => {
+    it("loads only effective operations, parameters and media schemas across Path Item overrides", async () => {
+      const ignored = { $ref: "must-not-load.json" }
+      const documents: Record<string, object> = {
+        "https://spec.test/routes/base.json": {
+          $ref: "parent.json",
+          parameters: [{ name: "x-choice", in: "header", schema: ignored }],
+          get: { responses: { "200": { content: { "application/json": { schema: ignored } } } } },
+          additionalOperations: {
+            get: { requestBody: { content: { "application/json": { schema: ignored } } } },
+            COPY: {
+              responses: {
+                "200": {
+                  content: {
+                    "application/x-ndjson": { schema: ignored, itemSchema: { type: "number" } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "https://spec.test/routes/parent.json": {
+          get: { requestBody: { content: { "application/json": { schema: ignored } } } },
+          post: {
+            responses: {
+              "200": {
+                content: {
+                  "text/plain": { schema: { type: "object", properties: { hidden: ignored } } },
+                },
+              },
+            },
+          },
+        },
+        "https://spec.test/selected.json": { type: "integer" },
+      }
+      const calls: string[] = []
+      const result = await generate(
+        oas("3.2", {
+          paths: {
+            "/r": {
+              $ref: "routes/base.json",
+              parameters: [{ name: "X-Choice", in: "header", schema: { type: "number" } }],
+              get: {
+                responses: {
+                  "200": { content: { "application/json": { schema: { $ref: "selected.json" } } } },
+                },
+              },
+            },
+          },
+        }),
+        {
+          base: "https://spec.test/api.json",
+          load: (uri) => {
+            calls.push(uri)
+            const document = documents[uri]
+            return document ? Response.json(document) : new Response(null, { status: 404 })
+          },
+        },
+      )
+      expect(calls.toSorted()).toStrictEqual(Object.keys(documents).toSorted())
+      expect(entry(result.code, "GET /r")).toContain('"application/json": Schemas.selected')
+      expect(entry(result.code, "POST /r")).toContain('"text/plain": string')
+      expect(entry(result.code, "COPY /r")).toContain('"application/x-ndjson": number[]')
+      for (const method of ["GET", "POST", "COPY"])
+        expect(entry(result.code, `${method} /r`)).toContain('"X-Choice"?: number')
+      expect(codes(result.diagnostics)).toStrictEqual([
+        "path-item-conflict https://spec.test/routes/base.json#/get",
+        "path-item-conflict #/paths/~1r/parameters",
+        "path-item-conflict #/paths/~1r/get",
+        "ignored-field https://spec.test/routes/base.json#/additionalOperations/get",
+      ])
+    })
+
     it.each([undefined, "https://schemas.test/value"])(
       "resolves redirected document anchors through retrieval aliases (schema id: %s)",
       async (id) => {

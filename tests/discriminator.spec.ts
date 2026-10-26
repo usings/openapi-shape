@@ -9,6 +9,16 @@ const object = (properties: Record<string, unknown>, required: string[] = []) =>
   required,
 })
 
+const hierarchy = (child: string) =>
+  withSchemas("3.1", {
+    Pet: {
+      ...object({ kind: { type: "string" } }, ["kind"]),
+      discriminator: { propertyName: "kind" },
+    },
+    Cat: { allOf: [{ $ref: "#/components/schemas/Pet" }] },
+    [child]: { allOf: [{ $ref: "#/components/schemas/Cat" }] },
+  })
+
 describe("discriminated oneOf/anyOf", () => {
   it("narrows each referenced branch at the union, by mapping or by component name", async () => {
     const code = await gen(
@@ -115,6 +125,16 @@ describe("discriminated oneOf/anyOf", () => {
 })
 
 describe("discriminated allOf hierarchies", () => {
+  it("keeps inheritance analysis isolated across interleaved generations with the same component names", async () => {
+    const first = hierarchy("Lion")
+    const second = hierarchy("Tiger")
+    const [lion, tiger, lionAgain] = await Promise.all([gen(first), gen(second), gen(first)])
+    expect(declaration(lion, "Cat")).toBe('Pet & { kind: "Cat" | "Lion" }')
+    expect(declaration(tiger, "Cat")).toBe('Pet & { kind: "Cat" | "Tiger" }')
+    expect(lionAgain).toBe(lion)
+    expect(await gen(second)).toBe(tiger)
+  })
+
   it("narrows each component that extends the parent", async () => {
     const code = await gen(
       withSchemas("3.0", {

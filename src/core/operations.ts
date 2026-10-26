@@ -7,9 +7,9 @@ import { formEncoding } from "./form-encoding"
 import { classifyMediaType, isFormData } from "./media-types"
 import type { Body, Media, Operation, Response } from "./model"
 import { isRecord } from "./object"
-import { METHODS } from "./operation-rules"
+import { selectOperations, selectPathItem } from "./operation-sources"
 import { ParameterBuilder } from "./parameters"
-import { resolveObject } from "./references"
+import { reportSourceIssues, resolveObject } from "./references"
 import type { SchemaBuilder } from "./schemas"
 import { union } from "./type-algebra"
 
@@ -71,81 +71,18 @@ class OperationBuilder {
     keyPrefix: string,
     callbacks: Set<string>,
   ): void {
-    const fields = this.pathItemFields(node)
-    if (fields === undefined) return
-    // `query` and `additionalOperations` are 3.2 fields, applied in earlier versions too.
-    const methods: Array<[method: string, node: DocumentNode]> = []
-    for (const method of METHODS) {
-      const op = fields.get(method)
-      if (op !== undefined) methods.push([method.toUpperCase(), op])
-    }
-    const additional = fields.get("additionalOperations")
-    if (additional !== undefined && isRecord(additional.value)) {
-      for (const method of Object.keys(additional.value)) {
-        const at = this.context.documents.child(additional, method)
-        if (METHODS.includes(method.toLowerCase())) {
-          this.context.warn(
-            "ignored-field",
-            `additionalOperations cannot redefine ${method}; use the "${method.toLowerCase()}" field`,
-            at,
-          )
-          continue
-        }
-        methods.push([method, at])
-      }
-    }
+    const result = selectPathItem(this.context.documents, node)
+    if (result.kind === "error") reportSourceIssues(this.context, [result.issue])
+    if (result.kind !== "found") return
+    const { fields, issues } = result.value
+    reportSourceIssues(this.context, issues)
+    const operations = selectOperations(this.context.documents, fields)
+    reportSourceIssues(this.context, operations.issues)
     const shared = fields.get("parameters")
     const servers = fields.get("servers")
-    for (const [method, op] of methods) {
+    for (const [method, op] of operations.methods) {
       this.operation(op, method, label, kind, keyPrefix, shared, servers, callbacks)
     }
-  }
-
-  /** A Path Item's fields, merging a `$ref`'d Path Item with local fields (local wins). */
-  private pathItemFields(node: DocumentNode): Map<string, DocumentNode> | undefined {
-    const fields = new Map<string, DocumentNode>()
-    const chain: DocumentNode[] = []
-    const seen = new Set<string>()
-    let current = node
-    while (isRecord(current.value)) {
-      const id = identity(current)
-      if (seen.has(id)) {
-        this.context.error("circular-ref", "Reference cycle through a Path Item", node, "$ref")
-        return undefined
-      }
-      seen.add(id)
-      chain.push(current)
-      const ref = current.value.$ref
-      if (typeof ref !== "string") break
-      const resolution = this.context.documents.resolve(ref, current)
-      if (resolution.kind === "pending") return undefined
-      if (resolution.kind === "error") {
-        this.context.error(
-          "unresolved-ref",
-          `Cannot resolve $ref "${ref}": ${resolution.message}`,
-          current,
-          "$ref",
-        )
-        return undefined
-      }
-      current = resolution.node
-    }
-    // Start at the target so each referring Path Item overrides its inherited fields.
-    for (const link of chain.toReversed()) {
-      for (const key of Object.keys(link.value as Record<string, unknown>)) {
-        if (key === "$ref") continue
-        if (fields.has(key)) {
-          this.context.warn(
-            "path-item-conflict",
-            `"${key}" is defined both here and in the referenced Path Item; the local definition is used`,
-            link,
-            key,
-          )
-        }
-        fields.set(key, this.context.documents.child(link, key))
-      }
-    }
-    return fields
   }
 
   private operation(
