@@ -153,8 +153,29 @@ function readyBody(value: unknown): BodyLike | undefined {
     isInstance(value, "Blob") ||
     isInstance(value, "FormData") ||
     isInstance(value, "URLSearchParams") ||
-    isStream(value)
-  return ready ? (value as BodyLike) : bytes(value)
+    isInstance(value, "ReadableStream")
+  if (ready) return value as BodyLike
+  return (
+    bytes(value) ?? (isStream(value) ? iterableBody(value as AsyncIterable<Uint8Array>) : undefined)
+  )
+}
+
+/** Browsers need a Web stream; passing an async iterable directly would send its string tag. */
+function iterableBody(value: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
+  const iterator = value[Symbol.asyncIterator]()
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        const result = await iterator.next()
+        if (result.done) controller.close()
+        else controller.enqueue(result.value)
+      },
+      async cancel() {
+        await iterator.return?.()
+      },
+    },
+    { highWaterMark: 0 },
+  )
 }
 
 /**

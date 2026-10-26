@@ -22,7 +22,7 @@ export interface TypedResponse<Status extends number, Ok extends boolean, Json> 
   json(): Promise<Json>
 }
 
-/** Ready-made request bodies: what `fetch` sends as it is, and Node.js streams. */
+/** Ready-made request bodies, including async byte iterables adapted to Web streams. */
 export type BodyLike =
   | Blob
   | ArrayBuffer
