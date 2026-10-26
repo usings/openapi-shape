@@ -19,10 +19,6 @@ Read before designing or reviewing module interfaces, responsibility boundaries,
 
 ## Carry the design through safely
 
-Architecture work follows the task's existing authorization. An assessment produces findings; an authorized implementation proceeds through routine design decisions without a separate candidate-selection gate. Compare alternative interface shapes when a consequential tradeoff remains, and ask only for material decisions unresolved by the task.
-
-Keep refactoring tied to the authorized objective. Address structural problems that prevent or materially complicate the requested outcome; report unrelated opportunities separately rather than restructuring adjacent code along the way.
-
 Check proposed responsibility and dependency changes against actual consumers. Keep required public behavior and compatibility explicit, including errors and resource ownership. A private reorganization does not by itself justify a public contract change. Use [Conventions](01-conventions.md) for repository-specific contract and verification policies.
 
-Use [Testing](02-testing.md) to verify preserved behavior and the interaction that motivated the change. Retain useful coverage; change tests tied to superseded internals only when equivalent behavioral evidence remains. Apply the Workflow's High-risk criteria and load [Review](03-review.md) when broad effects or compatibility risks warrant it.
+Use [Testing](02-testing.md) to verify preserved behavior and the interaction that motivated the change. Retain useful coverage; change tests tied to superseded internals only when equivalent behavioral evidence remains.

@@ -16,7 +16,7 @@ Resolve uncertainty through focused investigation where practical; use greater d
 
 ## 1. Model
 
-Establish the observable objective, constraints, affected behavior, and acceptance criteria. Treat existing code, tests, and documentation as evidence, not unquestionable truth. For bug fixes, identify the failure mechanism. Examine input sources, consumers, invariants, trust boundaries, compatibility, and assumptions where they matter. Investigate as widely as necessary, but keep the edit scope focused.
+Establish the observable objective, constraints, affected behavior, and acceptance criteria. Treat existing code, tests, and documentation as evidence, not unquestionable truth. For bug fixes, identify the failure mechanism. Trace affected behavior through inputs and consumers, checking relevant invariants, boundaries, and compatibility. Investigate as widely as necessary, but keep the edit scope focused.
 
 Within the task's requirements, prefer **correctness → simplicity → reversibility → consistency**.
 
@@ -34,7 +34,7 @@ Add abstractions, dependencies, configuration, or compatibility paths only for a
 
 ## 5. Attack
 
-Challenge assumptions rather than merely confirm success. Seek plausible failures involving unexpected or missing inputs, repeated operations, interrupted work, stale artifacts, or crossed boundaries. Scale review to risk. A blocking finding needs a concrete regression, unmet requirement, or specific reason the required result cannot be established; distinguish other concerns as notes. Surface risks promptly if they could change the user's next decision.
+Challenge assumptions rather than merely confirm success. Probe unexpected inputs, boundary cases, and repeated or interrupted work. Scale review to risk. A blocking finding needs a concrete regression, unmet requirement, or specific reason the required result cannot be established; distinguish other concerns as notes. Surface risks promptly if they could change the user's next decision.
 
 ### Fixing
 

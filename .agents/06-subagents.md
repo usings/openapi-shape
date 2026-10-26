@@ -2,7 +2,7 @@
 
 Read before delegating to subagents or coordinating parallel work.
 
-Delegate when independent judgment or parallel work justifies the coordination cost and the tools support it. Give each agent a bounded objective, relevant context, constraints, and expected evidence. Provide the applicable guidance or direct it to read the relevant guides; do not assume it inherits the coordinator's loaded context. Allow further inspection where needed.
+Delegate when independent judgment or parallel work justifies the coordination cost and the tools support it. Give each agent a bounded objective, relevant context, constraints, and expected evidence, while allowing inspection of related paths to test its assumptions. Provide the applicable guidance or direct it to read the relevant guides; do not assume it inherits the coordinator's loaded context.
 
 Before dispatch, assess task complexity, uncertainty, and the consequences of error. Where supported and permitted, explicitly select a reasoning effort appropriate to the task. Otherwise, retain the tool's default or inherited setting. Do not assume prompt wording changes the configured effort.
 

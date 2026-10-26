@@ -4,7 +4,7 @@ Read before writing, editing, or auditing reader-facing documentation.
 
 Treat documentation as a reader-facing contract; scale checks to the impact of what it says, not merely to its file type.
 
-- Organize around the reader's task. Use an appropriate shape for a README, tutorial, how-to, reference, explanation, design decision, or troubleshooting page; do not impose a taxonomy or restructure the docs without need.
+- Organize around the reader's task, using a suitable form for the document's purpose. Split pages for independent tasks while keeping the instructions for a common operation connected; length or internal module boundaries alone do not justify a split.
 - Ground commands, imports, flags, defaults, outputs, compatibility claims, and other consequential statements in current project evidence. Distinguish observed behavior from documented-but-unreproduced claims and illustrative examples. Never invent project capabilities or results.
 - Put prerequisites before dependent steps. Explain placeholders, expected success, meaningful failures, limits, and cleanup where relevant. Prefer one canonical home for shared details and link to it.
 - Follow the target renderer and existing terminology and style. Use semantic Markdown, accurate code fences, useful headings and links, and accessible alternatives to diagrams. Do not add decorative syntax or rely on unsupported extensions.

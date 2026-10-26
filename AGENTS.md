@@ -10,7 +10,9 @@ Scale work to risk, use judgment, and explain material deviations. Change these 
 
 ## Load guidance by task
 
-Start with Workflow for changes and assessments. Before the relevant work, read every additional guide whose trigger matches the task. Load only applicable guidance; reuse unchanged guides already read in the current context. Reassess when scope or risk changes.
+Start with Workflow for changes and assessments. Load only applicable guides; before the relevant work, read every additional guide whose trigger matches the task. When scope or risk changes, load newly applicable guides. Within the current context, reread a guide only when it has changed, its contents are no longer available, or a specific clause needs checking.
+
+Keep guide reads separate from large source or search outputs so the guidance remains visible. If output is truncated, read the missing portion before relying on it.
 
 The list runs from general guidance to specialized tasks. Numbers aid navigation, not instruction precedence. Paths are relative to this file.
 

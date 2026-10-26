@@ -28,6 +28,4 @@ Before finishing, consider a plausible wrong branch, missing effect, or incorrec
 
 For prompts, skills, and agent guides, check conflicting obligations, instruction precedence, load triggers, and references. Verify the entry file makes conditional guidance reachable; do not assume arbitrary files are discovered automatically.
 
-When consequential behavior justifies a trial, use a realistic task in fresh context with the required tools and permissions. Define pass criteria first and judge actions and outcomes against them. Use baseline evidence when attributing a fix; a passing new run cannot demonstrate a fix if the baseline never reproduced the failure. If a trial is unavailable or disproportionate, use static review and state that it does not establish execution behavior.
-
-Use the workflow's verification and reporting rules; include the runtime or environment when it limits what a result establishes.
+When consequential behavior justifies a trial, use a realistic task in fresh context with the required tools and permissions. Define pass criteria first and judge actions and outcomes against them. For loading changes, exercise the affected loading and authorization behavior. Attributing a fix requires baseline evidence that reproduces the failure. If a trial is unavailable or disproportionate, report static findings without claiming improved execution behavior. State runtime or environment limitations that affect the conclusion.
