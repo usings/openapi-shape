@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { DocumentLoader } from "../src/core/index"
 import { GenerateError, generate } from "../src/core/index"
 import { contractOf } from "./helpers/contract"
-import { codes, declaration, gen, oas } from "./helpers/generate"
+import { codes, declaration, documentSource, gen, oas } from "./helpers/generate"
 import { withServer } from "./helpers/http"
 import { withFiles } from "./helpers/tmp"
 import { typecheck } from "./helpers/tsc"
@@ -51,7 +51,7 @@ function document(schema: object, schemas: Record<string, object> = {}) {
   })
 }
 
-const load: DocumentLoader = (uri) => {
+const loader: DocumentLoader = (uri) => {
   if (uri === "https://schemas.test/pet.json") return Response.json(pet)
   throw new Error(`Unknown test resource: ${uri}`)
 }
@@ -231,10 +231,7 @@ describe("generation equivalence", () => {
     ]
     const outputs = await Promise.all(
       variants.map((input) =>
-        generate(input, {
-          base: "https://schemas.test/api.json",
-          load,
-        }),
+        generate(...documentSource(input, "https://schemas.test/api.json", { loader })),
       ),
     )
     for (const output of outputs) expect(output.diagnostics).toStrictEqual([])
@@ -272,14 +269,27 @@ const longLocation: I["body"]["application/json"] = { secret: "s", name: "pet", 
   it("generates identical bytes after other generations, a failure and concurrent calls", async () => {
     const input = document({ $ref: "pet.json" })
     const before = structuredClone(input)
-    const options = { base: "https://schemas.test/api.json", load }
-    const first = await generate(input, options)
+    const options = { loader }
+    const first = await generate(...documentSource(input, "https://schemas.test/api.json", options))
     await generate(document({ anyOf: [{ type: "number" }, { type: "string" }] }))
-    await expect(generate(document({ $ref: "missing.json" }), options)).rejects.toThrow(
-      "Unknown test resource",
-    )
+    await expect(
+      generate(
+        ...documentSource(
+          document({ $ref: "missing.json" }),
+          "https://schemas.test/api.json",
+          options,
+        ),
+      ),
+    ).rejects.toThrow("Unknown test resource")
     const repeated = await Promise.all(
-      [1, 8, 2].map((maxConcurrentLoads) => generate(input, { ...options, maxConcurrentLoads })),
+      [1, 8, 2].map((maxConcurrentLoads) =>
+        generate(
+          ...documentSource(input, "https://schemas.test/api.json", {
+            ...options,
+            maxConcurrentLoads,
+          }),
+        ),
+      ),
     )
     for (const output of repeated) expect(output).toStrictEqual(first)
     expect(input).toStrictEqual(before)

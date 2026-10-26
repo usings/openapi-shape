@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { generate } from "../src/core/index"
+import { documentSource } from "./helpers/generate"
 import { withFiles } from "./helpers/tmp"
 import { typecheck } from "./helpers/tsc"
 
@@ -183,17 +184,18 @@ describe("JSON Schema Test Suite (draft 2020-12)", () => {
       components: { schemas },
     }
     const code = await withFiles(files as Record<string, object>, async (dir) => {
-      const result = await generate(doc, {
-        base: join(dir, "openapi.json"),
-        load: (uri) => {
-          if (uri.startsWith("file:")) return undefined
-          const source = SOURCES[uri]
-          if (!source) throw new Error(`Unmapped suite resource: ${uri}`)
-          return new Response(readFileSync(join(REMOTES, source.file), "utf8"), {
-            headers: { "content-type": "application/schema+json" },
-          })
-        },
-      })
+      const result = await generate(
+        ...documentSource(doc, join(dir, "openapi.json"), {
+          loader: (uri) => {
+            if (uri.startsWith("file:")) return undefined
+            const source = SOURCES[uri]
+            if (!source) throw new Error(`Unmapped suite resource: ${uri}`)
+            return new Response(readFileSync(join(REMOTES, source.file), "utf8"), {
+              headers: { "content-type": "application/schema+json" },
+            })
+          },
+        }),
+      )
       return result.code
     })
 

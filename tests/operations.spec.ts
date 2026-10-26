@@ -2,7 +2,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { generate } from "../src/core/index"
 import { contractOf } from "./helpers/contract"
-import { codes, entry, gen, oas } from "./helpers/generate"
+import { codes, documentSource, entry, gen, oas } from "./helpers/generate"
 import { withFiles } from "./helpers/tmp"
 import { expectPassesTsc } from "./helpers/tsc"
 
@@ -602,24 +602,26 @@ describe("parameters", () => {
       }
       const calls: string[] = []
       const result = await generate(
-        oas("3.2", {
-          paths: {
-            "/search": {
-              parameters: [query],
-              get: {
-                parameters: [...(first ? [whole, query] : [query, whole]), duplicate],
-                responses: ok,
+        ...documentSource(
+          oas("3.2", {
+            paths: {
+              "/search": {
+                parameters: [query],
+                get: {
+                  parameters: [...(first ? [whole, query] : [query, whole]), duplicate],
+                  responses: ok,
+                },
               },
             },
+          }),
+          "https://spec.test/api.json",
+          {
+            loader: (uri) => {
+              calls.push(uri)
+              return new Response(null, { status: 404 })
+            },
           },
-        }),
-        {
-          base: "https://spec.test/api.json",
-          load: (uri) => {
-            calls.push(uri)
-            return new Response(null, { status: 404 })
-          },
-        },
+        ),
       )
       expect(calls).toStrictEqual([])
       expect(entry(result.code, "GET /search")).toContain("query?: string")

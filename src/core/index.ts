@@ -16,11 +16,6 @@ export type { Diagnostic, DiagnosticCode } from "./diagnostics"
 export interface GenerateOptions extends LoadingOptions {
   /** Cancel loading and stop at generation checkpoints; rejection preserves signal.reason. */
   signal?: AbortSignal
-  /**
-   * Where an in-memory document lives (file path or URL), so its relative `$ref`s can be resolved.
-   * Ignored when `input` is a path or URL.
-   */
-  base?: string | URL
 }
 
 export interface GenerateResult {
@@ -48,10 +43,11 @@ export class GenerateError extends Error {
  * Generate a TypeScript module from an OpenAPI 3.0, 3.1, or 3.2 description: its types, and the
  * runtime `contract` for `openapi-shape/client`.
  *
- * `input` is a file path, a `file:`/`http(s):` URL, or an already parsed document. Referenced
- * documents are loaded as needed. Throws {@link GenerateError} when the description cannot be turned
- * into correct types. Cancellation rejects with `signal.reason`; invalid loading limits throw
- * TypeError.
+ * `input` is a file path, a `file:`/`http(s):` URL, or an already parsed document. URI inputs load
+ * referenced documents as needed; parsed objects can reference only their own resources. Use an
+ * entry URI and `loader` to load an in-memory document with external references. Throws
+ * {@link GenerateError} when the description cannot be turned into correct types. Cancellation
+ * rejects with `signal.reason`; invalid loading limits throw TypeError.
  */
 export async function generate(
   input: string | URL | object,
@@ -61,7 +57,7 @@ export async function generate(
   control.throwIfAborted()
   const reader = new DocumentReader(options, control)
   try {
-    return await run(input, options, reader, control)
+    return await run(input, reader, control)
   } catch (error) {
     control.throwIfAborted()
     // Deeply nested documents can exhaust the stack at any stage.
@@ -83,12 +79,11 @@ export async function generate(
 /** Load the description, build its model, and render the module. */
 async function run(
   input: string | URL | object,
-  options: GenerateOptions,
   reader: DocumentReader,
   control: GenerationControl,
 ): Promise<GenerateResult> {
   const loading = new Diagnostics()
-  const documents = await loadDocuments(input, options.base, loading, reader, control)
+  const documents = await loadDocuments(input, loading, reader, control)
   if (documents === undefined) throw new GenerateError(loading.list)
   const { model, diagnostics } = await buildModel(documents, control)
   assignInputVariants(model, diagnostics)

@@ -4,7 +4,15 @@ import { generate } from "../src/core/index"
 import { contentTypeErrors } from "./helpers/content"
 import type { ResultOperation } from "./helpers/contract"
 import { contractOf } from "./helpers/contract"
-import { codes, declaration, entry, gen, oas, withSchemas } from "./helpers/generate"
+import {
+  codes,
+  declaration,
+  documentSource,
+  entry,
+  gen,
+  oas,
+  withSchemas,
+} from "./helpers/generate"
 import { expectPassesTsc } from "./helpers/tsc"
 
 const readWriteDoc = (version: "3.0" | "3.1") =>
@@ -834,13 +842,18 @@ describe("directional composition", () => {
         }
         // oxlint-disable-next-line no-await-in-loop -- keep the variant attached to its compiler result
         const result = await generate(
-          oas("3.1", {
-            paths: directionalPost({ anyOf: [ref("Use"), ref("Unknown")] }),
-            components: {
-              schemas: reverse ? Object.fromEntries(Object.entries(schemas).toReversed()) : schemas,
-            },
-          }),
-          { base: "https://directions.test/api.json", load: () => Response.json(read) },
+          ...documentSource(
+            oas("3.1", {
+              paths: directionalPost({ anyOf: [ref("Use"), ref("Unknown")] }),
+              components: {
+                schemas: reverse
+                  ? Object.fromEntries(Object.entries(schemas).toReversed())
+                  : schemas,
+              },
+            }),
+            "https://directions.test/api.json",
+            { loader: () => Response.json(read) },
+          ),
         )
         expect(result.diagnostics).toStrictEqual([])
         // oxlint-disable-next-line no-await-in-loop -- independent positive and negative witnesses per variant

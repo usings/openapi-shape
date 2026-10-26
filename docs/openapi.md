@@ -95,7 +95,7 @@ Retrieval boundaries apply to built-in and custom loading:
 
 - HTTP(S) documents cannot reach local files, except by a URI that a local document explicitly publishes as its `$self`.
 - Remote documents cannot claim local file URIs through `$id` or `$self`.
-- Parsed input without `base` cannot reference outside itself.
+- Parsed object inputs cannot reference outside themselves, even with a custom loader. To load external references from an in-memory document, use an [entry URI and loader](./generation.md#load-an-in-memory-document-with-external-references).
 
 IDs and anchors inside extensions, instance data (`example`, `examples`, `default`, `const`, `enum`), Links, or discriminator metadata claim no resources. Names such as `$id` inside a schema map are ordinary schema names. Explicit JSON Pointer references can activate schema indexing in otherwise filtered external dictionary entries; metadata inside the selected schema remains excluded unless itself explicitly referenced.
 

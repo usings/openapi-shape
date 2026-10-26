@@ -1,3 +1,5 @@
+import { resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 import type { Diagnostic, GenerateOptions } from "../../src/core/index"
 import { generate } from "../../src/core/index"
 
@@ -20,9 +22,33 @@ export function withSchemas(
   return oas(version, { components: { schemas } })
 }
 
-export async function gen(doc: object, options?: GenerateOptions): Promise<string> {
+export async function gen(doc: string | URL | object, options?: GenerateOptions): Promise<string> {
   const { code } = await generate(doc, options)
   return code
+}
+
+/** Supply an in-memory entry through the public URI/loader API, delegating its references. */
+export function documentSource(
+  doc: object,
+  uri: string | URL,
+  options: GenerateOptions = {},
+): [string | URL, GenerateOptions] {
+  const entryURL = new URL(
+    uri instanceof URL
+      ? uri.href
+      : /^(?:https?|file):/i.test(uri)
+        ? uri
+        : pathToFileURL(resolve(uri)).href,
+  )
+  entryURL.hash = ""
+  return [
+    uri,
+    {
+      ...options,
+      loader: (source, context) =>
+        source === entryURL.href ? Response.json(doc) : options.loader?.(source, context),
+    },
+  ]
 }
 
 /** Diagnostic codes with their locations, for compact assertions. */

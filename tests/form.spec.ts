@@ -5,7 +5,7 @@ import { contract as defaultContract } from "./__snapshots__/client-api"
 import { recorder } from "./helpers/client"
 import type { ResultOperation } from "./helpers/contract"
 import { contractOf } from "./helpers/contract"
-import { oas } from "./helpers/generate"
+import { documentSource, oas } from "./helpers/generate"
 import { typecheck } from "./helpers/tsc"
 
 const form = "application/x-www-form-urlencoded"
@@ -59,21 +59,23 @@ describe("form encoding plans", () => {
             ? { allOf: [{ $ref: "https://schemas.test/form.json" }] }
             : schema
           const { code, diagnostics } = await generate(
-            oas(version, {
-              paths: {
-                "/form": {
-                  post: operation({ [form]: { schema: input }, [multipart]: { schema: input } }),
+            ...documentSource(
+              oas(version, {
+                paths: {
+                  "/form": {
+                    post: operation({ [form]: { schema: input }, [multipart]: { schema: input } }),
+                  },
+                },
+              }),
+              "https://api.test/openapi.json",
+              {
+                loader: (uri) => {
+                  if (String(uri) !== "https://schemas.test/form.json")
+                    throw new Error(`Unexpected URI ${uri}`)
+                  return Response.json(schema)
                 },
               },
-            }),
-            {
-              base: "https://api.test/openapi.json",
-              load: (uri) => {
-                if (String(uri) !== "https://schemas.test/form.json")
-                  throw new Error(`Unexpected URI ${uri}`)
-                return Response.json(schema)
-              },
-            },
+            ),
           )
           expect(diagnostics).toStrictEqual([])
           const contract = await contractOf<{

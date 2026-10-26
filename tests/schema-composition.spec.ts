@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest"
 import type { DocumentLoader, GenerateOptions } from "../src/core/index"
 import { generate } from "../src/core/index"
-import { codes, declaration, gen, oas, typeOf, withSchemas } from "./helpers/generate"
+import {
+  codes,
+  declaration,
+  documentSource,
+  gen,
+  oas,
+  typeOf,
+  withSchemas,
+} from "./helpers/generate"
 import { expectPassesTsc, typecheck } from "./helpers/tsc"
 
 /** Sixteen alternatives, each requiring one property. */
@@ -34,7 +42,7 @@ interface Placement {
 interface CompositionCase {
   name: string
   schemas: Record<string, Schema>
-  options: GenerateOptions
+  source: { uri: string; options: GenerateOptions }
   checks: string[]
   precisionLoss?: boolean
 }
@@ -60,7 +68,7 @@ function ordered(schemas: Record<string, Schema>, order: Order): Record<string, 
 function graph(placement: Placement) {
   const schemas: Record<string, Schema> = {}
   const resources = new Map<string, Schema>()
-  const load: DocumentLoader = (uri) => {
+  const loader: DocumentLoader = (uri) => {
     const schema = resources.get(uri)
     if (!schema) throw new Error(`Unexpected invariant resource: ${uri}`)
     return Response.json(schema)
@@ -80,7 +88,11 @@ function graph(placement: Placement) {
     }
     return target
   }
-  return { schemas, place, options: { base: "https://invariants.test/api.json", load } }
+  return {
+    schemas,
+    place,
+    source: { uri: "https://invariants.test/api.json", options: { loader } },
+  }
 }
 
 /**
@@ -113,8 +125,10 @@ ${checks.join("\n")}
 
 async function checkCases(cases: CompositionCase[]): Promise<string> {
   const modules = await Promise.all(
-    cases.map(async ({ name, schemas, options, checks, precisionLoss }) => {
-      const output = await generate(withSchemas("3.1", schemas), options)
+    cases.map(async ({ name, schemas, source, checks, precisionLoss }) => {
+      const output = await generate(
+        ...documentSource(withSchemas("3.1", schemas), source.uri, source.options),
+      )
       expect({ name, codes: new Set(output.diagnostics.map((d) => d.code)) }).toStrictEqual({
         name,
         codes: new Set(precisionLoss ? ["schema-precision-loss"] : []),
@@ -571,7 +585,7 @@ describe("composition matrix", () => {
           cases.push({
             name,
             schemas: ordered(fixture.schemas, order),
-            options: fixture.options,
+            source: fixture.source,
             precisionLoss: count > 16,
             checks,
           })
@@ -641,7 +655,7 @@ describe("composition matrix", () => {
         cases.push({
           name,
           schemas: ordered(fixture.schemas, order),
-          options: fixture.options,
+          source: fixture.source,
           precisionLoss: product > 10_000,
           checks: [witnesses("Product", allowed, rejected)],
         })

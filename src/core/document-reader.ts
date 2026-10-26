@@ -23,7 +23,7 @@ export type DocumentLoader = (
 
 export interface LoadingOptions {
   /** Override entry and external document retrieval, or return undefined to delegate. */
-  load?: DocumentLoader
+  loader?: DocumentLoader
   /** Maximum concurrent document loads; a positive safe integer. Default: 8. */
   maxConcurrentLoads?: number
   /** Maximum bytes per loaded document; a positive safe integer. Default: 10 MiB. */
@@ -52,7 +52,7 @@ export class DocumentReader {
     const deadline = AbortSignal.timeout(FETCH_TIMEOUT)
     const signal = this.control.signal ? AbortSignal.any([this.control.signal, deadline]) : deadline
     const loaded = await abortable(
-      Promise.resolve().then(() => this.options.load?.(uri, { signal })),
+      Promise.resolve().then(() => this.options.loader?.(uri, { signal })),
       signal,
     )
     // Only undefined delegates; any fetch implementation's Response is accepted.

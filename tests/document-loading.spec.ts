@@ -3,7 +3,7 @@ import { gzipSync } from "node:zlib"
 import { expect, it, vi } from "vitest"
 import type { DocumentLoader, GenerateOptions } from "../src/core/index"
 import { generate, GenerateError } from "../src/core/index"
-import { oas } from "./helpers/generate"
+import { documentSource, oas } from "./helpers/generate"
 import { withServer } from "./helpers/http"
 import { withFiles } from "./helpers/tmp"
 
@@ -32,7 +32,7 @@ function references(count: number) {
 it("uses one loader for entry and external documents with absolute fragment-free URIs", async () => {
   const calls: string[] = []
   const result = await generate(`${uri}#ignored`, {
-    load: (url, { signal }) => {
+    loader: (url, { signal }) => {
       calls.push(url)
       expect(signal).toBeInstanceOf(AbortSignal)
       return Response.json(url === uri ? references(1) : { type: "string" })
@@ -42,19 +42,44 @@ it("uses one loader for entry and external documents with absolute fragment-free
   expect(result.code).toContain("export type T0 = string")
 })
 
+it("registers the loaded entry under its retrieval URI", async () => {
+  const entry = oas("3.1", {
+    components: {
+      schemas: {
+        Alias: { $ref: `${uri}#/components/schemas/Value` },
+        Value: { type: "string" },
+      },
+    },
+  })
+  const loader = vi.fn<DocumentLoader>(() => Response.json(entry))
+  const result = await generate(uri, { loader })
+  expect(result.code).toContain("export type Alias = Value")
+  expect(loader).toHaveBeenCalledOnce()
+})
+
+it.each(["./external.json", "https://spec.test/external.json"])(
+  "rejects external references from parsed objects before invoking the loader: %s",
+  async ($ref) => {
+    const loader = vi.fn<DocumentLoader>(() => Response.json({ type: "string" }))
+    const input = oas("3.1", { components: { schemas: { External: { $ref } } } })
+    await expect(generate(input, { loader })).rejects.toThrow(GenerateError)
+    expect(loader).not.toHaveBeenCalled()
+  },
+)
+
 it("delegates undefined to the file loader and parses custom YAML", async () => {
   await withFiles({ "api.json": text }, async (dir) => {
-    const load = vi.fn<DocumentLoader>(() => undefined)
-    const result = await generate(join(dir, "api.json"), { load })
+    const loader = vi.fn<DocumentLoader>(() => undefined)
+    const result = await generate(join(dir, "api.json"), { loader })
     expect(result.diagnostics).toStrictEqual([])
-    expect(load).toHaveBeenCalledOnce()
-    expect(load.mock.calls[0]).toStrictEqual([
+    expect(loader).toHaveBeenCalledOnce()
+    expect(loader.mock.calls[0]).toStrictEqual([
       expect.stringMatching(/^file:/),
       { signal: expect.any(AbortSignal) },
     ])
   })
   const result = await generate(uri, {
-    load: () =>
+    loader: () =>
       new Response("openapi: 3.1.2\ninfo: {title: YAML, version: '1'}", {
         headers: { "content-type": "application/yaml" },
       }),
@@ -68,7 +93,7 @@ it.each([
   "text/plain; filename=openapi.json",
 ])("ignores media type parameters when choosing a document parser: %s", async (contentType) => {
   const result = await generate("https://spec.test/api.yaml", {
-    load: () =>
+    loader: () =>
       new Response("openapi: 3.1.0\ninfo: {title: YAML, version: '1'}", {
         headers: { "content-type": contentType },
       }),
@@ -98,19 +123,20 @@ it.each([undefined, 2])(
     let peak = 0
     let calls = 0
     const limit = maxConcurrentLoads ?? 8
-    const pending = generate(references(12), {
-      base: uri,
-      maxConcurrentLoads,
-      load: async () => {
-        calls++
-        active++
-        peak = Math.max(peak, active)
-        if (active === limit) firstBatch.resolve()
-        await release.promise
-        active--
-        return Response.json({ type: "string" })
-      },
-    })
+    const pending = generate(
+      ...documentSource(references(12), uri, {
+        maxConcurrentLoads,
+        loader: async () => {
+          calls++
+          active++
+          peak = Math.max(peak, active)
+          if (active === limit) firstBatch.resolve()
+          await release.promise
+          active--
+          return Response.json({ type: "string" })
+        },
+      }),
+    )
     await firstBatch.promise
     expect(calls).toBe(limit)
     release.resolve()
@@ -133,14 +159,15 @@ it("registers documents in reference order despite completion order", async () =
       },
     },
   })
-  const pending = generate(ordered, {
-    base: uri,
-    load: (url) => {
-      if (url.endsWith("0.json")) return first.promise
-      second.resolve()
-      return Response.json({ $id: "https://spec.test/shared", type: "number" })
-    },
-  })
+  const pending = generate(
+    ...documentSource(ordered, uri, {
+      loader: (url) => {
+        if (url.endsWith("0.json")) return first.promise
+        second.resolve()
+        return Response.json({ $id: "https://spec.test/shared", type: "number" })
+      },
+    }),
+  )
   await second.promise
   first.resolve(Response.json({ $id: "https://spec.test/shared", type: "string" }))
   const result = await pending
@@ -152,9 +179,9 @@ it("registers documents in reference order despite completion order", async () =
 
 it("preserves a pre-aborted reason without starting retrieval", async () => {
   const reason = new RangeError("caller cancelled")
-  const load = vi.fn<DocumentLoader>()
-  await expect(generate(uri, { signal: AbortSignal.abort(reason), load })).rejects.toBe(reason)
-  expect(load).not.toHaveBeenCalled()
+  const loader = vi.fn<DocumentLoader>()
+  await expect(generate(uri, { signal: AbortSignal.abort(reason), loader })).rejects.toBe(reason)
+  expect(loader).not.toHaveBeenCalled()
 })
 
 it("cancels a loader that ignores its signal and disposes of its late response", async () => {
@@ -166,7 +193,7 @@ it("cancels a loader that ignores its signal and disposes of its late response",
   const reason = { cancelled: true }
   const pending = generate(uri, {
     signal: controller.signal,
-    load: () => {
+    loader: () => {
       started.resolve()
       return response.promise
     },
@@ -191,16 +218,17 @@ it("cancels stalled streams and stops queued loads without waiting for cleanup",
   const signals: AbortSignal[] = []
   const controller = new AbortController()
   const reason = new Error("stop")
-  const pending = generate(references(5), {
-    base: uri,
-    signal: controller.signal,
-    maxConcurrentLoads: 2,
-    load: (_, { signal }) => {
-      signals.push(signal)
-      if (signals.length === 2) started.resolve()
-      return new Response(new ReadableStream({ cancel: cancelled }))
-    },
-  })
+  const pending = generate(
+    ...documentSource(references(5), uri, {
+      signal: controller.signal,
+      maxConcurrentLoads: 2,
+      loader: (_, { signal }) => {
+        signals.push(signal)
+        if (signals.length === 2) started.resolve()
+        return new Response(new ReadableStream({ cancel: cancelled }))
+      },
+    }),
+  )
   const settled = pending.catch((error: unknown) => error)
   await started.promise
   // Let both workers acquire their body readers.
@@ -227,13 +255,13 @@ it("limits actual UTF-8 bytes, accepts the exact boundary, and cancels oversized
   const bytes = new TextEncoder().encode(serialized)
   const result = await generate(uri, {
     maxDocumentBytes: bytes.length,
-    load: () => new Response(bytes),
+    loader: () => new Response(bytes),
   })
   expect(result.diagnostics).toStrictEqual([])
   const cancelled = vi.fn<() => void>()
   const options: GenerateOptions = {
     maxDocumentBytes: bytes.length - 1,
-    load: () =>
+    loader: () =>
       new Response(
         new ReadableStream({
           start(stream) {
@@ -258,13 +286,16 @@ it("limits actual UTF-8 bytes, accepts the exact boundary, and cancels oversized
 
 it("enforces the default 10 MiB limit and reports oversized references at their source", async () => {
   await expect(
-    generate(uri, { load: () => new Response(new Uint8Array(10 * 1024 * 1024 + 1)) }),
+    generate(uri, { loader: () => new Response(new Uint8Array(10 * 1024 * 1024 + 1)) }),
   ).rejects.toThrow("10485760 bytes")
-  const failure = await generate(references(1), {
-    base: uri,
-    maxDocumentBytes: 1,
-    load: () => Response.json({ type: "string" }),
-  }).catch((error: unknown) => error)
+  const entry = references(1)
+  const limit = new TextEncoder().encode(JSON.stringify(entry)).length
+  const failure = await generate(
+    ...documentSource(entry, uri, {
+      maxDocumentBytes: limit,
+      loader: () => Response.json({ type: "string", description: "x".repeat(limit) }),
+    }),
+  ).catch((error: unknown) => error)
   expect(failure).toBeInstanceOf(GenerateError)
   expect((failure as GenerateError).diagnostics).toStrictEqual([
     expect.objectContaining({
@@ -279,13 +310,13 @@ it("disposes of unsuccessful responses and reports hook failures", async () => {
   const cancelled = vi.fn<() => void>()
   await expect(
     generate(uri, {
-      load: () => new Response(new ReadableStream({ cancel: cancelled }), { status: 403 }),
+      loader: () => new Response(new ReadableStream({ cancel: cancelled }), { status: 403 }),
     }),
   ).rejects.toThrow("HTTP 403")
   expect(cancelled).toHaveBeenCalledOnce()
   await expect(
     generate(uri, {
-      load: () => {
+      loader: () => {
         throw new Error("credentials missing")
       },
     }),
@@ -303,15 +334,15 @@ it("accepts any fetch implementation's Response, and rejects other loader result
     headers: real.headers,
     body: real.body,
   }
-  const result = await generate(uri, { load: () => foreign as unknown as Response })
+  const result = await generate(uri, { loader: () => foreign as unknown as Response })
   expect(result.diagnostics).toStrictEqual([])
   // Only undefined delegates: null must not reach the built-in loader.
   // A body that is not a web stream could not be cancelled, so a stalled one would hang.
   const stalled = { ok: true, headers: new Headers(), body: { getReader: () => ({}) } }
   for (const value of ["{}", null, { ...document, ok: true }, stalled]) {
-    const load = (() => value) as unknown as DocumentLoader
+    const loader = (() => value) as unknown as DocumentLoader
     // oxlint-disable-next-line no-await-in-loop -- each result is checked on its own
-    await expect(generate(uri, { load })).rejects.toThrow(
+    await expect(generate(uri, { loader })).rejects.toThrow(
       "A document loader must return a Response or undefined",
     )
   }
@@ -321,7 +352,7 @@ it("disposes of a late loader result of any shape without an unhandled rejection
   const late = deferred<unknown>()
   const controller = new AbortController()
   const reason = new Error("late")
-  const pending = generate(uri, { signal: controller.signal, load: () => late.promise as never })
+  const pending = generate(uri, { signal: controller.signal, loader: () => late.promise as never })
   const settled = pending.catch((error: unknown) => error)
   controller.abort(reason)
   expect(await settled).toBe(reason)
@@ -338,14 +369,14 @@ it("disposes of a late loader result of any shape without an unhandled rejection
 })
 
 it("keeps retrieval boundaries ahead of custom loaders", async () => {
-  const load = vi.fn<DocumentLoader>(() => Response.json({ type: "string" }))
-  await expect(generate(references(1), { load })).rejects.toThrow()
-  expect(load).not.toHaveBeenCalled()
+  const loader = vi.fn<DocumentLoader>(() => Response.json({ type: "string" }))
+  await expect(generate(references(1), { loader })).rejects.toThrow()
+  expect(loader).not.toHaveBeenCalled()
   const remote = oas("3.1", {
     components: { schemas: { Secret: { $ref: "file:///private/secret.json" } } },
   })
-  await expect(generate(remote, { base: uri, load })).rejects.toThrow()
-  expect(load).not.toHaveBeenCalled()
+  await expect(generate(...documentSource(remote, uri, { loader }))).rejects.toThrow()
+  expect(loader).not.toHaveBeenCalled()
 })
 
 it("times out custom loaders with the per-document deadline", async () => {
@@ -354,7 +385,7 @@ it("times out custom loaders with the per-document deadline", async () => {
   const started = deferred<void>()
   try {
     const pending = generate(uri, {
-      load: () => {
+      loader: () => {
         started.resolve()
         return new Promise(() => {
           /* Intentionally uncooperative loader. */
@@ -399,10 +430,10 @@ it("uses redirected response URLs as reference bases and counts decompressed HTT
     },
     async (origin) => {
       const custom = await generate(`${origin}/api`, {
-        load: (url, { signal }) => fetch(url, { signal }),
+        loader: (url, { signal }) => fetch(url, { signal }),
       })
       expect(custom.code).toContain("export type T = string")
-      const builtin = await generate(`${origin}/api`, { load: () => undefined })
+      const builtin = await generate(`${origin}/api`, { loader: () => undefined })
       expect(builtin.code).toBe(custom.code)
       await expect(
         generate(`${origin}/compressed`, {
@@ -416,7 +447,7 @@ it("uses redirected response URLs as reference bases and counts decompressed HTT
 it("rejects a custom remote response that claims a local retrieval URL", async () => {
   const response = Response.json(document)
   Object.defineProperty(response, "url", { value: "file:///private/secret.json" })
-  await expect(generate(uri, { load: () => response })).rejects.toThrow("Cannot redirect")
+  await expect(generate(uri, { loader: () => response })).rejects.toThrow("Cannot redirect")
 })
 
 it.each(["caller", "deadline"] as const)(
@@ -436,7 +467,7 @@ it.each(["caller", "deadline"] as const)(
       const pending = generate(uri, {
         signal: source === "caller" ? controller.signal : undefined,
         maxDocumentBytes: 1,
-        load: () =>
+        loader: () =>
           new Response(
             new ReadableStream({
               pull(stream) {
@@ -467,7 +498,7 @@ it("retains split UTF-8 characters across stream yields and empty decoder output
   let position = 0
   const result = await generate(uri, {
     maxDocumentBytes: bytes.length,
-    load: () =>
+    loader: () =>
       new Response(
         new ReadableStream({
           pull(stream) {

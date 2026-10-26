@@ -2,7 +2,7 @@ import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 import { GenerateError, generate } from "../src/core/index"
-import { codes, declaration, entry, gen, oas } from "./helpers/generate"
+import { codes, declaration, documentSource, entry, gen, oas } from "./helpers/generate"
 import { withServer } from "./helpers/http"
 import { withFiles } from "./helpers/tmp"
 import { expectPassesTsc } from "./helpers/tsc"
@@ -85,27 +85,31 @@ describe("reference resolution", () => {
       }
       const calls: string[] = []
       const result = await generate(
-        oas("3.2", {
-          paths: {
-            "/r": {
-              $ref: "routes/base.json",
-              parameters: [{ name: "X-Choice", in: "header", schema: { type: "number" } }],
-              get: {
-                responses: {
-                  "200": { content: { "application/json": { schema: { $ref: "selected.json" } } } },
+        ...documentSource(
+          oas("3.2", {
+            paths: {
+              "/r": {
+                $ref: "routes/base.json",
+                parameters: [{ name: "X-Choice", in: "header", schema: { type: "number" } }],
+                get: {
+                  responses: {
+                    "200": {
+                      content: { "application/json": { schema: { $ref: "selected.json" } } },
+                    },
+                  },
                 },
               },
             },
+          }),
+          "https://spec.test/api.json",
+          {
+            loader: (uri) => {
+              calls.push(uri)
+              const document = documents[uri]
+              return document ? Response.json(document) : new Response(null, { status: 404 })
+            },
           },
-        }),
-        {
-          base: "https://spec.test/api.json",
-          load: (uri) => {
-            calls.push(uri)
-            const document = documents[uri]
-            return document ? Response.json(document) : new Response(null, { status: 404 })
-          },
-        },
+        ),
       )
       expect(calls.toSorted()).toStrictEqual(Object.keys(documents).toSorted())
       expect(entry(result.code, "GET /r")).toContain('"application/json": Schemas.selected')
@@ -126,28 +130,30 @@ describe("reference resolution", () => {
       async (id) => {
         const calls: string[] = []
         const result = await generate(
-          oas("3.1", {
-            components: {
-              schemas: {
-                Alias: { $ref: "alias.json#named" },
-                OtherAlias: { $ref: "other.json#named" },
-                Final: { $ref: "moved.json#named" },
-                Pointer: { $ref: "alias.json#/$defs/Named" },
+          ...documentSource(
+            oas("3.1", {
+              components: {
+                schemas: {
+                  Alias: { $ref: "alias.json#named" },
+                  OtherAlias: { $ref: "other.json#named" },
+                  Final: { $ref: "moved.json#named" },
+                  Pointer: { $ref: "alias.json#/$defs/Named" },
+                },
+              },
+            }),
+            "https://spec.test/api.json",
+            {
+              loader: (uri) => {
+                calls.push(uri)
+                const response = Response.json({
+                  ...(id === undefined ? {} : { $id: id }),
+                  $defs: { Named: { $anchor: "named", type: "string" } },
+                })
+                Object.defineProperty(response, "url", { value: "https://spec.test/moved.json" })
+                return response
               },
             },
-          }),
-          {
-            base: "https://spec.test/api.json",
-            load: (uri) => {
-              calls.push(uri)
-              const response = Response.json({
-                ...(id === undefined ? {} : { $id: id }),
-                $defs: { Named: { $anchor: "named", type: "string" } },
-              })
-              Object.defineProperty(response, "url", { value: "https://spec.test/moved.json" })
-              return response
-            },
-          },
+          ),
         )
         expect(result.diagnostics).toStrictEqual([])
         expect(declaration(result.code, "Alias")).toBe("string")
@@ -160,22 +166,24 @@ describe("reference resolution", () => {
 
     it("resolves redirected anchors exposed by a later explicit schema reference", async () => {
       const result = await generate(
-        oas("3.1", {
-          components: {
-            schemas: {
-              Alias: { $ref: "alias.json#named" },
-              Pointer: { $ref: "alias.json#/x-schema" },
+        ...documentSource(
+          oas("3.1", {
+            components: {
+              schemas: {
+                Alias: { $ref: "alias.json#named" },
+                Pointer: { $ref: "alias.json#/x-schema" },
+              },
+            },
+          }),
+          "https://spec.test/api.json",
+          {
+            loader: () => {
+              const response = Response.json({ "x-schema": { $anchor: "named", type: "string" } })
+              Object.defineProperty(response, "url", { value: "https://spec.test/moved.json" })
+              return response
             },
           },
-        }),
-        {
-          base: "https://spec.test/api.json",
-          load: () => {
-            const response = Response.json({ "x-schema": { $anchor: "named", type: "string" } })
-            Object.defineProperty(response, "url", { value: "https://spec.test/moved.json" })
-            return response
-          },
-        },
+        ),
       )
       expect(result.diagnostics).toStrictEqual([])
       expect(declaration(result.code, "Alias")).toBe("string")
@@ -194,7 +202,7 @@ describe("reference resolution", () => {
         },
       })
       const result = await generate(uri, {
-        load: () => {
+        loader: () => {
           const response = Response.json(document)
           Object.defineProperty(response, "url", { value: uri })
           return response
@@ -233,27 +241,29 @@ describe("reference resolution", () => {
     it("discovers references behind an anchor made visible by later dictionary indexing", async () => {
       const calls: string[] = []
       const result = await generate(
-        oas("3.1", {
-          components: {
-            schemas: {
-              Anchor: { $ref: "common.json#named" },
-              Pointer: { $ref: "common.json#/x-schemas/Value" },
+        ...documentSource(
+          oas("3.1", {
+            components: {
+              schemas: {
+                Anchor: { $ref: "common.json#named" },
+                Pointer: { $ref: "common.json#/x-schemas/Value" },
+              },
+            },
+          }),
+          "https://spec.test/api.json",
+          {
+            loader: (uri) => {
+              calls.push(uri)
+              if (uri.endsWith("value.json")) return Response.json({ type: "string" })
+              return Response.json({
+                "x-schemas": {
+                  Value: { type: "number" },
+                  Named: { $anchor: "named", properties: { value: { $ref: "value.json" } } },
+                },
+              })
             },
           },
-        }),
-        {
-          base: "https://spec.test/api.json",
-          load: (uri) => {
-            calls.push(uri)
-            if (uri.endsWith("value.json")) return Response.json({ type: "string" })
-            return Response.json({
-              "x-schemas": {
-                Value: { type: "number" },
-                Named: { $anchor: "named", properties: { value: { $ref: "value.json" } } },
-              },
-            })
-          },
-        },
+        ),
       )
       expect(result.diagnostics).toStrictEqual([])
       expect(declaration(result.code, "Anchor")).toContain("value?: value")
@@ -265,37 +275,42 @@ describe("reference resolution", () => {
       const ref = { $ref: "unused.json" }
       const calls: string[] = []
       const result = await generate(
-        oas("3.1", {
-          components: {
-            schemas: {
-              Value: { "type": "string", "examples": [ref], "default": ref, "x-schema": ref },
+        ...documentSource(
+          oas("3.1", {
+            components: {
+              schemas: {
+                Value: { "type": "string", "examples": [ref], "default": ref, "x-schema": ref },
+              },
+              parameters: { Unused: ref },
             },
-            parameters: { Unused: ref },
-          },
-          paths: {
-            "/value": {
-              get: {
-                responses: {
-                  "200": {
-                    content: {
-                      "application/octet-stream": { schema: ref },
-                      "text/plain": { schema: { type: "object", properties: { hidden: ref } } },
-                      "application/json": { schema: { type: "string" }, examples: { unused: ref } },
+            paths: {
+              "/value": {
+                get: {
+                  responses: {
+                    "200": {
+                      content: {
+                        "application/octet-stream": { schema: ref },
+                        "text/plain": { schema: { type: "object", properties: { hidden: ref } } },
+                        "application/json": {
+                          schema: { type: "string" },
+                          examples: { unused: ref },
+                        },
+                      },
+                      headers: { "Content-Type": ref },
                     },
-                    headers: { "Content-Type": ref },
                   },
                 },
               },
             },
+          }),
+          "https://spec.test/api.json",
+          {
+            loader: (uri) => {
+              calls.push(uri)
+              return Response.json({ type: "number" })
+            },
           },
-        }),
-        {
-          base: "https://spec.test/api.json",
-          load: (uri) => {
-            calls.push(uri)
-            return Response.json({ type: "number" })
-          },
-        },
+        ),
       )
       expect(result.diagnostics).toStrictEqual([])
       expect(calls).toStrictEqual([])
@@ -332,39 +347,43 @@ describe("reference resolution", () => {
       const uri = "https://spec.test/cat.json"
       const calls: string[] = []
       const { code, diagnostics } = await generate(
-        oas("3.1", {
-          components: {
-            schemas: {
-              Pet: {
-                oneOf: [{ $ref: uri }],
-                discriminator: {
-                  propertyName: "kind",
-                  mapping: { $id: uri, $anchor: "Local", $dynamicAnchor: "Dynamic" },
+        ...documentSource(
+          oas("3.1", {
+            components: {
+              schemas: {
+                Pet: {
+                  oneOf: [{ $ref: uri }],
+                  discriminator: {
+                    propertyName: "kind",
+                    mapping: { $id: uri, $anchor: "Local", $dynamicAnchor: "Dynamic" },
+                  },
                 },
+                Local: { $anchor: "local", type: "string" },
+                Dynamic: { $dynamicAnchor: "dynamic", type: "number" },
+                LocalUse: { $ref: "#local" },
+                DynamicUse: { $ref: "#dynamic" },
+                Named: {
+                  type: "object",
+                  properties: {
+                    discriminator: { $id: "https://spec.test/named", type: "boolean" },
+                  },
+                },
+                NamedUse: { $ref: "https://spec.test/named" },
               },
-              Local: { $anchor: "local", type: "string" },
-              Dynamic: { $dynamicAnchor: "dynamic", type: "number" },
-              LocalUse: { $ref: "#local" },
-              DynamicUse: { $ref: "#dynamic" },
-              Named: {
+            },
+          }),
+          "https://spec.test/api.json",
+          {
+            loader: (url) => {
+              calls.push(url)
+              return Response.json({
                 type: "object",
-                properties: { discriminator: { $id: "https://spec.test/named", type: "boolean" } },
-              },
-              NamedUse: { $ref: "https://spec.test/named" },
+                properties: { kind: { type: "string" }, name: { type: "string" } },
+                required: ["kind", "name"],
+              })
             },
           },
-        }),
-        {
-          base: "https://spec.test/api.json",
-          load: (url) => {
-            calls.push(url)
-            return Response.json({
-              type: "object",
-              properties: { kind: { type: "string" }, name: { type: "string" } },
-              required: ["kind", "name"],
-            })
-          },
-        },
+        ),
       )
       expect(calls).toStrictEqual([uri])
       expect(diagnostics).toStrictEqual([])
@@ -443,14 +462,14 @@ describe("reference resolution", () => {
       )
     })
 
-    it("resolves an in-memory document's relative references against `base`", async () => {
+    it("resolves an in-memory document's relative references against its loader entry URI", async () => {
       await withFiles({ "schemas/thing.json": { type: "string" } }, async (dir) => {
         const doc = oas("3.1", {
           components: { schemas: { Thing: { $ref: "schemas/thing.json" } } },
         })
-        expect(declaration(await gen(doc, { base: join(dir, "openapi.json") }), "Thing")).toBe(
-          "string",
-        )
+        expect(
+          declaration(await gen(...documentSource(doc, join(dir, "openapi.json"))), "Thing"),
+        ).toBe("string")
         expect(await errorsOf(generate(doc))).toStrictEqual([
           "unresolved-ref #/components/schemas/Thing/$ref",
         ])
@@ -463,9 +482,9 @@ describe("reference resolution", () => {
           $self: "shared/openapi.json",
           components: { schemas: { Thing: { $ref: "thing.json" } } },
         })
-        expect(declaration(await gen(doc, { base: join(dir, "root.json") }), "Thing")).toBe(
-          "boolean",
-        )
+        expect(
+          declaration(await gen(...documentSource(doc, join(dir, "root.json"))), "Thing"),
+        ).toBe("boolean")
       })
     })
 
@@ -480,7 +499,7 @@ describe("reference resolution", () => {
           const doc = oas("3.1", {
             components: { schemas: { M: { $ref: "old.json#/components/schemas/N" } } },
           })
-          expect(declaration(await gen(doc, { base: join(dir, "x.json") }), "M")).toBe(
+          expect(declaration(await gen(...documentSource(doc, join(dir, "x.json"))), "M")).toBe(
             "string | null",
           )
         },
@@ -523,7 +542,7 @@ describe("reference resolution", () => {
         },
       })
       const result = await generate(api, {
-        load: (url) => {
+        loader: (url) => {
           calls.push(url)
           return Response.json(url === api ? doc : { type: "string" })
         },
@@ -540,35 +559,38 @@ describe("reference resolution", () => {
       const api = "https://spec.test/api.json"
       const nested = { $id: "lib/", $ref: "#/$defs/S", $defs: { S: { type: "null" } } }
       const result = await generate(
-        oas("3.1", {
-          paths: { "/a": { get: { responses: { "200": { $ref: "alias.json#/R" } } } } },
-          components: {
-            schemas: {
-              Pet: {
-                type: "object",
-                properties: { t: { $ref: "defs.json#/$defs/T" } },
-                $defs: { "a~b": { type: "object", properties: { p: nested } } },
+        ...documentSource(
+          oas("3.1", {
+            R: { description: "OK" },
+            paths: { "/a": { get: { responses: { "200": { $ref: "alias.json#/R" } } } } },
+            components: {
+              schemas: {
+                Pet: {
+                  type: "object",
+                  properties: { t: { $ref: "defs.json#/$defs/T" } },
+                  $defs: { "a~b": { type: "object", properties: { p: nested } } },
+                },
+                Lib: { $ref: "#/components/schemas/Pet/$defs/a~0b" },
               },
-              Lib: { $ref: "#/components/schemas/Pet/$defs/a~0b" },
+            },
+          }),
+          api,
+          {
+            loader: (url) => {
+              if (url !== "https://spec.test/alias.json") {
+                const type = url.startsWith("https://evil.test/") ? "boolean" : "string"
+                return Response.json({ $defs: { T: { type } } })
+              }
+              // A redirect to the entry reuses it; this copy's nested $id cannot rebase Pet.
+              const response = Response.json({
+                R: { description: "OK" },
+                components: { schemas: { Pet: { $id: "https://evil.test/pet.json" } } },
+              })
+              Object.defineProperty(response, "url", { value: api })
+              return response
             },
           },
-        }),
-        {
-          base: api,
-          load: (url) => {
-            if (url !== "https://spec.test/alias.json") {
-              const type = url.startsWith("https://evil.test/") ? "boolean" : "string"
-              return Response.json({ $defs: { T: { type } } })
-            }
-            // Another document at the entry's address, as a redirect leaves it.
-            const response = Response.json({
-              R: { description: "OK" },
-              components: { schemas: { Pet: { $id: "https://evil.test/pet.json" } } },
-            })
-            Object.defineProperty(response, "url", { value: api })
-            return response
-          },
-        },
+        ),
       )
       expect(declaration(result.code, "T")).toBe("string")
       expect(declaration(result.code, "Lib")).toBe("{\n  p?: S\n}")
@@ -630,7 +652,7 @@ describe("reference resolution", () => {
       }
       const calls: string[] = []
       const result = await generate(api, {
-        load: (url) => {
+        loader: (url) => {
           calls.push(url)
           return Response.json(documents[url])
         },
@@ -670,14 +692,16 @@ describe("reference resolution", () => {
         "https://spec.test/id.json": { type: "null" },
       }
       const result = await generate(
-        oas("3.1", { components: { schemas: { User: { $ref: `common.json#/${pointer}` } } } }),
-        {
-          base: api,
-          load: (uri) => {
-            calls.push(uri)
-            return Response.json(documents[uri])
+        ...documentSource(
+          oas("3.1", { components: { schemas: { User: { $ref: `common.json#/${pointer}` } } } }),
+          api,
+          {
+            loader: (uri) => {
+              calls.push(uri)
+              return Response.json(documents[uri])
+            },
           },
-        },
+        ),
       )
       expect(result.diagnostics).toStrictEqual([])
       expect(declaration(result.code, "User")).toBe("{\n  id?: id\n  tag?: Tag\n}")
@@ -698,30 +722,34 @@ describe("reference resolution", () => {
         }
         const calls: string[] = []
         const result = await generate(
-          oas("3.1", {
-            components: {
-              schemas: reverse ? Object.fromEntries(Object.entries(schemas).toReversed()) : schemas,
-            },
-          }),
-          {
-            base: "https://spec.test/api.json",
-            load: (uri) => {
-              calls.push(uri)
-              if (uri.endsWith("value.json")) return Response.json({ type: "string" })
-              return Response.json({
-                "x-schemas": {
-                  links: {
-                    $anchor: "named",
-                    $id: "nested/user.json",
-                    $defs: { Value: { $ref: "value.json" } },
-                    type: "boolean",
+          ...documentSource(
+            oas("3.1", {
+              components: {
+                schemas: reverse
+                  ? Object.fromEntries(Object.entries(schemas).toReversed())
+                  : schemas,
+              },
+            }),
+            "https://spec.test/api.json",
+            {
+              loader: (uri) => {
+                calls.push(uri)
+                if (uri.endsWith("value.json")) return Response.json({ type: "string" })
+                return Response.json({
+                  "x-schemas": {
+                    links: {
+                      $anchor: "named",
+                      $id: "nested/user.json",
+                      $defs: { Value: { $ref: "value.json" } },
+                      type: "boolean",
+                    },
+                    // Its anchor belongs to the containing document, before the nested $id.
+                    Named: { $anchor: "named", type: "integer" },
                   },
-                  // Its anchor belongs to the containing document, before the nested $id.
-                  Named: { $anchor: "named", type: "integer" },
-                },
-              })
+                })
+              },
             },
-          },
+          ),
         )
         expect(result.diagnostics).toStrictEqual([])
         expect(declaration(result.code, "Anchor")).toBe("number")
@@ -745,13 +773,14 @@ describe("reference resolution", () => {
       })
       expect(
         await errorsOf(
-          generate(doc, {
-            base: "https://spec.test/api.json",
-            load: () =>
-              Response.json({
-                "x-User": { $id: "https://shared.test/schema", $anchor: "other", type: "number" },
-              }),
-          }),
+          generate(
+            ...documentSource(doc, "https://spec.test/api.json", {
+              loader: () =>
+                Response.json({
+                  "x-User": { $id: "https://shared.test/schema", $anchor: "other", type: "number" },
+                }),
+            }),
+          ),
         ),
       ).toStrictEqual(["unresolved-ref #/components/schemas/Stolen/$ref"])
     })
@@ -769,21 +798,23 @@ describe("reference resolution", () => {
         "https://spec.test/child.json": { $anchor: "named", type: "number" },
       }
       const result = await generate(
-        oas("3.1", {
-          components: {
-            schemas: {
-              Nested: { $ref: "dict.json#/schemas" },
-              Separate: { $ref: "child.json#named" },
+        ...documentSource(
+          oas("3.1", {
+            components: {
+              schemas: {
+                Nested: { $ref: "dict.json#/schemas" },
+                Separate: { $ref: "child.json#named" },
+              },
+            },
+          }),
+          "https://spec.test/api.json",
+          {
+            loader: (uri) => {
+              calls.push(uri)
+              return Response.json(documents[uri])
             },
           },
-        }),
-        {
-          base: "https://spec.test/api.json",
-          load: (uri) => {
-            calls.push(uri)
-            return Response.json(documents[uri])
-          },
-        },
+        ),
       )
       expect(result.diagnostics).toStrictEqual([])
       expect(declaration(result.code, "Nested")).toBe("string")
@@ -795,22 +826,24 @@ describe("reference resolution", () => {
       "indexes %s on a schema named like a name map without mistaking map keys for declarations",
       async (keyword) => {
         const result = await generate(
-          oas("3.1", {
-            components: {
-              schemas: { Named: { $ref: "dict.json#named" }, Map: { $ref: "dict.json#/Map" } },
+          ...documentSource(
+            oas("3.1", {
+              components: {
+                schemas: { Named: { $ref: "dict.json#named" }, Map: { $ref: "dict.json#/Map" } },
+              },
+            }),
+            "https://spec.test/api.json",
+            {
+              loader: () =>
+                Response.json({
+                  properties: { [keyword]: "named", type: "number" },
+                  Map: {
+                    type: "object",
+                    properties: { $id: { type: "string" }, $anchor: { type: "boolean" } },
+                  },
+                }),
             },
-          }),
-          {
-            base: "https://spec.test/api.json",
-            load: () =>
-              Response.json({
-                properties: { [keyword]: "named", type: "number" },
-                Map: {
-                  type: "object",
-                  properties: { $id: { type: "string" }, $anchor: { type: "boolean" } },
-                },
-              }),
-          },
+          ),
         )
         expect(result.diagnostics).toStrictEqual([])
         expect(declaration(result.code, "Named")).toBe("number")
@@ -820,22 +853,24 @@ describe("reference resolution", () => {
 
     it("does not borrow canonical anchors through a redirected document's losing root id", async () => {
       const result = generate(
-        oas("3.1", {
-          components: {
-            schemas: {
-              Owner: { $id: "https://shared.test/value", $anchor: "named", type: "string" },
-              Other: { $ref: "alias.json#named" },
+        ...documentSource(
+          oas("3.1", {
+            components: {
+              schemas: {
+                Owner: { $id: "https://shared.test/value", $anchor: "named", type: "string" },
+                Other: { $ref: "alias.json#named" },
+              },
+            },
+          }),
+          "https://spec.test/api.json",
+          {
+            loader: () => {
+              const response = Response.json({ $id: "https://shared.test/value", type: "number" })
+              Object.defineProperty(response, "url", { value: "https://spec.test/moved.json" })
+              return response
             },
           },
-        }),
-        {
-          base: "https://spec.test/api.json",
-          load: () => {
-            const response = Response.json({ $id: "https://shared.test/value", type: "number" })
-            Object.defineProperty(response, "url", { value: "https://spec.test/moved.json" })
-            return response
-          },
-        },
+        ),
       )
       expect(await errorsOf(result)).toStrictEqual([
         "unresolved-ref #/components/schemas/Other/$ref",
@@ -845,18 +880,20 @@ describe("reference resolution", () => {
     it("does not activate $id in a 3.0 external schema dictionary", async () => {
       const calls: string[] = []
       const code = await gen(
-        oas("3.0", { components: { schemas: { User: { $ref: "common.json#/x-User" } } } }),
-        {
-          base: "https://spec.test/api.json",
-          load: (uri) => {
-            calls.push(uri)
-            return Response.json(
-              uri.endsWith("common.json")
-                ? { "x-User": { $id: "nested/user.json", $ref: "value.json" } }
-                : { type: "string" },
-            )
+        ...documentSource(
+          oas("3.0", { components: { schemas: { User: { $ref: "common.json#/x-User" } } } }),
+          "https://spec.test/api.json",
+          {
+            loader: (uri) => {
+              calls.push(uri)
+              return Response.json(
+                uri.endsWith("common.json")
+                  ? { "x-User": { $id: "nested/user.json", $ref: "value.json" } }
+                  : { type: "string" },
+              )
+            },
           },
-        },
+        ),
       )
       expect(declaration(code, "User")).toBe("string")
       expect(calls).toStrictEqual(["https://spec.test/common.json", "https://spec.test/value.json"])
@@ -950,7 +987,7 @@ describe("reference resolution", () => {
 })
 
 describe("reference discovery", () => {
-  it("keeps an in-memory document without base from reaching files or the network", async () => {
+  it("keeps a parsed input from reaching files or the network", async () => {
     await withFiles({ "secret.json": { type: "string", const: "TOP-SECRET" } }, async (dir) => {
       const file = pathToFileURL(join(dir, "secret.json")).href
       const docs = [
@@ -975,7 +1012,9 @@ describe("reference discovery", () => {
         // oxlint-disable-next-line no-await-in-loop -- each case is independent and quick
         const failure: unknown = await generate(doc).catch((error: unknown) => error)
         expect(failure).toBeInstanceOf(GenerateError)
-        expect(String((failure as GenerateError).message)).toContain("pass the `base` option")
+        expect(String((failure as GenerateError).message)).toContain(
+          "use an entry URI and `loader`",
+        )
       }
     })
   })
@@ -1003,7 +1042,7 @@ describe("reference discovery", () => {
               },
             },
           })
-          const code = await gen(doc, { base: join(dir, "openapi.json") })
+          const code = await gen(...documentSource(doc, join(dir, "openapi.json")))
           expect(declaration(code, "Local")).toBe("number")
         },
       )
@@ -1030,9 +1069,9 @@ describe("reference discovery", () => {
                 },
               },
             })
-            expect(declaration(await gen(claim, { base: join(dir, "x.json") }), "Local")).toBe(
-              "number",
-            )
+            expect(
+              declaration(await gen(...documentSource(claim, join(dir, "x.json"))), "Local"),
+            ).toBe("number")
             // The local file is loaded, and still out of the remote document's reach.
             const read = oas("3.1", {
               components: {
@@ -1042,9 +1081,9 @@ describe("reference discovery", () => {
                 },
               },
             })
-            expect(await errorsOf(generate(read, { base: join(dir, "x.json") }))).toStrictEqual([
-              `unresolved-ref ${origin}/read.json#/$defs/leak/$ref`,
-            ])
+            expect(
+              await errorsOf(generate(...documentSource(read, join(dir, "x.json")))),
+            ).toStrictEqual([`unresolved-ref ${origin}/read.json#/$defs/leak/$ref`])
           },
         )
       },
@@ -1066,9 +1105,9 @@ describe("reference discovery", () => {
                 },
               },
             })
-            expect(await errorsOf(generate(doc, { base: join(dir, "x.json") }))).toStrictEqual([
-              `unresolved-ref ${origin}/r.json#/$defs/leak/$ref`,
-            ])
+            expect(
+              await errorsOf(generate(...documentSource(doc, join(dir, "x.json")))),
+            ).toStrictEqual([`unresolved-ref ${origin}/r.json#/$defs/leak/$ref`])
           },
         )
       },
@@ -1091,7 +1130,7 @@ describe("reference discovery", () => {
             },
           },
         })
-        const code = await gen(doc, { base: join(dir, "openapi.json") })
+        const code = await gen(...documentSource(doc, join(dir, "openapi.json")))
         expect(declaration(code, "Pet")).toBe("{\n  owner?: Owner\n}")
       })
     })
@@ -1099,13 +1138,6 @@ describe("reference discovery", () => {
 
   it("reports a source that is not a valid URL", async () => {
     expect(await errorsOf(generate("http://[bad"))).toStrictEqual(["read-failed #"])
-    expect(
-      await errorsOf(
-        generate(oas("3.1", { components: { schemas: { A: { $ref: "x.json" } } } }), {
-          base: "http://[bad",
-        }),
-      ),
-    ).toStrictEqual(["unresolved-ref #/components/schemas/A/$ref"])
   })
 
   it("keeps a URI's anchors with the document that keeps the URI", async () => {
@@ -1128,7 +1160,7 @@ describe("reference discovery", () => {
       },
       "https://spec.test/b.json": { $id: "https://shared.test/s", $anchor: "evil", type: "number" },
     }
-    const options = { load: (url: string) => Response.json(documents[url]) }
+    const options = { loader: (url: string) => Response.json(documents[url]) }
     expect(await errorsOf(generate(api, options))).toStrictEqual([
       "unresolved-ref #/components/schemas/Evil/$ref",
     ])

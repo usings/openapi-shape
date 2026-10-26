@@ -129,20 +129,18 @@ export class DocumentSet {
   /**
    * Made by {@link loadDocuments}.
    *
-   * @param retrieval Whether other documents may be loaded. An in-memory document without a `base`
-   *   has no location to load anything relative to, and must not reach files or the network by
-   *   absolute URIs either.
+   * @param retrieval Whether other documents may be loaded. A parsed input has no retrieval URI and
+   *   must not reach files or the network, including by absolute URIs.
    */
   constructor(
     entry: LoadedDocument,
     private readonly retrieval: boolean,
     private readonly reader: DocumentReader,
     private readonly control: GenerationControl,
-    entryRetrieved: boolean,
   ) {
     this.entry = entry
     this.register(entry)
-    if (entryRetrieved) this.retrieved.set(entry.uri, entry)
+    if (retrieval) this.retrieved.set(entry.uri, entry)
   }
 
   get hasPending(): boolean {
@@ -308,7 +306,7 @@ export class DocumentSet {
       if (!this.retrieval || docUri.startsWith(MEMORY_SCHEME)) {
         return {
           kind: "error",
-          message: `"${ref}" points outside an in-memory document; pass the \`base\` option to resolve it`,
+          message: `"${ref}" points outside an in-memory document; use an entry URI and \`loader\` to resolve it`,
         }
       }
       if (!/^(?:https?|file):/i.test(docUri)) {
@@ -362,8 +360,7 @@ export class DocumentSet {
       this.retrieved.set(fetched.uri, document)
       this.register(document)
     }
-    // Retrieval aliases share the first document actually loaded at the final URL. An in-memory
-    // entry's base is only a location for references, not evidence that it was retrieved there.
+    // Retrieval aliases share the first document actually loaded at the final URL.
     this.claim(this.resources, uri, this.root(document))
   }
 
@@ -464,7 +461,6 @@ export class DocumentSet {
  */
 export async function loadDocuments(
   input: string | URL | object,
-  base: string | URL | undefined,
   diagnostics: Diagnostics,
   reader: DocumentReader,
   control: GenerationControl,
@@ -485,9 +481,8 @@ export async function loadDocuments(
       return undefined
     }
   } else {
-    uri = base === undefined ? MEMORY_URI : sourceUri(base)
+    uri = MEMORY_URI
     root = input
-    remote = /^https?:/i.test(uri)
   }
 
   if (!isRecord(root)) {
@@ -519,13 +514,7 @@ export async function loadDocuments(
     return undefined
   }
   const inMemory = typeof input !== "string" && !(input instanceof URL)
-  return new DocumentSet(
-    createDocument(uri, root, version, remote),
-    !inMemory || base !== undefined,
-    reader,
-    control,
-    !inMemory,
-  )
+  return new DocumentSet(createDocument(uri, root, version, remote), !inMemory, reader, control)
 }
 
 function createDocument(

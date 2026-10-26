@@ -60,13 +60,38 @@ try {
 
 Generation failures reject with `GenerateError`, whose `diagnostics` includes errors and any warnings found. Invalid numeric options reject with `TypeError`; cancellation rejects with `signal.reason`. A failed or canceled run returns no partial module. Unlike the CLI, `writeFile` above is a direct write without atomic replacement.
 
-| Option                  | Default         | Meaning                                                                                                             |
-| ----------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `base`                  | None            | Path or URL locating a parsed input object. Required to resolve references outside it; ignored for path/URL inputs. |
-| `signal`                | None            | Cancel loading and generation.                                                                                      |
-| `load(uri, { signal })` | Built-in loader | Return a successful `Response`, or `undefined` to delegate, directly or through a promise.                          |
-| `maxConcurrentLoads`    | `8`             | Maximum active document loads, including hooks and body reading.                                                    |
-| `maxDocumentBytes`      | `10485760`      | Streamed byte limit per document: 10 MiB.                                                                           |
+| Option                    | Default         | Meaning                                                                                    |
+| ------------------------- | --------------- | ------------------------------------------------------------------------------------------ |
+| `signal`                  | None            | Cancel loading and generation.                                                             |
+| `loader(uri, { signal })` | Built-in loader | Return a successful `Response`, or `undefined` to delegate, directly or through a promise. |
+| `maxConcurrentLoads`      | `8`             | Maximum active document loads, including hooks and body reading.                           |
+| `maxDocumentBytes`        | `10485760`      | Streamed byte limit per document: 10 MiB.                                                  |
+
+### Load an in-memory document with external references
+
+Parsed object inputs can reference only resources inside themselves, even when a loader is supplied. To resolve external references, supply an entry URI and return the in-memory document from its loader:
+
+```ts
+import { generate } from "openapi-shape"
+
+const document = {
+  openapi: "3.1.2",
+  info: { title: "Example", version: "1" },
+  components: { schemas: { Pet: { $ref: "./pet.json" } } },
+}
+const entry = "https://spec.example.com/openapi.json"
+const { code } = await generate(entry, {
+  loader(uri) {
+    if (uri === entry) return Response.json(document)
+    return undefined
+  },
+})
+console.log(code)
+```
+
+The entry URI locates the document and resolves `./pet.json` against the same origin. Returning `undefined` delegates external documents to the built-in loader. The entry also passes through parsing and document size limits.
+
+When migrating, rename the `load` option to `loader`. The `base` option has been removed: replace `generate(document, { base: uri, … })` with `generate(uri, { loader, … })`, returning the document for that entry URI as above.
 
 ### Authenticate document loading
 
@@ -76,7 +101,7 @@ A loader receives an absolute `file:`, `http:`, or `https:` URI without a fragme
 import { generate, type DocumentLoader } from "openapi-shape"
 
 const token = "replace-with-access-token"
-const load: DocumentLoader = (uri, { signal }) => {
+const loader: DocumentLoader = (uri, { signal }) => {
   if (new URL(uri).origin !== "https://spec.example.com") return undefined
   return fetch(uri, {
     signal,
@@ -85,7 +110,7 @@ const load: DocumentLoader = (uri, { signal }) => {
   })
 }
 const { code } = await generate("https://spec.example.com/openapi.yaml", {
-  load,
+  loader,
   signal: AbortSignal.timeout(15_000),
   maxConcurrentLoads: 4,
 })
