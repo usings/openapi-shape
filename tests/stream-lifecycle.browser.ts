@@ -88,9 +88,13 @@ describe("Web stream lifecycle", () => {
     }
   })
 
-  it.each(["paused", "reading"])(
-    "propagates cancellation reason and waits for cleanup while %s",
-    async (state) => {
+  it.each(
+    ["paused", "reading"].flatMap((state) =>
+      [undefined, null, new Error("consumer stopped")].map((reason) => ({ state, reason })),
+    ),
+  )(
+    "propagates cancellation reason $reason and waits for cleanup while $state",
+    async ({ state, reason }) => {
       const gate = Promise.withResolvers<void>()
       const cancel = vi.fn<(reason?: unknown) => Promise<void>>(() => gate.promise)
       const client = sseClient({
@@ -110,7 +114,6 @@ describe("Web stream lifecycle", () => {
       const reader = client.stream("GET /events", { retry: false }).getReader()
       await reader.read()
       const pending = state === "reading" ? reader.read() : undefined
-      const reason = new Error("consumer stopped")
       let finished = false
       const cancellation = reader.cancel(reason).then(() => {
         finished = true

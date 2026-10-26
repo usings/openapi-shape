@@ -51,7 +51,7 @@ export async function wait(delay: number, signal: AbortSignal): Promise<void> {
 
 /** The subscription can cancel its currently owned reader before aborting the transport. */
 export interface BodyOwner {
-  reader?: ReadableStreamDefaultReader<Uint8Array> | undefined
+  cancel?: ((reason?: unknown) => Promise<void>) | undefined
 }
 
 /** A parser owns one reader and propagates its cancellation and cleanup to the subscription. */
@@ -61,20 +61,20 @@ export function bodyReader(
   owner?: BodyOwner,
 ) {
   const reader = body.getReader()
-  if (owner) owner.reader = reader
   let completed = false
   let cancellation: Promise<void> | undefined
-  const cancel = (): Promise<void> => {
+  const cancel = (reason?: unknown): Promise<void> => {
     if (!cancellation) {
-      cancellation = reader.cancel(signal.aborted ? signal.reason : undefined)
+      cancellation = reader.cancel(reason)
       void cancellation.catch(() => {
         // Observed again by release and by the subscription's explicit cancel.
       })
     }
     return cancellation
   }
+  if (owner) owner.cancel = cancel
   const abort = (): void => {
-    void cancel()
+    void cancel(signal.reason)
   }
   signal.addEventListener("abort", abort, { once: true })
   if (signal.aborted) abort()
@@ -86,9 +86,9 @@ export function bodyReader(
     },
     async release() {
       signal.removeEventListener("abort", abort)
-      if (owner?.reader === reader) owner.reader = undefined
+      if (owner?.cancel === cancel) owner.cancel = undefined
       try {
-        if (!completed || cancellation) await cancel()
+        if (!completed || cancellation) await cancel(signal.aborted ? signal.reason : undefined)
       } finally {
         reader.releaseLock()
       }

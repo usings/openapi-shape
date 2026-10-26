@@ -43,7 +43,7 @@ export function stream(
     if (cleanup) return cleanup
     externalSignal?.removeEventListener("abort", abort)
     // Cancel the owned reader first: aborting Fetch can synchronously error its body.
-    const bodyCleanup = owner.reader?.cancel(reason)
+    const bodyCleanup = owner.cancel?.(reason)
     void bodyCleanup?.catch(() => {
       /* Observed by the returned cleanup promise. */
     })
