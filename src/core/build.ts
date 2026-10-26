@@ -1,6 +1,7 @@
 import { BuildContext } from "./build-context"
 import { Diagnostics } from "./diagnostics"
 import type { DocumentSet } from "./documents"
+import type { GenerationControl } from "./generation-control"
 import type { Info, Model } from "./model"
 import { normalizeModel } from "./normalize-model"
 import { isRecord } from "./object"
@@ -11,16 +12,17 @@ import { SchemaBuilder } from "./schemas"
 /** Load the reachable reference graph, then compile against its final document identities. */
 export async function buildModel(
   documents: DocumentSet,
+  control: GenerationControl,
 ): Promise<{ model: Model; diagnostics: Diagnostics }> {
-  await documents.reader.checkpoint()
-  const discovered = await discoverReferences(documents)
+  await control.checkpoint()
+  const discovered = await discoverReferences(documents, control)
   documents.finishDiscovery()
   const diagnostics = new Diagnostics()
   if (discovered.exhausted) {
     diagnostics.error("unresolved-ref", "References nest too deeply across documents", "#")
   }
   const model = await buildResolvedModel(
-    new BuildContext(documents, diagnostics),
+    new BuildContext(documents, diagnostics, control),
     discovered.repeated,
   )
   return { model, diagnostics }

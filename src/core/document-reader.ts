@@ -3,6 +3,7 @@ import { Readable } from "node:stream"
 import { setImmediate } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { parse as parseYaml } from "yaml"
+import type { GenerationControl } from "./generation-control"
 
 type TextFormat = "json" | "yaml" | "unknown"
 
@@ -21,8 +22,6 @@ export type DocumentLoader = (
 ) => Response | undefined | Promise<Response | undefined>
 
 export interface LoadingOptions {
-  /** Cancel loading and stop at generation checkpoints; rejection preserves signal.reason. */
-  signal?: AbortSignal
   /** Override entry and external document retrieval, or return undefined to delegate. */
   load?: DocumentLoader
   /** Maximum concurrent document loads; a positive safe integer. Default: 8. */
@@ -35,42 +34,23 @@ export interface LoadingOptions {
 export class DocumentReader {
   readonly concurrency: number
   private readonly maxBytes: number
-  private lastYield = performance.now()
-
-  constructor(private readonly options: LoadingOptions = {}) {
+  constructor(
+    private readonly options: LoadingOptions,
+    private readonly control: GenerationControl,
+  ) {
     this.concurrency = positiveInteger(options.maxConcurrentLoads, 8, "maxConcurrentLoads")
     this.maxBytes = positiveInteger(options.maxDocumentBytes, 10 * 1024 * 1024, "maxDocumentBytes")
   }
 
-  throwIfAborted(): void {
-    this.options.signal?.throwIfAborted()
-  }
-
-  /** Let a pending abort, such as a timeout, fire between synchronous generation stages. */
-  async checkpoint(): Promise<void> {
-    const { signal } = this.options
-    if (signal === undefined) return
-    await setImmediate()
-    signal.throwIfAborted()
-    this.lastYield = performance.now()
-  }
-
-  /** Yield between synchronous work units after a short time slice, only for cancellable runs. */
-  workpoint(): Promise<void> | undefined {
-    if (this.options.signal === undefined) return undefined
-    this.throwIfAborted()
-    return performance.now() - this.lastYield >= 8 ? this.checkpoint() : undefined
-  }
-
   async read(source: string): Promise<FetchedDocument> {
-    this.throwIfAborted()
+    this.control.throwIfAborted()
     const uri = withoutFragment(source)
     const url = new URL(uri)
     if (!RETRIEVABLE.has(url.protocol)) {
       throw new Error(`Cannot retrieve "${uri}"; expected a file or HTTP(S) URI`)
     }
     const deadline = AbortSignal.timeout(FETCH_TIMEOUT)
-    const signal = this.options.signal ? AbortSignal.any([this.options.signal, deadline]) : deadline
+    const signal = this.control.signal ? AbortSignal.any([this.control.signal, deadline]) : deadline
     const loaded = await abortable(
       Promise.resolve().then(() => this.options.load?.(uri, { signal })),
       signal,

@@ -4,6 +4,7 @@ import { Diagnostics } from "./diagnostics"
 import type { LoadingOptions } from "./document-reader"
 import { DocumentReader } from "./document-reader"
 import { loadDocuments } from "./documents"
+import { GenerationControl } from "./generation-control"
 import { PatternTimeoutError } from "./patterns"
 import { prepareOutput } from "./prepare-output"
 import { assignInputVariants } from "./projection"
@@ -13,6 +14,8 @@ export type { DocumentLoader } from "./document-reader"
 export type { Diagnostic, DiagnosticCode } from "./diagnostics"
 
 export interface GenerateOptions extends LoadingOptions {
+  /** Cancel loading and stop at generation checkpoints; rejection preserves signal.reason. */
+  signal?: AbortSignal
   /**
    * Where an in-memory document lives (file path or URL), so its relative `$ref`s can be resolved.
    * Ignored when `input` is a path or URL.
@@ -54,12 +57,13 @@ export async function generate(
   input: string | URL | object,
   options: GenerateOptions = {},
 ): Promise<GenerateResult> {
-  options.signal?.throwIfAborted()
-  const reader = new DocumentReader(options)
+  const control = new GenerationControl(options.signal)
+  control.throwIfAborted()
+  const reader = new DocumentReader(options, control)
   try {
-    return await run(input, options, reader)
+    return await run(input, options, reader, control)
   } catch (error) {
-    options.signal?.throwIfAborted()
+    control.throwIfAborted()
     // Deeply nested documents can exhaust the stack at any stage.
     if (!(error instanceof RangeError) && !(error instanceof PatternTimeoutError)) throw error
     throw new GenerateError([
@@ -81,16 +85,17 @@ async function run(
   input: string | URL | object,
   options: GenerateOptions,
   reader: DocumentReader,
+  control: GenerationControl,
 ): Promise<GenerateResult> {
   const loading = new Diagnostics()
-  const documents = await loadDocuments(input, options.base, loading, reader)
+  const documents = await loadDocuments(input, options.base, loading, reader, control)
   if (documents === undefined) throw new GenerateError(loading.list)
-  const { model, diagnostics } = await buildModel(documents)
+  const { model, diagnostics } = await buildModel(documents, control)
   assignInputVariants(model, diagnostics)
   if (diagnostics.hasErrors) throw new GenerateError(diagnostics.list)
-  await reader.checkpoint()
-  const output = await prepareOutput(model, () => reader.workpoint())
-  const code = await renderModule(output, () => reader.workpoint())
-  await reader.checkpoint()
+  await control.checkpoint()
+  const output = await prepareOutput(model, () => control.workpoint())
+  const code = await renderModule(output, () => control.workpoint())
+  await control.checkpoint()
   return { code, diagnostics: diagnostics.list }
 }

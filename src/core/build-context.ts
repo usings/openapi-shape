@@ -1,5 +1,6 @@
 import type { DiagnosticCode, Diagnostics } from "./diagnostics"
 import type { DocumentNode, DocumentSet } from "./documents"
+import type { GenerationControl } from "./generation-control"
 import { appendPointer } from "./json-pointer"
 
 /**
@@ -10,6 +11,7 @@ export class BuildContext {
   constructor(
     readonly documents: DocumentSet,
     readonly diagnostics: Diagnostics,
+    readonly control: GenerationControl,
   ) {}
 
   /** A warning at a node, or at one of its keys. */

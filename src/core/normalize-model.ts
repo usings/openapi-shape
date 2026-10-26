@@ -13,11 +13,11 @@ export async function normalizeModel(
 ): Promise<void> {
   const context = schemas.context
   await applyDiscriminators(context, schemas, operations)
-  await context.documents.reader.checkpoint()
+  await context.control.checkpoint()
   breakDirectCycles(context, schemas)
-  await context.documents.reader.checkpoint()
+  await context.control.checkpoint()
   await normalizeTypes(schemas, operations)
-  await context.documents.reader.checkpoint()
+  await context.control.checkpoint()
 }
 
 function allOperations(operations: Operations): Operation[] {
@@ -58,7 +58,7 @@ async function transformAll(
     const source = schemas.stateOf(declaration)?.node
     const location = source && schemas.context.documents.locate(source.document, source.pointer)
     declaration.type = rebuild(declaration.type, finish, schemas, location)
-    const pending = schemas.context.documents.reader.workpoint()
+    const pending = schemas.context.control.workpoint()
     // oxlint-disable-next-line no-await-in-loop -- yield between declarations, never inside algebra
     if (pending) await pending
   }
@@ -82,7 +82,7 @@ async function transformAll(
         media.type = rebuild(media.type, finish, schemas, media.location)
       response.headers = fields(response.headers)
     }
-    const pending = schemas.context.documents.reader.workpoint()
+    const pending = schemas.context.control.workpoint()
     // oxlint-disable-next-line no-await-in-loop -- yield between complete operations
     if (pending) await pending
   }

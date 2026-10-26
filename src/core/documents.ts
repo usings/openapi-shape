@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url"
 import type { Diagnostics } from "./diagnostics"
 import type { DocumentReader, FetchedDocument } from "./document-reader"
 import { assertAcyclic, withoutFragment } from "./document-reader"
+import type { GenerationControl } from "./generation-control"
 import { appendPointer, parsePointer, readPointer } from "./json-pointer"
 import { isRecord } from "./object"
 
@@ -135,7 +136,8 @@ export class DocumentSet {
   constructor(
     entry: LoadedDocument,
     private readonly retrieval: boolean,
-    readonly reader: DocumentReader,
+    private readonly reader: DocumentReader,
+    private readonly control: GenerationControl,
     entryRetrieved: boolean,
   ) {
     this.entry = entry
@@ -193,7 +195,7 @@ export class DocumentSet {
           fetched[index] = { document: await this.reader.read(uris[index]) }
         } catch (error) {
           // Cancellation stops every worker; any other failure belongs to its document.
-          this.reader.throwIfAborted()
+          this.control.throwIfAborted()
           fetched[index] = { error }
         }
       }
@@ -465,6 +467,7 @@ export async function loadDocuments(
   base: string | URL | undefined,
   diagnostics: Diagnostics,
   reader: DocumentReader,
+  control: GenerationControl,
 ): Promise<DocumentSet | undefined> {
   let uri: string
   let root: unknown
@@ -477,7 +480,7 @@ export async function loadDocuments(
       root = fetched.root
       remote = !isFileUri(uri)
     } catch (error) {
-      reader.throwIfAborted()
+      control.throwIfAborted()
       diagnostics.error("read-failed", `Cannot read ${uri}: ${errorMessage(error)}`, "#")
       return undefined
     }
@@ -520,6 +523,7 @@ export async function loadDocuments(
     createDocument(uri, root, version, remote),
     !inMemory || base !== undefined,
     reader,
+    control,
     !inMemory,
   )
 }

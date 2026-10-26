@@ -35,7 +35,7 @@ export async function buildOperations(
       // The Paths Object allows specification extensions beside its paths.
       if (path.startsWith("x-")) continue
       ops.pathItem(context.documents.child(paths, path), "endpoint", path, "", new Set())
-      const pending = context.documents.reader.workpoint()
+      const pending = context.control.workpoint()
       // oxlint-disable-next-line no-await-in-loop -- yield between independent path items
       if (pending) await pending
     }
@@ -45,7 +45,7 @@ export async function buildOperations(
   if (isRecord(webhooks.value)) {
     for (const name of Object.keys(webhooks.value)) {
       ops.pathItem(context.documents.child(webhooks, name), "webhook", name, "", new Set())
-      const pending = context.documents.reader.workpoint()
+      const pending = context.control.workpoint()
       // oxlint-disable-next-line no-await-in-loop -- yield between independent webhook items
       if (pending) await pending
     }

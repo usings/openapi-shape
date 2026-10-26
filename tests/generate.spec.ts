@@ -289,24 +289,48 @@ const longLocation: I["body"]["application/json"] = { secret: "s", name: "pet", 
 describe("cancellation", () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it("interrupts CPU work without returning partial output and isolates concurrent generations", async () => {
+  it("keeps in-memory generation off the event loop when no signal is supplied", async () => {
     clockSlices()
-    const controller = new AbortController()
-    const reason = { cancelled: "generation" }
-    const input = endpoints(200)
-    const before = structuredClone(input)
-    const pending = generate(input, { signal: controller.signal })
-    const timer = setImmediate(() => controller.abort(reason))
+    let yielded = false
+    const timer = setImmediate(() => {
+      yielded = true
+    })
     try {
-      const [cancelled, complete] = await Promise.allSettled([pending, generate(input)])
-      expect(cancelled).toStrictEqual({ status: "rejected", reason })
-      expect(complete.status).toBe("fulfilled")
-      const recovered = await generate(input)
-      expect(complete).toStrictEqual({ status: "fulfilled", value: recovered })
-      expect(recovered.diagnostics).toStrictEqual([])
-      expect(input).toStrictEqual(before)
+      const result = await generate(endpoints(200))
+      expect(result.diagnostics).toStrictEqual([])
+      expect(result.code).toContain('"GET /items/199"')
+      expect(yielded).toBe(false)
     } finally {
       clearImmediate(timer)
     }
   })
+
+  it.each([false, true])(
+    "interrupts CPU work and isolates concurrent generations (other cancellable: %s)",
+    async (cancellable) => {
+      clockSlices()
+      const controller = new AbortController()
+      const other = new AbortController()
+      const reason = { cancelled: "generation" }
+      const input = endpoints(200)
+      const before = structuredClone(input)
+      const pending = generate(input, { signal: controller.signal })
+      const timer = setImmediate(() => controller.abort(reason))
+      try {
+        const [cancelled, complete] = await Promise.allSettled([
+          pending,
+          generate(input, cancellable ? { signal: other.signal } : {}),
+        ])
+        expect(cancelled).toStrictEqual({ status: "rejected", reason })
+        expect(complete.status).toBe("fulfilled")
+        expect(other.signal.aborted).toBe(false)
+        const recovered = await generate(input)
+        expect(complete).toStrictEqual({ status: "fulfilled", value: recovered })
+        expect(recovered.diagnostics).toStrictEqual([])
+        expect(input).toStrictEqual(before)
+      } finally {
+        clearImmediate(timer)
+      }
+    },
+  )
 })

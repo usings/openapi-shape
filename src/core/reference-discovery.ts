@@ -1,6 +1,7 @@
 import { selectContentSource, selectParameterValue } from "./content-sources"
 import { componentNameOf, identity } from "./document-nodes"
 import type { DocumentNode, DocumentSet } from "./documents"
+import type { GenerationControl } from "./generation-control"
 import { isRecord } from "./object"
 import { selectOperations, selectParameterSources, selectPathItem } from "./operation-sources"
 import { inspectObject, referencesOf } from "./references"
@@ -13,8 +14,9 @@ import { aliasReference } from "./schema-rules"
  */
 export function discoverReferences(
   documents: DocumentSet,
+  control: GenerationControl,
 ): Promise<{ repeated: Set<string>; exhausted: boolean }> {
-  const discovery = new ReferenceDiscovery(documents)
+  const discovery = new ReferenceDiscovery(documents, control)
   discovery.start()
   return discovery.run()
 }
@@ -25,7 +27,10 @@ class ReferenceDiscovery {
   private readonly incoming = new Map<string, Set<string>>()
   private retry = false
 
-  constructor(private readonly documents: DocumentSet) {}
+  constructor(
+    private readonly documents: DocumentSet,
+    private readonly control: GenerationControl,
+  ) {}
 
   start(): void {
     const root = this.documents.root(this.documents.entry)
@@ -42,7 +47,7 @@ class ReferenceDiscovery {
       for (const task of this.queue) {
         this.retry = false
         if (!task() || this.retry) pending.push(task)
-        const checkpoint = this.documents.reader.workpoint()
+        const checkpoint = this.control.workpoint()
         // oxlint-disable-next-line no-await-in-loop -- yield between graph positions
         if (checkpoint) await checkpoint
       }
