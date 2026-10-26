@@ -13,14 +13,14 @@ Generate types and a runtime `contract` from OpenAPI 3.0, 3.1, or 3.2. Make type
 
 You need Node.js 22 or later to generate a module. The client needs an ES module environment with Fetch and Web Streams.
 
-Start with your API's JSON or YAML description, saved as `openapi.yaml`. To follow the example unchanged, save the [Petstore description](./docs/examples/petstore.yaml) as that file; its `GET /pets` operation returns pets.
+Save your OpenAPI JSON or YAML description as `openapi.yaml`. The example below uses the [Petstore description](./docs/examples/petstore.yaml).
 
 ```sh
 pnpm add openapi-shape
 pnpm exec openapi-shape ./openapi.yaml -o src/api.ts
 ```
 
-In `src/main.ts`, import the generated contract and replace `baseURL` with your running API's address; the example domain is a placeholder:
+Import the generated contract and set `baseURL` to your API's address. Adjust the import path to match your generated file:
 
 ```ts
 import { createClient } from "openapi-shape/client"
@@ -40,7 +40,7 @@ if (error !== undefined) throw new Error(`HTTP ${status}`, { cause: error })
 console.log(pets.map((pet) => pet.name))
 ```
 
-The endpoint key selects its request inputs and response types. HTTP error responses resolve as `error`; request, transport, and decoding failures reject. Types describe the API but do not validate payloads at runtime.
+Endpoint keys such as `GET /pets` select the request and response types. When using your own description, use its declared endpoints and parameters.
 
 ## Choose a response API
 
