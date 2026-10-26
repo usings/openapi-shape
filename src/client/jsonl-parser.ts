@@ -1,5 +1,6 @@
 import type { BodyOwner } from "./cancellation"
 import { bodyReader } from "./cancellation"
+import { MessageBuffer } from "./message-buffer"
 
 /** A malformed JSON line; line is one-based and input contents are never embedded in the message. */
 export class StreamParseError extends SyntaxError {
@@ -21,24 +22,17 @@ export async function* readJsonLines(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
   owner?: BodyOwner,
+  maxMessageBytes = Infinity,
 ): AsyncGenerator<unknown> {
   const reader = bodyReader(body, signal, owner)
   let failed = false
   // Preserve BOM so JSON.parse rejects it; do not replace malformed UTF-8 with different data.
   const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
-  let fragments: Uint8Array[] = []
+  const buffer = new MessageBuffer(maxMessageBytes)
   let line = 1
   const parse = (): unknown => {
-    const size = fragments.reduce((length, part) => length + part.length, 0)
-    const bytes = new Uint8Array(size)
-    let offset = 0
-    for (const part of fragments) {
-      bytes.set(part, offset)
-      offset += part.length
-    }
-    fragments = []
     try {
-      return JSON.parse(decoder.decode(bytes))
+      return JSON.parse(decoder.decode(buffer.take()))
     } catch (error) {
       throw new StreamParseError(line, error)
     }
@@ -50,20 +44,20 @@ export async function* readJsonLines(
       const chunk = await reader.read()
       signal.throwIfAborted()
       if (chunk.done) {
-        if (fragments.length > 0) yield parse()
+        if (buffer.byteLength > 0) yield parse()
         return
       }
       let start = 0
       const bytes = chunk.value
       for (let i = 0; i < bytes.length; i++) {
         if (bytes[i] !== 10) continue
-        fragments.push(bytes.subarray(start, i))
+        buffer.append(bytes.subarray(start, i))
         start = i + 1
         yield parse()
         signal.throwIfAborted()
         line++
       }
-      if (start < bytes.length) fragments.push(bytes.subarray(start))
+      buffer.append(bytes.subarray(start))
     }
   } catch (error) {
     failed = true

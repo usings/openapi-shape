@@ -572,6 +572,18 @@ async function run() {
     ).toBe("")
   })
 
+  it("checks stream limits and generic wrappers under strict optional and index settings", async () => {
+    const assertions = await readFile(join(import.meta.dirname, "types/stream.ts"), "utf8")
+    expect(
+      await typecheck(
+        {
+          "stream.ts": assertions.replace('from "../../src/client"', 'from "openapi-shape/client"'),
+        },
+        { compilerOptions: { exactOptionalPropertyTypes: true, noUncheckedIndexedAccess: true } },
+      ),
+    ).toBe("")
+  })
+
   it("checks 300 heterogeneous endpoints directly and through both generic wrapper forms", async () => {
     const ids = Array.from({ length: 300 }, (_, i) => i)
     const { code, diagnostics } = await generate(

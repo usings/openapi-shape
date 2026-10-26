@@ -38,6 +38,7 @@ export type {
 } from "./types"
 export type { StreamMessage } from "./sse-parser"
 export { StreamParseError } from "./jsonl-parser"
+export { StreamMessageTooLargeError } from "./message-buffer"
 export { StreamResponseError } from "./stream"
 
 /**

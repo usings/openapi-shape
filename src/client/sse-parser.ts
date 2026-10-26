@@ -1,5 +1,6 @@
 import type { BodyOwner } from "./cancellation"
 import { bodyReader } from "./cancellation"
+import { MessageBuffer } from "./message-buffer"
 
 /** One dispatched SSE event. Data is text, even when it contains JSON. */
 export interface StreamMessage {
@@ -32,11 +33,16 @@ export async function* readEvents(
   state: EventState,
   signal: AbortSignal,
   owner?: BodyOwner,
+  maxMessageBytes = Infinity,
 ): AsyncGenerator<StreamMessage> {
   const reader = bodyReader(body, signal, owner)
   let failed = false
-  const decoder = new TextDecoder()
-  let fragments: string[] = []
+  // Decode complete lines so limits are checked on raw bytes before allocating strings.
+  // Preserve BOMs here and strip only the one at the start of the connection.
+  const decoder = new TextDecoder("utf-8", { ignoreBOM: true })
+  const buffer = new MessageBuffer(maxMessageBytes)
+  let firstLine = true
+  let messageBytes = 0
   let data: string[] = []
   let event = ""
   let id = state.id
@@ -54,24 +60,29 @@ export async function* readEvents(
       }
       signal.throwIfAborted()
       if (chunk.done) return // An unterminated event is never dispatched.
-      const text = decoder.decode(chunk.value, { stream: true })
+      const bytes = chunk.value
       let start = 0
-      for (let i = 0; i < text.length; i++) {
-        const char = text[i]
+      for (let i = 0; i < bytes.length; i++) {
+        const byte = bytes[i]
         if (skipLF) {
           skipLF = false
-          if (char === "\n") {
+          if (byte === 10) {
             start = i + 1
             continue
           }
         }
-        if (char !== "\r" && char !== "\n") continue
-        skipLF = char === "\r"
-        fragments.push(text.slice(start, i))
-        const line = fragments.join("")
-        fragments = []
+        if (byte !== 13 && byte !== 10) continue
+        skipLF = byte === 13
+        buffer.append(bytes.subarray(start, i), messageBytes)
+        const lineBytes = buffer.byteLength
+        let line = decoder.decode(buffer.take())
+        if (firstLine) {
+          firstLine = false
+          if (line.startsWith("\uFEFF")) line = line.slice(1)
+        }
         start = i + 1
         if (line === "") {
+          messageBytes = 0
           state.id = id
           if (data.length > 0) {
             yield {
@@ -87,6 +98,9 @@ export async function* readEvents(
           retry = undefined
           continue
         }
+        // Heartbeats are discarded once their line is complete, even without a blank block.
+        if (line.startsWith(":")) continue
+        messageBytes += lineBytes
         const colon = line.indexOf(":")
         const field = colon === -1 ? line : line.slice(0, colon)
         let value = colon === -1 ? "" : line.slice(colon + 1)
@@ -111,7 +125,7 @@ export async function* readEvents(
             break
         }
       }
-      if (start < text.length) fragments.push(text.slice(start))
+      buffer.append(bytes.subarray(start), messageBytes)
     }
   } catch (error) {
     failed = true

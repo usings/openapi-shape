@@ -4,6 +4,7 @@ import { abortable, cancelBody } from "./cancellation"
 import { readJsonSequence } from "./json-seq-parser"
 import { readJsonLines } from "./jsonl-parser"
 import { responseMediaType } from "./media"
+import { messageLimit } from "./message-buffer"
 import type { MiddlewareContext, Sender } from "./middleware"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest } from "./request"
@@ -119,7 +120,8 @@ async function* subscription(
     : undefined
   if (!media?.length)
     throw new TypeError(`Endpoint "${endpoint}" does not declare a successful streaming response`)
-  const { accept, retry, ...call } = init
+  const { accept, retry, maxMessageBytes, ...call } = init
+  const limit = messageLimit(maxMessageBytes)
   const selected = accept ?? (media.length === 1 ? media[0] : undefined)
   if (selected === undefined || !media.includes(selected))
     throw new TypeError(`Choose a declared streaming media type with accept for "${endpoint}"`)
@@ -148,7 +150,7 @@ async function* subscription(
     }
     first = false
     const request = new Request(template, { headers: own, ...(body === undefined ? {} : { body }) })
-    return connection(request, selected, state, send, context, signal, owner)
+    return connection(request, selected, state, send, context, signal, owner, limit)
   }
   if (format === "sse") yield* sseSession(connect, state, retry, signal)
   else yield* connect()
@@ -167,6 +169,7 @@ async function* connection(
   context: MiddlewareContext,
   signal: AbortSignal,
   owner: BodyOwner,
+  maxMessageBytes: number,
 ): AsyncGenerator<unknown, boolean> {
   const transportFailures: unknown[] = []
   let response: Response | undefined
@@ -206,15 +209,15 @@ async function* connection(
       throw new StreamResponseError(`Expected an unused ${selected} response body`, response)
     if (sse) {
       try {
-        yield* readEvents(response.body, state, signal, owner)
+        yield* readEvents(response.body, state, signal, owner, maxMessageBytes)
       } catch (error) {
         signal.throwIfAborted()
         if (error instanceof StreamReadError) throw new RetryableStreamError(error.cause)
         throw error
       }
     } else if (streamFormat(selected) === "json-seq")
-      yield* readJsonSequence(response.body, signal, owner)
-    else yield* readJsonLines(response.body, signal, owner)
+      yield* readJsonSequence(response.body, signal, owner, maxMessageBytes)
+    else yield* readJsonLines(response.body, signal, owner, maxMessageBytes)
     return false
   } finally {
     if (response && !response.body?.locked) cancelBody(response, signal.reason)

@@ -40,6 +40,31 @@ describe("SSE parser", () => {
     }
   })
 
+  it("keeps UTF-8 replacement and BOM handling consistent across line and chunk boundaries", async () => {
+    const encoder = new TextEncoder()
+    const encoded = new Uint8Array([
+      ...encoder.encode("\uFEFFdata:"),
+      0xc3,
+      ...encoder.encode("\ndata:"),
+      0xa9,
+      ...encoder.encode("\n\ndata:\uFEFF\n\n"),
+    ])
+    for (let i = 0; i <= encoded.length; i++) {
+      const events: StreamMessage[] = []
+      // oxlint-disable-next-line no-await-in-loop -- every split must preserve the same wire text
+      for await (const event of readEvents(
+        bytes([encoded.slice(0, i), encoded.slice(i)]),
+        { id: "", retry: 1000 },
+        new AbortController().signal,
+      ))
+        events.push(event)
+      expect(events).toStrictEqual([
+        { data: "�\n�", event: "message", id: "" },
+        { data: "\uFEFF", event: "message", id: "" },
+      ])
+    }
+  })
+
   it("ignores invalid retry and id fields, unknown fields, comments and incomplete cursors", async () => {
     const state = { id: "old", retry: 1000 }
     const body = new TextEncoder().encode(

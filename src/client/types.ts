@@ -9,9 +9,11 @@ export interface StreamRetryOptions {
   maxRetries?: number
 }
 
-/** The response representation to consume, and SSE reconnection settings. */
+/** The response representation, per-message byte limit, and SSE reconnection settings. */
 export interface StreamOptions {
   accept?: string
+  /** Maximum UTF-8 bytes per message; a positive safe integer. Omitted means no limit. */
+  maxMessageBytes?: number | undefined
   retry?: false | StreamRetryOptions
 }
 
@@ -147,7 +149,10 @@ type Replayable<Call> = Call extends unknown
         : Call[P]
     }
   : never
-type StreamInit<E, K extends StreamEndpoint<E>, M extends StreamMedia<E, K>> = {
+type StreamInit<E, K extends StreamEndpoint<E>, M extends StreamMedia<E, K>> = Pick<
+  StreamOptions,
+  "maxMessageBytes"
+> & {
   accept?: M
 } & StreamSelection<E, K, M>
 type StreamSelection<

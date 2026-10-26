@@ -9,6 +9,7 @@ import type {
   StreamEndpoint,
   StreamMedia,
   StreamMessage,
+  StreamOptions,
 } from "../../src/client"
 interface Content<M extends string, T> {
   content: Record<M, T>
@@ -104,6 +105,14 @@ export const message: EndpointMessage<Endpoints, "GET /events"> = {
   id: "1",
 }
 api.stream("GET /events", { retry: false, signal: AbortSignal.abort() })
+const limited: Pick<StreamOptions, "maxMessageBytes"> = { maxMessageBytes: 8 * 1024 * 1024 }
+api.stream("GET /events", limited) satisfies ReadableStream<
+  EndpointMessage<Endpoints, "GET /events">
+>
+api.stream("GET /events", { ...limited, retry: false })
+export function limitedEvents(maxMessageBytes?: number) {
+  return api.stream("GET /events", { maxMessageBytes })
+}
 api.stream("GET /events", { accept: "text/event-stream", retry: { delay: 12, maxRetries: 2 } })
 // @ts-expect-error Web Streams return synchronously
 api.stream("GET /events").then()
@@ -117,6 +126,17 @@ export async function eventFields() {
   void item.value.extra
 }
 api.stream("GET /sequence") satisfies ReadableStream<{ id: number } | null>
+api.stream("GET /sequence", limited) satisfies ReadableStream<{ id: number } | null>
+api.stream("GET /records", limited)
+api.stream("GET /jsonl", { ...limited, accept: "Application/JSONL; charset=utf-8" })
+// @ts-expect-error the per-message limit is numeric
+api.stream("GET /events", { maxMessageBytes: "8 MiB" })
+// @ts-expect-error parser limits do not apply to raw fetch responses
+api.fetch("GET /events", limited)
+// @ts-expect-error parser limits do not apply to result decoding
+api.result("GET /plain", limited)
+// @ts-expect-error a byte limit does not supply required request inputs
+api.stream("POST /events/{id}", limited)
 // @ts-expect-error sequence endpoints must use stream or fetch
 api.result("GET /sequence")
 // @ts-expect-error JSON sequences do not retry
@@ -171,6 +191,7 @@ api.stream("POST /events/{id}", {
   query: { topic: "orders" },
   body: new ReadableStream<Uint8Array>(),
   retry: { maxRetries: 0 },
+  maxMessageBytes: 1024,
 })
 // @ts-expect-error a reconnecting subscription still requires replayable bytes
 api.stream("POST /events/{id}", {
@@ -198,6 +219,10 @@ api.stream("GET /mixed", { accept: "application/x-ndjson" }) satisfies ReadableS
 }>
 api.stream("GET /mixed", { accept: "application/jsonl" }) satisfies ReadableStream<number[]>
 api.stream("GET /mixed", { accept: "application/json-seq" }) satisfies ReadableStream<boolean>
+api.stream("GET /mixed", {
+  accept: "application/jsonl",
+  maxMessageBytes: 1024,
+}) satisfies ReadableStream<number[]>
 // @ts-expect-error ordinary JSON is not a streaming choice
 api.stream("GET /mixed", { accept: "application/json" })
 // @ts-expect-error the selected JSON line media forbids retry
@@ -232,6 +257,10 @@ function anyApi<E, K extends StreamEndpoint<E>, const M extends StreamMedia<E, K
   return client.stream(key, ...args)
 }
 anyApi(api, "GET /mixed", { accept: "application/jsonl" }) satisfies ReadableStream<number[]>
+anyApi(api, "GET /mixed", {
+  accept: "application/jsonl",
+  maxMessageBytes: 1024,
+}) satisfies ReadableStream<number[]>
 function forwardDefault<K extends StreamEndpoint<Endpoints>>(
   key: K,
   ...args: StreamArgs<Endpoints, K>

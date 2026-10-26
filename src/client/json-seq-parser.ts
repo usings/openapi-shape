@@ -1,5 +1,6 @@
 import type { BodyOwner } from "./cancellation"
 import { bodyReader } from "./cancellation"
+import { MessageBuffer } from "./message-buffer"
 
 /**
  * Decode RFC 7464 records on demand, recovering at RS after malformed or truncated JSON.
@@ -10,31 +11,25 @@ export async function* readJsonSequence(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
   owner?: BodyOwner,
+  maxMessageBytes = Infinity,
 ): AsyncGenerator<unknown> {
   const reader = bodyReader(body, signal, owner)
   const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
-  let fragments: Uint8Array[] = []
+  const buffer = new MessageBuffer(maxMessageBytes)
   let active = false
   let started = false
   let quoted = false
   let escaped = false
   let depth = 0
   let failed = false
-  const parse = (): [] | [unknown] => {
-    const size = fragments.reduce((length, part) => length + part.length, 0)
-    const bytes = new Uint8Array(size)
-    let offset = 0
-    for (const part of fragments) {
-      bytes.set(part, offset)
-      offset += part.length
-    }
-    fragments = []
+  const parse = (terminated = false): [] | [unknown] => {
     try {
-      const text = decoder.decode(bytes)
+      const text = decoder.decode(buffer.take())
       const value: unknown = JSON.parse(text)
       // Numbers and literal values need trailing JSON whitespace to rule out truncation.
       if (
         (value === null || typeof value === "number" || typeof value === "boolean") &&
+        !terminated &&
         !/[\x20\t\r\n]$/.test(text)
       )
         return []
@@ -58,7 +53,7 @@ export async function* readJsonSequence(
       for (let i = 0; i < bytes.length; i++) {
         const byte = bytes[i]
         if (byte === 30) {
-          if (active) fragments.push(bytes.subarray(start, i))
+          if (active) buffer.append(bytes.subarray(start, i))
           const result = active ? parse() : []
           active = true
           started = false
@@ -81,13 +76,13 @@ export async function* readJsonSequence(
         if (byte !== 32 && byte !== 9 && byte !== 13 && byte !== 10) started = true
         // A top-level LF finishes a record without waiting for another RS or EOF.
         if (byte === 10 && started && !quoted && depth === 0) {
-          fragments.push(bytes.subarray(start, i + 1))
+          buffer.append(bytes.subarray(start, i))
           active = false
-          yield* parse()
+          yield* parse(true)
           signal.throwIfAborted()
         }
       }
-      if (active && start < bytes.length) fragments.push(bytes.subarray(start))
+      if (active) buffer.append(bytes.subarray(start))
     }
   } catch (error) {
     failed = true

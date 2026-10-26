@@ -62,9 +62,31 @@ JSON Text Sequences (`application/json-seq`) use an RS byte (`0x1E`) before each
 
 JSON record streams close at EOF, reject a `retry` option, and never reconnect automatically. Transport failures propagate and discard pending partial records. Reopening and deduplicating records belong to your application. Formats such as `application/example+json-seq` are not decoded by `stream()`; read them with `fetch()`.
 
+## Limit message size
+
+Set `maxMessageBytes` to bound a single message while it is being assembled:
+
+```ts
+const events = api.stream("GET /events", {
+  maxMessageBytes: 8 * 1024 * 1024,
+})
+```
+
+The limit is a positive safe integer in UTF-8 bytes; omitted means no limit. Each message has its own budget, across any number of received chunks. A chunk containing many small messages can exceed the limit in total, and a long-lived connection can transfer any amount of data.
+
+| Format              | Bytes counted                                                                                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SSE                 | Field-line contents in the current event block, including field names, excluding CR/LF. Complete comment lines are discarded rather than accumulated; an unfinished line shares the current message's budget. |
+| JSONL / NDJSON      | JSON text before LF, including whitespace and a preceding CR, if present.                                                                                                                                     |
+| JSON Text Sequences | JSON text after RS, excluding RS and the terminating top-level LF; whitespace inside the record counts.                                                                                                       |
+
+The parser checks before buffering more bytes or decoding a record. Exceeding the limit errors the stream with `StreamMessageTooLargeError`, which exposes `maxMessageBytes` and `receivedBytes`, and cancels the response body. This error terminates SSE without reconnecting, and JSON sequences do not discard it as a malformed record. Pending cleanup cannot delay the error.
+
+The limit bounds per-message accumulation, not total process memory. Received chunks, decoded values, replay bodies, and transport buffers have their own memory costs.
+
 ## Cancellation and backpressure
 
-The stream follows consumer demand and does not maintain an application event queue (`highWaterMark: 0`). Individual records, received chunks, replay bodies, and transport buffers are not size-bounded.
+The stream follows consumer demand and does not maintain an application event queue (`highWaterMark: 0`). Use `maxMessageBytes` to bound individual records.
 
 Pass a call signal to stop a subscription, including a pending read or reconnection wait:
 
