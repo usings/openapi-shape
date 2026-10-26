@@ -10,15 +10,18 @@ Scale work to risk, use judgment, and explain material deviations. Change these 
 
 ## Load guidance by task
 
-Before acting, explicitly read the guides matching the task. Load all applicable guides, not the whole directory. Reassess when scope or risk changes. Paths are relative to this file; numbers identify guides, not reading order.
+Start with Workflow for changes and assessments. Before the relevant work, read every additional guide whose trigger matches the task. Load only applicable guidance; reuse unchanged guides already read in the current context. Reassess when scope or risk changes.
 
-| When                                                                                                             | Read                                              |
-| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Planning, making, or reviewing a change                                                                          | [00 — Workflow](.agents/00-workflow.md)           |
-| Choosing, writing, running, or reviewing tests; changing or auditing agent instructions or loading rules         | [01 — Testing](.agents/01-testing.md)             |
-| In-depth reviews, High risk, complex compatibility or recovery, or blocked verification                          | [02 — Review](.agents/02-review.md)               |
-| Writing, editing, or auditing reader-facing documentation                                                        | [03 — Documentation](.agents/03-documentation.md) |
-| Delegating or coordinating parallel work; before dispatch                                                        | [04 — Subagents](.agents/04-subagents.md)         |
-| Changing or reviewing code, dependencies, tooling, generated output, or contracts; repository checks or releases | [05 — Conventions](.agents/05-conventions.md)     |
+The list runs from general guidance to specialized tasks. Numbers aid navigation, not instruction precedence. Paths are relative to this file.
+
+| When                                                                                                                                 | Read                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| Planning, implementing, or reviewing changes; assessing existing work                                                                | [00 — Workflow](.agents/00-workflow.md)           |
+| Changing or reviewing code, dependencies, tooling, generated output, or contracts; before repository checks or releases              | [01 — Conventions](.agents/01-conventions.md)     |
+| Choosing, writing, running, or reviewing tests; changing or auditing agent instructions or loading rules                             | [02 — Testing](.agents/02-testing.md)             |
+| In-depth reviews, High risk, complex compatibility or recovery, or blocked verification                                              | [03 — Review](.agents/03-review.md)               |
+| Designing or reviewing module interfaces, responsibility boundaries, or dependency direction; architecture refactoring or assessment | [04 — Architecture](.agents/04-architecture.md)   |
+| Writing, editing, or auditing reader-facing documentation                                                                            | [05 — Documentation](.agents/05-documentation.md) |
+| Before delegating or coordinating parallel work                                                                                      | [06 — Subagents](.agents/06-subagents.md)         |
 
 Keep Workflow project-agnostic. Repository-specific commands and policies belong in Conventions. Keep detailed rules in their owning guide and update this index when triggers or paths change.

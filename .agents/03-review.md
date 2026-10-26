@@ -1,6 +1,6 @@
 # Review
 
-Read for in-depth reviews and as soon as a High-risk change, complex compatibility or recovery work, or blocked verification is identified. It adds depth to the [Workflow](00-workflow.md), not a second workflow.
+Read for in-depth reviews and as soon as a High-risk change, complex compatibility or recovery work, or blocked verification is identified. Apply this guide within the [Workflow](00-workflow.md).
 
 ## Establish the risk model
 

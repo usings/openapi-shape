@@ -21,7 +21,9 @@ Install missing dependencies with `pnpm install`. Before browser tests, read the
 
 Run `pnpm verify` when a code change has broad effects or its impact cannot be bounded. For bounded changes, run affected tests and relevant type, lint, and formatting checks; explain the chosen scope.
 
-For documentation or instruction-only changes, use the relevant content, link, example, and formatting checks. Run a focused file with `pnpm test --run --project=node tests/docs.spec.ts`, replacing the project and file for other tests.
+For documentation changes, use the relevant content, link, example, and formatting checks. `pnpm test --run --project=node tests/docs.spec.ts` checks `README.md` and top-level Markdown pages in `docs/`; it does not check `AGENTS.md` or `.agents/`. Replace the project and file to run other focused tests.
+
+For instruction-only changes, follow [Testing — Testing agent instructions](02-testing.md#testing-agent-instructions), check affected references and formatting, and report the limits of static review or task trials.
 
 ## Test resources
 

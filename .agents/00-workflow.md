@@ -1,6 +1,6 @@
 # Workflow
 
-Use this guide when planning, making, or reviewing a change. Keep it project-agnostic; project-specific commands and policies belong in the repository's conventions.
+Use this guide when planning, making, or reviewing changes, or assessing existing work. Keep it project-agnostic; project-specific commands and policies belong in the repository's conventions.
 
 **Model → Implement → Test → Simplify → Attack → Verify**, scaled to risk. Iterate as needed. For review-only tasks, assess the applicable steps and report findings; implement or fix only when authorized.
 

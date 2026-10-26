@@ -1,6 +1,6 @@
 # Testing
 
-Read before choosing, writing, running, or reviewing tests, or changing or auditing agent instructions and loading rules. Use the [Workflow](00-workflow.md) for risk and acceptance criteria, and [Conventions](05-conventions.md) for repository commands, test placement, and fixtures.
+Read before choosing, writing, running, or reviewing tests, or changing or auditing agent instructions and loading rules. Use the [Workflow](00-workflow.md) for risk and acceptance criteria, and [Conventions](01-conventions.md) for repository commands, test placement, and fixtures.
 
 ## Choose useful evidence
 
