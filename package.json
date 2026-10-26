@@ -1,7 +1,7 @@
 {
   "name": "openapi-shape",
   "version": "0.20.0",
-  "description": "One generated TypeScript module and a dependency-free typed fetch client for OpenAPI 3.0, 3.1, and 3.2 APIs",
+  "description": "A lightweight, Web standards-based OpenAPI toolkit for TypeScript contracts, type-safe Fetch, and native streaming.",
   "keywords": [
     "api-client",
     "codegen",

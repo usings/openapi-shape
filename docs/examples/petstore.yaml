@@ -1,4 +1,4 @@
-# The API behind the examples in README.md and docs/ (see tests/docs.test.ts).
+# The shared API description for the documentation examples.
 openapi: 3.2.0
 info:
   title: Petstore
@@ -98,7 +98,8 @@ webhooks:
         "200":
           content:
             application/json:
-              schema: { type: object, required: [received], properties: { received: { type: integer } } }
+              schema:
+                { type: object, required: [received], properties: { received: { type: integer } } }
 components:
   schemas:
     Pet:
