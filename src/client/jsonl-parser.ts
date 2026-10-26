@@ -1,3 +1,6 @@
+import type { BodyOwner } from "./cancellation"
+import { bodyReader } from "./cancellation"
+
 /** A malformed JSON line; line is one-based and input contents are never embedded in the message. */
 export class StreamParseError extends SyntaxError {
   constructor(
@@ -17,14 +20,10 @@ export class StreamParseError extends SyntaxError {
 export async function* readJsonLines(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
+  owner?: BodyOwner,
 ): AsyncGenerator<unknown> {
-  const reader = body.getReader()
-  const cancel = (): void => {
-    void reader.cancel().catch(() => {
-      /* Preserve the subscription's cancellation reason. */
-    })
-  }
-  signal.addEventListener("abort", cancel, { once: true })
+  const reader = bodyReader(body, signal, owner)
+  let failed = false
   // Preserve BOM so JSON.parse rejects it; do not replace malformed UTF-8 with different data.
   const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
   let fragments: Uint8Array[] = []
@@ -66,11 +65,15 @@ export async function* readJsonLines(
       }
       if (start < bytes.length) fragments.push(bytes.subarray(start))
     }
+  } catch (error) {
+    failed = true
+    throw error
   } finally {
-    signal.removeEventListener("abort", cancel)
-    void reader.cancel().catch(() => {
-      /* Cleanup cannot mask a decoding or transport failure. */
-    })
-    reader.releaseLock()
+    const released = reader.release()
+    if (failed) {
+      void released.catch(() => {
+        /* Cleanup cannot delay or replace a parser failure. */
+      })
+    } else await released
   }
 }

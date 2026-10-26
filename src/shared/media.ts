@@ -7,14 +7,16 @@ export function mediaTypeEssence(mediaType: string): string {
     .toLowerCase()
 }
 
-/** The streaming formats this client decodes; JSON text sequences use different framing. */
-export function streamFormat(mediaType: string): "sse" | "ndjson" | undefined {
+/** The streaming formats this client decodes. */
+export function streamFormat(mediaType: string): "sse" | "jsonl" | "json-seq" | undefined {
   switch (mediaTypeEssence(mediaType)) {
     case "text/event-stream":
       return "sse"
     case "application/jsonl":
     case "application/x-ndjson":
-      return "ndjson"
+      return "jsonl"
+    case "application/json-seq":
+      return "json-seq"
     default:
       return undefined
   }

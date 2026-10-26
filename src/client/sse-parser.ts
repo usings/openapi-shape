@@ -1,3 +1,6 @@
+import type { BodyOwner } from "./cancellation"
+import { bodyReader } from "./cancellation"
+
 /** One dispatched SSE event. Data is text, even when it contains JSON. */
 export interface StreamMessage {
   data: string
@@ -28,14 +31,10 @@ export async function* readEvents(
   body: ReadableStream<Uint8Array>,
   state: EventState,
   signal: AbortSignal,
+  owner?: BodyOwner,
 ): AsyncGenerator<StreamMessage> {
-  const reader = body.getReader()
-  const cancel = (): void => {
-    void reader.cancel().catch(() => {
-      /* Cleanup must not mask the original error. */
-    })
-  }
-  signal.addEventListener("abort", cancel, { once: true })
+  const reader = bodyReader(body, signal, owner)
+  let failed = false
   const decoder = new TextDecoder()
   let fragments: string[] = []
   let data: string[] = []
@@ -114,12 +113,15 @@ export async function* readEvents(
       }
       if (start < text.length) fragments.push(text.slice(start))
     }
+  } catch (error) {
+    failed = true
+    throw error
   } finally {
-    signal.removeEventListener("abort", cancel)
-    // Cancellation errors cannot replace the original stream or callback error.
-    void reader.cancel().catch(() => {
-      /* Cleanup must not mask the original error. */
-    })
-    reader.releaseLock()
+    const released = reader.release()
+    if (failed) {
+      void released.catch(() => {
+        /* Cleanup cannot delay or replace a parser failure. */
+      })
+    } else await released
   }
 }

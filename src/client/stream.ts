@@ -1,7 +1,10 @@
 import { mediaTypeEssence, streamFormat } from "../shared/media"
+import type { BodyOwner } from "./cancellation"
 import { abortable, cancelBody } from "./cancellation"
+import { readJsonSequence } from "./json-seq-parser"
+import { readJsonLines } from "./jsonl-parser"
+import { responseMediaType } from "./media"
 import type { MiddlewareContext, Sender } from "./middleware"
-import { readJsonLines } from "./ndjson-parser"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest } from "./request"
 import type { EventState } from "./sse-parser"
@@ -33,16 +36,22 @@ export function stream(
   let iterator: AsyncGenerator<unknown, void> | undefined
   let terminal = false
   let cleanup: Promise<void> | undefined
+  const owner: BodyOwner = {}
   let controller: ReadableStreamDefaultController<unknown>
   const dispose = (reason?: unknown): Promise<void> => {
     if (cleanup) return cleanup
     externalSignal?.removeEventListener("abort", abort)
+    // Cancel the owned reader first: aborting Fetch can synchronously error its body.
+    const bodyCleanup = owner.reader?.cancel(reason)
+    void bodyCleanup?.catch(() => {
+      /* Observed by the returned cleanup promise. */
+    })
     abortController.abort(reason)
     cleanup = (async () => {
       try {
         await iterator?.return()
-      } catch {
-        // A terminal subscription keeps its original reason.
+      } finally {
+        await bodyCleanup
       }
     })()
     return cleanup
@@ -51,7 +60,9 @@ export function stream(
     if (terminal) return
     terminal = true
     controller.error(externalSignal?.reason)
-    void dispose(externalSignal?.reason)
+    void dispose(externalSignal?.reason).catch(() => {
+      /* Keep the abort reason. */
+    })
   }
   return new ReadableStream<unknown>(
     {
@@ -63,19 +74,21 @@ export function stream(
       async pull() {
         if (terminal) return
         try {
-          iterator ??= subscription(endpoint, init, defaults, send, abortController.signal)
+          iterator ??= subscription(endpoint, init, defaults, send, abortController.signal, owner)
           const result = await iterator.next()
           if (terminal) return
           if (result.done) {
             terminal = true
             controller.close()
-            await dispose()
+            externalSignal?.removeEventListener("abort", abort)
           } else controller.enqueue(result.value)
         } catch (error) {
           if (terminal) return
           terminal = true
           controller.error(error)
-          await dispose(error)
+          await dispose(error).catch(() => {
+            /* Keep the stream failure. */
+          })
         }
       },
       cancel(reason) {
@@ -88,7 +101,7 @@ export function stream(
 }
 
 /**
- * Build and encode once at first demand, then replay those bytes through fresh middleware attempts.
+ * Send once without buffering, or snapshot a replayable body when SSE reconnection is enabled.
  *
  * @yields Parsed items of the selected response representation.
  */
@@ -98,6 +111,7 @@ async function* subscription(
   defaults: RequestDefaults,
   send: Sender,
   signal: AbortSignal,
+  owner: BodyOwner,
 ): AsyncGenerator<unknown, void> {
   signal.throwIfAborted()
   const media = Object.hasOwn(defaults.endpoints, endpoint)
@@ -112,11 +126,14 @@ async function* subscription(
   const format = streamFormat(selected)
   if (format === undefined) throw new TypeError(`Unsupported streaming media type "${selected}"`)
   if (format !== "sse" && retry !== undefined)
-    throw new TypeError("JSON line streams do not support automatic retry")
-  if (isStream(call.body)) throw new TypeError("api.stream cannot replay a streaming request body")
+    throw new TypeError("JSON streams do not support automatic retry")
+  const replay = format === "sse" && retry !== false && retry?.maxRetries !== 0
+  if (replay && isStream(call.body))
+    throw new TypeError("SSE reconnection cannot replay a streaming request body; set retry: false")
   const state: EventState = { id: "", retry: format === "sse" ? validateRetry(retry) : 1000 }
   const template = buildRequest(endpoint, { ...call, signal }, defaults)
-  const body = template.body === null ? undefined : await abortable(template.arrayBuffer(), signal)
+  const body =
+    !replay || template.body === null ? undefined : await abortable(template.arrayBuffer(), signal)
   const headers = new Headers(template.headers)
   headers.set("accept", selected)
   const initialId = headers.get("last-event-id") ?? ""
@@ -131,14 +148,14 @@ async function* subscription(
     }
     first = false
     const request = new Request(template, { headers: own, ...(body === undefined ? {} : { body }) })
-    return connection(request, selected, state, send, context, signal)
+    return connection(request, selected, state, send, context, signal, owner)
   }
   if (format === "sse") yield* sseSession(connect, state, retry, signal)
   else yield* connect()
 }
 
 /**
- * Own the delivered response for one connection; the sender retires unselected responses.
+ * Own only the delivered response for one connection.
  *
  * @yields Parsed items from this connection only.
  */
@@ -149,6 +166,7 @@ async function* connection(
   send: Sender,
   context: MiddlewareContext,
   signal: AbortSignal,
+  owner: BodyOwner,
 ): AsyncGenerator<unknown, boolean> {
   const transportFailures: unknown[] = []
   let response: Response | undefined
@@ -180,7 +198,7 @@ async function* connection(
       throw error
     }
     if (
-      mediaTypeEssence(response.headers.get("content-type") ?? "") !== mediaTypeEssence(selected) ||
+      responseMediaType(response.headers) !== mediaTypeEssence(selected) ||
       response.body === null ||
       response.bodyUsed ||
       response.body.locked
@@ -188,16 +206,18 @@ async function* connection(
       throw new StreamResponseError(`Expected an unused ${selected} response body`, response)
     if (sse) {
       try {
-        yield* readEvents(response.body, state, signal)
+        yield* readEvents(response.body, state, signal, owner)
       } catch (error) {
         signal.throwIfAborted()
         if (error instanceof StreamReadError) throw new RetryableStreamError(error.cause)
         throw error
       }
-    } else yield* readJsonLines(response.body, signal)
+    } else if (streamFormat(selected) === "json-seq")
+      yield* readJsonSequence(response.body, signal, owner)
+    else yield* readJsonLines(response.body, signal, owner)
     return false
   } finally {
-    if (response) cancelBody(response)
+    if (response && !response.body?.locked) cancelBody(response, signal.reason)
   }
 }
 

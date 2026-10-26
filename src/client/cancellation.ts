@@ -21,8 +21,8 @@ export function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<
 }
 
 /** Cleanup cannot replace a subscription's error or cancellation reason. */
-export function cancelBody(response: Response): void {
-  void response.body?.cancel().catch(() => {
+export function cancelBody(response: Response, reason?: unknown): void {
+  void response.body?.cancel(reason).catch(() => {
     /* A parser may already have closed or canceled the body. */
   })
 }
@@ -47,4 +47,51 @@ export async function wait(delay: number, signal: AbortSignal): Promise<void> {
     }
     remaining -= interval
   } while (remaining > 0)
+}
+
+/** The subscription can cancel its currently owned reader before aborting the transport. */
+export interface BodyOwner {
+  reader?: ReadableStreamDefaultReader<Uint8Array> | undefined
+}
+
+/** A parser owns one reader and propagates its cancellation and cleanup to the subscription. */
+export function bodyReader(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  owner?: BodyOwner,
+) {
+  const reader = body.getReader()
+  if (owner) owner.reader = reader
+  let completed = false
+  let cancellation: Promise<void> | undefined
+  const cancel = (): Promise<void> => {
+    if (!cancellation) {
+      cancellation = reader.cancel(signal.aborted ? signal.reason : undefined)
+      void cancellation.catch(() => {
+        // Observed again by release and by the subscription's explicit cancel.
+      })
+    }
+    return cancellation
+  }
+  const abort = (): void => {
+    void cancel()
+  }
+  signal.addEventListener("abort", abort, { once: true })
+  if (signal.aborted) abort()
+  return {
+    async read() {
+      const result = await reader.read()
+      completed = result.done
+      return result
+    },
+    async release() {
+      signal.removeEventListener("abort", abort)
+      if (owner?.reader === reader) owner.reader = undefined
+      try {
+        if (!completed || cancellation) await cancel()
+      } finally {
+        reader.releaseLock()
+      }
+    },
+  }
 }

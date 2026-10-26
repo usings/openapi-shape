@@ -31,13 +31,12 @@ export type Sender = (
 interface Exchange {
   context: MiddlewareContext
   signal: AbortSignal
-  received: (response: Response) => Response
   transportFailed: ((error: unknown) => void) | undefined
 }
 
 type Dispatch = (request: Request, exchange: Exchange) => Promise<Response>
 
-/** Compile the chain once; each dispatch owns its context and all responses until delivery. */
+/** Compile the chain once; each boundary owns a response only until it hands it off. */
 export function createSender(middleware: readonly Middleware[], transport?: Fetcher): Sender {
   const transmit: Dispatch = async (request, exchange) => {
     exchange.signal.throwIfAborted()
@@ -49,44 +48,49 @@ export function createSender(middleware: readonly Middleware[], transport?: Fetc
       exchange.transportFailed?.(error)
       throw error
     }
-    return exchange.received(response)
+    return response
   }
   const dispatch = middleware.reduceRight<Dispatch>(
     (next, wrap) => async (request, exchange) => {
       exchange.signal.throwIfAborted()
-      return exchange.received(
-        await wrap(request, (outgoing) => next(outgoing, exchange), exchange.context),
+      return await wrap(
+        request,
+        (outgoing) => handoff(next(outgoing, exchange), exchange.signal),
+        exchange.context,
       )
     },
     transmit,
   )
   return async (request, context, transportFailed) => {
-    const responses = new Set<Response>()
-    let finished = false
-    let delivered: Response | undefined
-    const discard = (response: Response): void => {
-      if (response !== delivered && response.body !== delivered?.body) cancelBody(response)
-    }
-    const exchange: Exchange = {
-      context: Object.freeze({ ...context }),
-      signal: request.signal,
-      transportFailed,
-      received(response) {
-        if (finished) discard(response)
-        else responses.add(response)
-        return response
-      },
-    }
-    try {
-      request.signal.throwIfAborted()
-      const response = await abortable(dispatch(request, exchange), request.signal)
-      request.signal.throwIfAborted()
-      delivered = response
-      return response
-    } finally {
-      finished = true
-      for (const response of responses) discard(response)
-      responses.clear()
-    }
+    request.signal.throwIfAborted()
+    return await handoff(
+      dispatch(request, {
+        context: Object.freeze({ ...context }),
+        signal: request.signal,
+        transportFailed,
+      }),
+      request.signal,
+    )
+  }
+}
+
+/** Retire a response only when cancellation prevents delivery across this boundary. */
+async function handoff(pending: Promise<Response>, signal: AbortSignal): Promise<Response> {
+  let received: Response | undefined
+  let finished = false
+  let delivered = false
+  const observed = pending.then((response) => {
+    received = response
+    if (finished) cancelBody(response, signal.reason)
+    return response
+  })
+  try {
+    const response = await abortable(observed, signal)
+    signal.throwIfAborted()
+    delivered = true
+    return response
+  } finally {
+    finished = true
+    if (!delivered && received) cancelBody(received, signal.reason)
   }
 }

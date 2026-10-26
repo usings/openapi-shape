@@ -73,7 +73,11 @@ export type StreamEndpoint<E> = {
 /** Endpoints whose bodies result() can read to completion. */
 export type ResultEndpoint<E> = Exclude<Endpoint<E>, StreamEndpoint<E>>
 
-type StreamingEssence = "text/event-stream" | "application/jsonl" | "application/x-ndjson"
+type StreamingEssence =
+  | "text/event-stream"
+  | "application/jsonl"
+  | "application/x-ndjson"
+  | "application/json-seq"
 
 type StreamsIn<Shape> = Shape extends { content: infer Content }
   ? {
@@ -143,19 +147,27 @@ type Replayable<Call> = Call extends unknown
         : Call[P]
     }
   : never
-type StreamInit<E, K extends StreamEndpoint<E>, M extends StreamMedia<E, K>> = Replayable<
-  Init<OperationOf<E, K>, MethodOf<K>>
-> & { accept?: M } & StreamSelection<E, K, M>
+type StreamInit<E, K extends StreamEndpoint<E>, M extends StreamMedia<E, K>> = {
+  accept?: M
+} & StreamSelection<E, K, M>
 type StreamSelection<
   E,
   K extends StreamEndpoint<E>,
   M extends StreamMedia<E, K>,
+  Call = Init<OperationOf<E, K>, MethodOf<K>>,
 > = M extends unknown
   ? ([Only<StreamMedia<E, K>>] extends [never] ? { accept: M } : { accept?: M }) &
-      (Essence<M> extends "text/event-stream" ? Pick<StreamOptions, "retry"> : { retry?: never })
+      (Essence<M> extends "text/event-stream"
+        ?
+            | (Replayable<Call> & Pick<StreamOptions, "retry">)
+            | (Call & { retry: false | (StreamRetryOptions & { maxRetries: 0 }) })
+        : Call & { retry?: never })
   : never
 
-/** Stream arguments preserve required inputs, select a media type, and exclude one-shot bodies. */
+/**
+ * Stream arguments preserve required inputs and require replayable bodies only for reconnecting
+ * SSE.
+ */
 // Keep the init tuple outside conditionals so accept can infer the selected media.
 export type StreamArgs<
   E,
