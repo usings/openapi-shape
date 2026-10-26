@@ -8,6 +8,9 @@ import { isInstance, isStream, isPlainObject, scalar, toJson } from "./values"
 
 // Request bodies encoded by their media type, and response bodies decoded by theirs.
 
+/** Native types override explicit headers; defaults can be overridden by the call. */
+type ContentTypePolicy = { kind: "native" } | { kind: "default"; value: string | undefined }
+
 /**
  * A request body: JSON, form, and multipart content is encoded from its value (multipart as
  * `FormData`), text is sent as given, and any other media type takes a ready body. A `Blob`,
@@ -17,7 +20,10 @@ export function encodeBody(
   body: unknown,
   contentType: string | undefined,
   declared: EndpointContract | undefined,
-): { body: BodyLike | string; contentType: string | undefined } {
+): {
+  body: BodyLike | string
+  contentType: ContentTypePolicy
+} {
   const type = contentType ?? "application/json"
   const essence = contentType === undefined ? "application/json" : mediaTypeEssence(contentType)
   // A wildcard media type cannot label a request; a `*` in a parameter can.
@@ -26,24 +32,36 @@ export function encodeBody(
   if (ready !== undefined) {
     // fetch derives multipart boundaries and form encodings itself.
     const own = isInstance(ready, "FormData") || isInstance(ready, "URLSearchParams")
-    return { body: ready, contentType: own ? undefined : label }
+    return {
+      body: ready,
+      contentType: own ? { kind: "native" } : { kind: "default", value: label },
+    }
   }
   if (isJsonEssence(essence) || isJsonWildcardEssence(essence)) {
-    return { body: toJson(body), contentType: label ?? "application/json" }
+    return {
+      body: toJson(body),
+      contentType: { kind: "default", value: label ?? "application/json" },
+    }
   }
   const encodings = declared?.bodyEncodings
   const encoding = encodings && Object.hasOwn(encodings, type) ? encodings[type] : undefined
   if (essence === "application/x-www-form-urlencoded") {
     // A string is already encoded.
-    if (typeof body === "string") return { body, contentType: label }
+    if (typeof body === "string") return { body, contentType: { kind: "default", value: label } }
     if (!isPlainObject(body)) throw new TypeError("A form body must be an object")
-    return { body: formFields(body, encoding ?? {}, true), contentType: label }
+    return {
+      body: formFields(body, encoding ?? {}, true),
+      contentType: { kind: "default", value: label },
+    }
   }
   if (essence === "multipart/form-data") {
     if (!isPlainObject(body)) throw new TypeError("A multipart/form-data body must be an object")
-    return { body: formData(body, encoding ?? {}), contentType: undefined }
+    return {
+      body: formData(body, encoding ?? {}),
+      contentType: { kind: "native" },
+    }
   }
-  if (typeof body === "string") return { body, contentType: label }
+  if (typeof body === "string") return { body, contentType: { kind: "default", value: label } }
   throw new TypeError(`Cannot encode a ${typeof body} as ${type}; pass it encoded`)
 }
 

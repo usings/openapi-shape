@@ -1,8 +1,7 @@
 import type { EndpointContract } from "../shared/contract"
 import { encodeBody } from "./body"
 import { delimited, encodeContent, expandPath, normalize, serializeQuery } from "./serialization"
-import type { BodyLike } from "./types"
-import { isInstance, isStream } from "./values"
+import { isStream } from "./values"
 
 /** What a call takes at run time: its parameters, its body, and any other `RequestInit` field. */
 export interface CallInit extends Omit<RequestInit, "headers" | "body"> {
@@ -40,13 +39,16 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
   if (query !== undefined) url = appendQuery(url, serializeQuery(query, declared))
 
   const headers = new Headers(defaults.headers)
-  let body: BodyLike | string | undefined
-  if (value !== undefined) {
-    const encoded = encodeBody(value, contentType ?? declared.contentType, declared)
-    body = encoded.body
+  const encoded =
+    value === undefined
+      ? undefined
+      : encodeBody(value, contentType ?? declared.contentType, declared)
+  const body = encoded?.body
+  if (encoded) {
     // Without a label, the body's own type (a Blob's, FormData's boundary) applies.
-    if (encoded.contentType === undefined) headers.delete("content-type")
-    else headers.set("content-type", encoded.contentType)
+    if (encoded.contentType.kind === "default" && encoded.contentType.value !== undefined) {
+      headers.set("content-type", encoded.contentType.value)
+    } else headers.delete("content-type")
   }
   // The call's own headers go over the client's and the body's. Iterable ones,
   // a `Headers` of any implementation or its entries, are taken as they are, as
@@ -68,10 +70,8 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
       )
     }
   }
-  // Their content type is the body's own: a multipart boundary, a form encoding.
-  if (isInstance(body, "FormData") || isInstance(body, "URLSearchParams")) {
-    headers.delete("content-type")
-  }
+  // The encoder may require Request to supply a multipart boundary or form encoding.
+  if (encoded?.contentType.kind === "native") headers.delete("content-type")
   const requestInit: RequestInit & { duplex?: "half" } = {
     ...defaults.init,
     ...rest,

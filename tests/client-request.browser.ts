@@ -439,6 +439,49 @@ describe("parameters", () => {
 })
 
 describe("request bodies", () => {
+  it("lets encoded multipart bodies supply their boundary over explicit headers", async () => {
+    const { client, sent } = recorder(contract, {
+      headers: { "content-type": "application/json" },
+    })
+    await client.fetch("POST /upload", {
+      contentType: "multipart/form-data",
+      headers: { "content-type": "text/plain" },
+      body: { file: new Blob(["payload"]) },
+    })
+    expect(sent().headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/)
+    const parts = await sent().formData()
+    expect(await (parts.get("file") as Blob).text()).toBe("payload")
+  })
+
+  it("reserves native form headers while allowing overrides for encoded form text", async () => {
+    const { client, sent } = recorder<{
+      "POST /form": ResultOperation<{
+        body: { name: string }
+        contentType?: "application/x-www-form-urlencoded"
+      }>
+    }>(
+      {
+        version: 6,
+        endpoints: { "POST /form": { contentType: "application/x-www-form-urlencoded" } },
+      },
+      { headers: { "content-type": "application/json" } },
+    )
+    await client.fetch("POST /form", {
+      body: new URLSearchParams({ name: "a b" }),
+      headers: new Headers({ "content-type": "text/plain" }),
+    })
+    expect(sent().headers.get("content-type")).toBe(
+      "application/x-www-form-urlencoded;charset=UTF-8",
+    )
+    expect(await sent().text()).toBe("name=a+b")
+    await client.fetch("POST /form", {
+      body: { name: "a b" },
+      headers: { "content-type": "text/plain" },
+    })
+    expect(sent().headers.get("content-type")).toBe("text/plain")
+    expect(await sent().text()).toBe("name=a+b")
+  })
+
   it("sets the call's headers over the body's media type", async () => {
     const { client, sent } = recorder(contract)
     await client.fetch("PATCH /pets/{id}", {
