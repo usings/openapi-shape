@@ -326,7 +326,8 @@ export class DocumentSet {
     if (fragment.startsWith("/")) {
       const pointer = resource.pointer + fragment
       const tokens = parsePointer(pointer)
-      const target = tokens && this.child(this.root(resource.document), ...tokens)
+      if (tokens === null) return { kind: "error", message: `"${ref}" has an invalid JSON Pointer` }
+      const target = this.child(this.root(resource.document), ...tokens)
       if (target?.value === undefined) return { kind: "error", message: `"${ref}" does not exist` }
       return { kind: "found", node: target }
     }

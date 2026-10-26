@@ -96,7 +96,7 @@ export class DocumentReader {
       const text = await readText(response, signal, this.maxBytes)
       return { uri: finalUri, root: parseText(text, format) }
     } finally {
-      discard(response)
+      discard(response, signal.aborted ? signal.reason : undefined)
     }
   }
 }
@@ -139,7 +139,7 @@ function abortable(pending: Promise<unknown>, signal: AbortSignal): Promise<unkn
       (result) => {
         signal.removeEventListener("abort", abort)
         // A response that arrives after cancellation is disposed of.
-        if (signal.aborted) discard(result)
+        if (signal.aborted) discard(result, signal.reason)
         resolve(result)
       },
       (error: unknown) => {
@@ -154,10 +154,10 @@ function abortable(pending: Promise<unknown>, signal: AbortSignal): Promise<unkn
  * Release a body that will not be read; one already read or being read is left alone. A loader's
  * result may be anything, and cleanup must not throw.
  */
-function discard(response: unknown): void {
+function discard(response: unknown, reason?: unknown): void {
   try {
     const body = (response as Response | undefined)?.body
-    if (body && !body.locked) void body.cancel().catch(ignore)
+    if (body && !body.locked) void body.cancel(reason).catch(ignore)
   } catch {
     // Not a web stream, so there is nothing this reader can release.
   }
@@ -178,7 +178,7 @@ async function readText(
   const reader = response.body.getReader()
   // Cancelling settles a pending read at once, even when the stream's own cleanup stalls.
   const cancel = (): void => {
-    void reader.cancel().catch(ignore)
+    void reader.cancel(signal.reason).catch(ignore)
   }
   signal.addEventListener("abort", cancel, { once: true })
   const decoder = new TextDecoder()

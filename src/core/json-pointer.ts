@@ -10,7 +10,7 @@ export function appendPointer(base: string, ...segments: Array<string | number>)
 /** Split a JSON Pointer into decoded reference tokens; `null` when malformed. */
 export function parsePointer(pointer: string): string[] | null {
   if (pointer === "") return []
-  if (!pointer.startsWith("/")) return null
+  if (!pointer.startsWith("/") || /~(?:[^01]|$)/.test(pointer)) return null
   return pointer
     .slice(1)
     .split("/")
