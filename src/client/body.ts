@@ -1,5 +1,7 @@
 import type { Encoding, EndpointContract } from "../shared/contract"
 import { isJsonEssence, isJsonWildcardEssence, mediaTypeEssence } from "../shared/media"
+import { abortable } from "./cancellation"
+import { responseMediaType } from "./media"
 import { encodeContent, formFields, formPairs, normalize } from "./serialization"
 import type { BodyLike } from "./types"
 import { isInstance, isStream, isPlainObject, scalar, toJson } from "./values"
@@ -112,30 +114,35 @@ function holdsBinary(value: unknown): boolean {
  * A response body, by its content type: JSON parsed, `text/*` as a string, no content as
  * `undefined`, anything else as a `Blob`.
  */
-export async function decodeBody(response: Response, method: string): Promise<unknown> {
+export async function decodeBody(
+  response: Response,
+  method: string,
+  signal: AbortSignal,
+): Promise<unknown> {
   if (method === "HEAD" || [204, 205, 304].includes(response.status)) {
-    await response.body?.cancel()
+    await abortable(response.body?.cancel(signal.reason) ?? Promise.resolve(), signal)
     return undefined
   }
-  const type = response.headers.get("content-type")
-  if (type === null) {
-    // An empty body without a content type is no content.
+  // Own cancellation even when middleware supplied a body unrelated to native Fetch's signal.
+  // The pipeline cancels its source; abortable keeps a slow cleanup from delaying rejection.
+  const readable =
+    response.body && !response.bodyUsed
+      ? new Response(
+          response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal }),
+          { headers: response.headers },
+        )
+      : response
+  return await abortable(readBody(readable), signal)
+}
+
+/** Decode through native Response methods without changing the original response's metadata. */
+async function readBody(response: Response): Promise<unknown> {
+  const essence = responseMediaType(response.headers)
+  if (essence === undefined) {
     const blob = await response.blob()
     return blob.size === 0 ? undefined : blob
   }
-  const essence = mediaTypeEssence(type)
-  if (isJsonEssence(essence)) {
-    const text = await response.text()
-    // JSON's own whitespace: space, tab, and line breaks.
-    if (/^[ \t\n\r]*$/.test(text)) return undefined
-    try {
-      return JSON.parse(text)
-    } catch (error) {
-      throw new SyntaxError(`The ${response.status} response is not the JSON it says`, {
-        cause: error,
-      })
-    }
-  }
+  if (isJsonEssence(essence)) return response.json()
   if (essence.startsWith("text/")) return response.text()
   return response.blob()
 }

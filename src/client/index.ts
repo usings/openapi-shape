@@ -37,7 +37,7 @@ export type {
   TypedResponse,
 } from "./types"
 export type { StreamMessage } from "./sse-parser"
-export { StreamParseError } from "./ndjson-parser"
+export { StreamParseError } from "./jsonl-parser"
 export { StreamResponseError } from "./stream"
 
 /**
@@ -114,7 +114,7 @@ export function createClient<Endpoints>(
     }
     const request = buildRequest(endpoint, call, defaults)
     const response = await send(request, { endpoint, kind: "result" })
-    const body = await decodeBody(response, request.method)
+    const body = await decodeBody(response, request.method, request.signal)
     // A failure's error is never undefined, which is what tells a success.
     const { status } = response
     return response.ok
