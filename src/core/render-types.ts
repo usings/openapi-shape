@@ -72,6 +72,7 @@ function render(type: Type, context: TypeContext): Rendered {
     case "number":
       return atom(type.kind)
     case "binary":
+    case "blob":
       return atom(context.blob)
     case "literal":
       return atom(renderLiteral(type.value))

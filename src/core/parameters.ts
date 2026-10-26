@@ -8,6 +8,7 @@ import { classifyMediaType } from "./media-types"
 import type { Annotations, Field, Operation, Type } from "./model"
 import { UNKNOWN } from "./model"
 import { isRecord } from "./object"
+import { selectParameters } from "./operation-rules"
 import type { Resolved } from "./references"
 import { resolveObject } from "./references"
 import type { SchemaBuilder } from "./schemas"
@@ -82,24 +83,28 @@ export class ParameterBuilder {
       cookie: [] as Field[],
       querystring: undefined as Operation["querystring"],
     }
-    for (const { at, value } of byKey.values()) {
-      const field = this.parameterField(at, value)
-      const location = value.in as string
-      if (location === "querystring") {
-        if (out.querystring) {
+    const selected = new Set(selectParameters(byKey.values()))
+    let ignoredQuery = false
+    for (const parameter of byKey.values()) {
+      const { at, value } = parameter
+      if (!selected.has(parameter)) {
+        if (value.in === "query") ignoredQuery = true
+        else
           this.context.warn(
             "invalid-parameter",
             "Only one querystring parameter is allowed",
             at.node,
           )
-          continue
-        }
+        continue
+      }
+      const field = this.parameterField(at, value)
+      const location = value.in as string
+      if (location === "querystring") {
         out.querystring = { type: field.type, required: field.required, location: field.location }
         if (field.annotations) out.querystring.annotations = field.annotations
         const [mediaType] = isRecord(value.content) ? Object.keys(value.content) : []
-        if (mediaType !== undefined && classifyMediaType(mediaType) !== "form") {
-          out.querystring.mediaType = mediaType
-        } else if (mediaType !== undefined) {
+        if (mediaType !== undefined) out.querystring.mediaType = mediaType
+        if (mediaType !== undefined && classifyMediaType(mediaType) === "form") {
           // Form fields serialize like query parameters, by their Encoding Objects.
           const media = resolveObject(
             this.context,
@@ -116,13 +121,12 @@ export class ParameterBuilder {
         out[location as Location].push(field)
       }
     }
-    if (out.querystring && out.query.length > 0) {
+    if (ignoredQuery) {
       this.context.warn(
         "invalid-parameter",
         "A querystring parameter cannot be combined with query parameters; the query parameters are ignored",
         own,
       )
-      out.query = []
     }
     return out
   }
@@ -172,10 +176,10 @@ export class ParameterBuilder {
         this.context,
         this.context.documents.child(node, "content", content[0]),
       )
-      return media === undefined
-        ? UNKNOWN
-        : // The 3.2 querystring is the whole query, encoded like a request body.
-          typeOfContent(this.schemas, media.node, content[0], value.in !== "querystring")
+      if (media === undefined) return UNKNOWN
+      // The 3.2 querystring uses body encodings, but raw media still travels as URL text.
+      const type = typeOfContent(this.schemas, media.node, content[0], value.in !== "querystring")
+      return type.kind === "blob" ? { kind: "string" } : type
     }
     this.context.warn("invalid-parameter", `A ${what} needs "schema" or "content"`, node)
     return UNKNOWN

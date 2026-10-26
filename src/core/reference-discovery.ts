@@ -2,10 +2,9 @@ import { componentNameOf, identity } from "./document-nodes"
 import type { DocumentNode, DocumentSet } from "./documents"
 import { classifyMediaType } from "./media-types"
 import { isRecord } from "./object"
+import { METHODS, selectParameters } from "./operation-rules"
 import { referencesOf } from "./references"
 import { aliasReference, describesRawBytes } from "./schema-rules"
-
-const METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace", "query"]
 
 /**
  * Discover the reference graph before compiling types. Work items describe semantic positions,
@@ -299,7 +298,8 @@ class ReferenceDiscovery {
           )
         }
       }
-      if (!pending) for (const target of parameters.values()) this.parameter(target)
+      if (!pending)
+        for (const target of selectParameters(parameters.values())) this.parameter(target)
       this.container(this.documents.child(node, "requestBody"), "body")
       this.each(
         this.documents.child(node, "responses"),

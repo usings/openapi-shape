@@ -1,8 +1,6 @@
+import { defaultExplode } from "../shared/contract"
 import type { Encoding } from "./model"
 import { isRecord } from "./object"
-
-// `deepObject` is defined for explode: true only.
-const EXPLODED_BY_DEFAULT = new Set(["form", "cookie", "deepObject"])
 
 /**
  * A parameter's or Encoding Object's serialization, where it differs from the default: then always
@@ -13,7 +11,6 @@ export function encodingOf(
   defaultStyle: string,
   /** For an Encoding Object of a form body. */
   field = false,
-  multipart = false,
 ): Encoding | undefined {
   // A parameter with `content` is serialized as that media type; style does not apply.
   if (!field && isRecord(value.content)) {
@@ -22,13 +19,12 @@ export function encodingOf(
   }
   const out: Encoding = {}
   const style = typeof value.style === "string" ? value.style : defaultStyle
-  const explode =
-    typeof value.explode === "boolean" ? value.explode : EXPLODED_BY_DEFAULT.has(style)
+  const explode = typeof value.explode === "boolean" ? value.explode : defaultExplode(style)
   const allowReserved = value.allowReserved === true
   if (
-    (multipart && ("style" in value || "explode" in value || "allowReserved" in value)) ||
+    (field && ("style" in value || "explode" in value || "allowReserved" in value)) ||
     style !== defaultStyle ||
-    explode !== EXPLODED_BY_DEFAULT.has(defaultStyle) ||
+    explode !== defaultExplode(defaultStyle) ||
     allowReserved
   ) {
     out.style = style

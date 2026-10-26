@@ -1,4 +1,5 @@
 import type { Encoding, EndpointContract } from "../shared/contract"
+import { defaultExplode } from "../shared/contract"
 import { isJsonEssence, isJsonWildcardEssence, mediaTypeEssence } from "../shared/media"
 import { isPlainObject, scalar, toJson } from "./values"
 
@@ -12,14 +13,11 @@ interface Normalized {
 
 type Pair = [name: string, value: string]
 
-// `deepObject` is defined for explode: true only.
-const EXPLODED = new Set(["form", "cookie", "deepObject"])
-
 export function normalize(spec: Encoding | undefined, defaultStyle: string): Normalized {
   const style = spec?.style ?? defaultStyle
   return {
     style,
-    explode: spec?.explode ?? EXPLODED.has(style),
+    explode: spec?.explode ?? defaultExplode(style),
     allowReserved: spec?.allowReserved ?? false,
     contentType: spec?.contentType,
     repeat: spec?.repeat === true,
@@ -95,6 +93,12 @@ export function delimited(
 
 export function serializeQuery(query: unknown, declared: EndpointContract | undefined): string {
   if (declared?.querystring !== undefined) {
+    if (mediaTypeEssence(declared.querystring) === "application/x-www-form-urlencoded") {
+      if (typeof query === "string") return query
+      if (!isPlainObject(query))
+        throw new TypeError("A form querystring must be an object or encoded string")
+      return formFields(query, declared.query ?? {}, true)
+    }
     return encode(encodeContent(query, declared.querystring), null)
   }
   if (!isPlainObject(query)) return encode(scalar(query), null)
@@ -105,12 +109,20 @@ export function serializeQuery(query: unknown, declared: EndpointContract | unde
 export function formFields(
   fields: Record<string, unknown>,
   encodings: Readonly<Record<string, Encoding>>,
+  form = false,
 ): string {
   const parts: string[] = []
   for (const [name, value] of Object.entries(fields)) {
     const encoding = normalize(Object.hasOwn(encodings, name) ? encodings[name] : undefined, "form")
-    for (const [key, encoded] of formPairs(name, value, encoding)) {
-      parts.push(`${encodeKey(key)}=${encoded}`)
+    // Content-based form fields follow the URL Standard; explicit styles follow RFC6570.
+    const contentForm =
+      form && (encoding.contentType !== undefined || !Object.hasOwn(encodings, name))
+    for (const [key, encoded] of formPairs(name, value, encoding, contentForm)) {
+      parts.push(
+        contentForm
+          ? new URLSearchParams([[key, encoded]]).toString()
+          : `${encodeKey(key)}=${encoded}`,
+      )
     }
   }
   return parts.join("&")
@@ -196,7 +208,10 @@ const QUERY_RESERVED = /%(?:3A|2F|3F|40|21|24|27|28|29|2A|2C|3B)/gi
 
 /** Percent-encode; with `reserved`, those characters and existing percent-encodings are kept. */
 function encode(value: string, reserved: RegExp | null): string {
-  const encoded = encodeURIComponent(value)
+  const encoded = encodeURIComponent(value).replaceAll(
+    /[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
   if (reserved === null) return encoded
   return encoded
     .replaceAll(reserved, (m) => decodeURIComponent(m))
@@ -205,5 +220,5 @@ function encode(value: string, reserved: RegExp | null): string {
 
 /** Bracket notation stays readable: `created[gte]`. */
 function encodeKey(key: string): string {
-  return encodeURIComponent(key).replaceAll("%5B", "[").replaceAll("%5D", "]")
+  return encode(key, null).replaceAll("%5B", "[").replaceAll("%5D", "]")
 }

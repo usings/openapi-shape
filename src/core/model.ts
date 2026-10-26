@@ -62,7 +62,7 @@ export interface Operation {
     type: Type
     required: boolean
     annotations?: Annotations
-    /** The media type, unless form-urlencoded. */
+    /** The media type, including form-urlencoded. */
     mediaType?: string
     /** Form content: its Encoding Objects, by field. */
     encoding?: Record<string, Encoding>
@@ -155,8 +155,10 @@ export type Type =
   | { kind: "boolean" }
   | { kind: "string" }
   | { kind: "number" }
-  /** Raw octets. */
+  /** A string schema annotated as binary, projected by transport. */
   | { kind: "binary" }
+  /** Raw media content, independent of schema string annotations. */
+  | { kind: "blob" }
   | { kind: "literal"; value: Literal }
   | { kind: "ref"; target: Declaration }
   /**

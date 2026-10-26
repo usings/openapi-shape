@@ -8,9 +8,9 @@ import { intersect, literal, union } from "./type-algebra"
 
 /**
  * Discriminator Objects are hints that "MUST NOT change the validation outcome". They narrow types
- * only where a branch leaves the property open: a branch that already declares string literals for
- * it keeps them, and an explicit mapping that contradicts those literals is reported instead.
- * Narrowings are recorded while building and applied by `applyNarrowing`.
+ * where a branch leaves the property open or its string literals overlap the mapped values.
+ * Disjoint literals win over a mapping; an explicit contradiction is reported instead. Narrowings
+ * are recorded while building and applied by `applyNarrowing`.
  */
 export function narrowDiscriminated(
   schemas: SchemaBuilder,
@@ -177,7 +177,7 @@ function narrow(
 
 /**
  * Apply a recorded discriminator narrowing, now that declarations are built. A schema that already
- * fixes the property to string literals keeps them.
+ * fixes the property to string literals constrains the narrowing to their intersection.
  */
 export function applyNarrowing(
   node: Extract<Type, { kind: "narrow" }>,

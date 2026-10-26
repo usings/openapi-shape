@@ -255,7 +255,7 @@ function partEncoding(
     )
     return undefined
   }
-  const spec = encodingOf(styled ? value : { contentType: value.contentType }, "form", true, true)
+  const spec = encodingOf(styled ? value : { contentType: value.contentType }, "form", true)
   if (spec?.contentType !== undefined && !isConcreteMediaType(spec.contentType)) {
     context.warn(
       "ignored-field",

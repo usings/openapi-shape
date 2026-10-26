@@ -7,13 +7,12 @@ import { formEncoding } from "./form-encoding"
 import { classifyMediaType, isFormData } from "./media-types"
 import type { Body, Media, Operation, Response } from "./model"
 import { isRecord } from "./object"
+import { METHODS } from "./operation-rules"
 import { ParameterBuilder } from "./parameters"
 import { resolveObject } from "./references"
 import type { SchemaBuilder } from "./schemas"
 import { union } from "./type-algebra"
 
-const METHODS_30 = ["get", "put", "post", "delete", "options", "head", "patch", "trace"]
-const METHODS_32 = [...METHODS_30, "query"]
 type Kind = "endpoint" | "webhook" | "callback"
 
 export interface Operations {
@@ -76,7 +75,7 @@ class OperationBuilder {
     if (fields === undefined) return
     // `query` and `additionalOperations` are 3.2 fields, applied in earlier versions too.
     const methods: Array<[method: string, node: DocumentNode]> = []
-    for (const method of METHODS_32) {
+    for (const method of METHODS) {
       const op = fields.get(method)
       if (op !== undefined) methods.push([method.toUpperCase(), op])
     }
@@ -84,7 +83,7 @@ class OperationBuilder {
     if (additional !== undefined && isRecord(additional.value)) {
       for (const method of Object.keys(additional.value)) {
         const at = this.context.documents.child(additional, method)
-        if (METHODS_32.includes(method.toLowerCase())) {
+        if (METHODS.includes(method.toLowerCase())) {
           this.context.warn(
             "ignored-field",
             `additionalOperations cannot redefine ${method}; use the "${method.toLowerCase()}" field`,

@@ -1,5 +1,10 @@
 /** The only contract format version this client reads. */
-export const CONTRACT_VERSION = 5
+export const CONTRACT_VERSION = 6
+
+/** Whether a serialization style explodes by default; deepObject requires explode: true. */
+export function defaultExplode(style: string): boolean {
+  return style === "form" || style === "cookie" || style === "deepObject"
+}
 
 /**
  * The runtime details a generated module exports as `contract`. Encodings record deviations from

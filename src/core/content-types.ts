@@ -6,7 +6,7 @@ import { isRecord } from "./object"
 import { describesRawBytes } from "./schema-rules"
 import type { SchemaBuilder } from "./schemas"
 
-const BLOB: Type = { kind: "binary" }
+const BLOB: Type = { kind: "blob" }
 const STRING: Type = { kind: "string" }
 
 /**
