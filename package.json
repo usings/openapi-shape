@@ -1,6 +1,6 @@
 {
   "name": "openapi-shape",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "A lightweight, Web standards-based OpenAPI toolkit for TypeScript contracts, type-safe Fetch, and native streaming.",
   "keywords": [
     "api-client",
