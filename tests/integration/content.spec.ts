@@ -8,7 +8,7 @@ import { codes, entry, gen, oas } from "../support/generate"
 import { expectPassesTsc, typecheck } from "../support/tsc"
 
 // The rules for media types live in four places that must agree: how the
-// generator types content and picks a request's default media type, and how
+// generator describes media and the client selects request encoding, and how
 // the client reads and writes bodies, at run time and in its types. One table
 // drives all four.
 
@@ -228,7 +228,7 @@ describe("media types", () => {
         )
       observed.push([mediaType, read, label])
     }
-    // Sent as the only media type declared, without the call naming it.
+    // Explicit headers select each declared representation; ready-only media reject structured values.
     expect(observed).toStrictEqual(
       MEDIA.map(([mediaType, read, write]) => [
         mediaType,
@@ -239,7 +239,7 @@ describe("media types", () => {
   })
 
   describe("explicit request media", () => {
-    it("requires a media choice even for one declared JSON type", async () => {
+    it("requires an explicit header when JSON fallback cannot satisfy media parameters", async () => {
       const code = await gen(defaults)
       expect(
         await typecheck({
@@ -248,7 +248,7 @@ describe("media types", () => {
         import { createClient } from "openapi-shape/client"
         import { contract } from "./api"
         const api = createClient(contract)
-        // @ts-expect-error structured bodies need a media header
+        // @ts-expect-error the JSON fallback does not include the required profile parameter
         api.fetch("POST /d0", { body: { m0: "x" } })
         api.fetch("POST /d0", { headers: { "content-type": 'application/json; profile="https://x.test/p"' }, body: { m0: "x" } })
       `,

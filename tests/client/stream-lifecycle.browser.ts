@@ -21,7 +21,7 @@ function api(options: ClientOptions = {}) {
           requestBody: { required: false, content: { "application/octet-stream": {} } },
           responses: {
             "200": {
-              content: Object.fromEntries(["application/x-ndjson"].map((media) => [media, {}])),
+              content: { "application/x-ndjson": {} },
             },
           },
         },

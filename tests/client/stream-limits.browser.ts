@@ -67,7 +67,7 @@ function fixture(
         "GET /data": {
           responses: {
             "200": {
-              content: Object.fromEntries([media].map((declaredMedia) => [declaredMedia, {}])),
+              content: { [media]: {} },
             },
           },
         },

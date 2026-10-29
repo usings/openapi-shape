@@ -17,7 +17,7 @@ function api(response: Response) {
         "GET /records": {
           responses: {
             "200": {
-              content: Object.fromEntries([media].map((declaredMedia) => [declaredMedia, {}])),
+              content: { [media]: {} },
             },
           },
         },

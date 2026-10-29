@@ -2,10 +2,7 @@ import type { ClientOptions, StreamMessage } from "../../src/client"
 import { createClient } from "../../src/client"
 import type { ResultOperation } from "./contract"
 
-type StreamOperation<Request = Record<never, never>> = Omit<
-  ResultOperation<Request>,
-  "responses"
-> & {
+type StreamOperation<Request = Record<never, never>> = Request & {
   responses: { 200: { content: { "text/event-stream": StreamMessage[] } } }
 }
 
@@ -14,10 +11,7 @@ export function sseClient(options: ClientOptions = {}) {
     "GET /events": StreamOperation
     "POST /events/{id}": StreamOperation<{
       params: { id: number }
-      body: Record<
-        "application/json",
-        { topic: string } | Blob | ReadableStream | AsyncIterable<Uint8Array>
-      >
+      body: Record<"application/json", { topic: string }>
     }>
     "GET /ordinary": ResultOperation
   }>(
@@ -27,7 +21,7 @@ export function sseClient(options: ClientOptions = {}) {
         "GET /events": {
           responses: {
             "200": {
-              content: Object.fromEntries(["text/event-stream"].map((media) => [media, {}])),
+              content: { "text/event-stream": {} },
             },
           },
         },
@@ -36,7 +30,7 @@ export function sseClient(options: ClientOptions = {}) {
           parameters: { path: { id: { required: true } } },
           responses: {
             "200": {
-              content: Object.fromEntries(["text/event-stream"].map((media) => [media, {}])),
+              content: { "text/event-stream": {} },
             },
           },
         },

@@ -1,13 +1,13 @@
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { describe, expect, it, vi } from "vitest"
-import type { Contract, Fetcher, StreamMessage } from "../../src/client"
+import { describe, expect, it } from "vitest"
+import type { Contract, StreamMessage } from "../../src/client"
 import { createClient } from "../../src/client"
 import { collectStreamMedia } from "../../src/client/streams/subscription"
 import { generate } from "../../src/core/index"
 import { contractOf } from "../support/contract"
 import { codes, entry, gen, oas } from "../support/generate"
-import { sseClient as client, sseResponse as response } from "../support/streams"
+import { sseResponse as response } from "../support/streams"
 import { withFiles } from "../support/tmp"
 import { expectPassesTsc, typecheck } from "../support/tsc"
 
@@ -686,37 +686,5 @@ message.data satisfies string
     ))
       messages.push(event as StreamMessage)
     expect(messages).toStrictEqual([{ event: "removed", data: "gone", id: "" }])
-  })
-
-  it("rejects invalid endpoint/request input through the stream while fetch remains available", async () => {
-    const fetch = vi.fn<Fetcher>().mockImplementation(() => Promise.resolve(response()))
-    const api = client({ fetch })
-    await expect(
-      api
-        .stream("GET /ordinary" as never)
-        .getReader()
-        .read(),
-    ).rejects.toThrow("does not declare")
-    await expect(
-      api
-        .stream("POST /events/{id}", {
-          headers: { "accept": "text/event-stream", "content-type": "application/json" },
-          params: { id: 1 },
-          body: new ReadableStream() as never,
-          retry: {},
-        })
-        .getReader()
-        .read(),
-    ).rejects.toThrow("cannot replay")
-    await expect(
-      api
-        .stream("POST /events/{id}", { body: { topic: "a" } } as never)
-        .getReader()
-        .read(),
-    ).rejects.toThrow()
-    await expect(api.result("GET /events" as never)).rejects.toThrow("Response media")
-    expect(fetch).toHaveBeenCalledOnce()
-    const received = await api.fetch("GET /events")
-    expect(await received.text()).toBe("data: hello\n\n")
   })
 })

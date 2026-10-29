@@ -45,14 +45,14 @@ function api(options: ClientOptions = {}) {
         "GET /records": {
           responses: {
             "200": {
-              content: Object.fromEntries(["application/x-ndjson"].map((media) => [media, {}])),
+              content: { "application/x-ndjson": {} },
             },
           },
         },
         "GET /jsonl": {
           responses: {
             "200": {
-              content: Object.fromEntries(["application/jsonl"].map((media) => [media, {}])),
+              content: { "application/jsonl": {} },
             },
           },
         },

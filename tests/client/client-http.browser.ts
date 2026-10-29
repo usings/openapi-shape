@@ -31,7 +31,7 @@ function client(options: ClientOptions = {}) {
         "GET /events": {
           responses: {
             "200": {
-              content: Object.fromEntries(["text/event-stream"].map((media) => [media, {}])),
+              content: { "text/event-stream": {} },
             },
           },
         },

@@ -331,32 +331,56 @@ it("keeps a middleware-owned clone branch readable after response handoff", asyn
   unused?.releaseLock()
 })
 
-it("cleans responses when abort races every transport completion boundary", async () => {
-  for (let offset = 0; offset < 16; offset++) {
+it.each(["transport", "middleware", "reader"] as const)(
+  "cleans the response when abort occurs at the %s boundary",
+  async (boundary) => {
     const signal = new AbortController()
+    const reason = new Error("boundary stop")
+    const entered = Promise.withResolvers<void>()
+    const proceed = Promise.withResolvers<void>()
     const cancel = vi.fn<() => void>()
-    const received = new Response(new ReadableStream({ cancel }), {
-      headers: { "content-type": "text/event-stream" },
-    })
+    const received = new Response(
+      new ReadableStream(
+        {
+          pull() {
+            if (boundary === "reader") entered.resolve()
+          },
+          cancel,
+        },
+        { highWaterMark: 0 },
+      ),
+      { headers: { "content-type": "text/event-stream" } },
+    )
     const api = client({
-      fetch: () => {
-        let remaining = offset
-        const abort = (): void => {
-          if (remaining-- === 0) signal.abort(new Error("racing stop"))
-          else queueMicrotask(abort)
+      fetch: async () => {
+        if (boundary === "transport") {
+          entered.resolve()
+          await proceed.promise
         }
-        queueMicrotask(abort)
-        return Promise.resolve(received)
+        return received
       },
+      middleware: [
+        async (request, next) => {
+          const delivered = await next(request)
+          if (boundary === "middleware") {
+            entered.resolve()
+            await proceed.promise
+          }
+          return delivered
+        },
+      ],
     })
-    // oxlint-disable-next-line no-await-in-loop -- each independent subscription races a different boundary
-    await expect(
-      api.stream("GET /events", { signal: signal.signal }).getReader().read(),
-    ).rejects.toThrow("racing stop")
-    // oxlint-disable-next-line no-await-in-loop -- wait for the late response's cleanup before the next case
+    const reader = api.stream("GET /events", { signal: signal.signal }).getReader()
+    const read = reader.read()
+    const outcome = read.catch((error: unknown) => error)
+    await entered.promise
+    signal.abort(reason)
+    proceed.resolve()
+    expect(await outcome).toBe(reason)
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
-  }
-})
+    reader.releaseLock()
+  },
+)
 
 it("does not reconnect when reader cancellation wins the retry timer boundary", async () => {
   vi.useFakeTimers()
@@ -371,4 +395,36 @@ it("does not reconnect when reader cancellation wins the retry timer boundary", 
   await vi.advanceTimersByTimeAsync(100)
   expect(fetch).toHaveBeenCalledOnce()
   expect(vi.getTimerCount()).toBe(0)
+})
+
+it("rejects invalid endpoint/request input through the stream while fetch remains available", async () => {
+  const fetch = vi.fn<Fetcher>().mockImplementation(() => Promise.resolve(response()))
+  const api = client({ fetch })
+  await expect(
+    api
+      .stream("GET /ordinary" as never)
+      .getReader()
+      .read(),
+  ).rejects.toThrow("does not declare")
+  await expect(
+    api
+      .stream("POST /events/{id}", {
+        headers: { "accept": "text/event-stream", "content-type": "application/json" },
+        params: { id: 1 },
+        body: new ReadableStream() as never,
+        retry: {},
+      })
+      .getReader()
+      .read(),
+  ).rejects.toThrow("cannot replay")
+  await expect(
+    api
+      .stream("POST /events/{id}", { body: { topic: "a" } } as never)
+      .getReader()
+      .read(),
+  ).rejects.toThrow()
+  await expect(api.result("GET /events" as never)).rejects.toThrow("Response media")
+  expect(fetch).toHaveBeenCalledOnce()
+  const received = await api.fetch("GET /events")
+  expect(await received.text()).toBe("data: hello\n\n")
 })
