@@ -10,4 +10,5 @@ Treat documentation as a reader-facing contract; scale checks to the impact of w
 - Follow the target renderer and existing terminology and style. Use semantic Markdown, accurate code fences, useful headings and links, and accessible alternatives to diagrams. Do not add decorative syntax or rely on unsupported extensions.
 - Preserve working links, incoming heading anchors, examples, and established documentation contracts unless change is required. When updating generated docs, edit their source of truth where applicable.
 - Remove filler, inflated claims, repeated summaries, and unnecessary formatting without deleting technical distinctions, warnings, or caveats.
+- After behavior changes, rewrite the affected explanation to describe the current model; avoid accumulating exceptions that explain superseded designs.
 - Verify affected snippets, links, anchors, and rendering where practical using existing project checks. Identify static-only reviews and unexecuted examples.

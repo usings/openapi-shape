@@ -16,6 +16,15 @@ Exercise semantics in the runtime that owns them; a Node test does not establish
 
 Assert arguments, counts, or ordering when they are part of the component's contract, rather than merely proving a mock was present or called.
 
+## Verify type inference
+
+- For inference precision, use exact type assertions and check types at the point of consumption. One-way assignability can accept an unintended `never`, including inside a stream.
+- Pair accepted calls with rejected calls for relevant constraints, so rejecting everything cannot satisfy the test. Compile expected errors and detect unused `@ts-expect-error` directives.
+- Casts do not establish inference correctness. They may deliberately bypass types to test runtime rejection; keep that purpose explicit.
+- When a complex inference fix leaves doubt about test sensitivity, temporarily substitute a plausible wrong result and confirm an assertion fails. Use a focused probe rather than requiring a mutation-testing framework.
+
+Use [Conventions](01-conventions.md#verification-commands) for required commands and [the test coverage map](../tests/README.md) for placement and compiler configurations.
+
 ## Keep checks reliable
 
 Reuse existing helpers and fixtures when they express the requirement clearly. Prefer explicit synchronization and controlled clocks to arbitrary sleeps. Ensure asynchronous checks terminate, and clean up streams, servers, timers, and temporary files. Isolate mutable test state so parallel runs do not interfere.

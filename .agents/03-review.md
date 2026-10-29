@@ -1,6 +1,6 @@
 # Review
 
-Read for in-depth reviews and as soon as a High-risk change, complex compatibility or recovery work, or blocked verification is identified. Apply this guide within the [Workflow](00-workflow.md).
+Read for in-depth reviews, High-risk changes, complex compatibility or recovery work, or verification gaps affecting key correctness claims. An environment failure alone does not require this guide unless resolving it involves such decisions. Apply this guide within the [Workflow](00-workflow.md).
 
 ## Establish the risk model
 
@@ -22,7 +22,7 @@ Select checks that establish the required behavior; a passing build or happy pat
 
 ## Independent review
 
-For independent review, supply the reviewer with the objective, change, constraints, invariants, input sources, and known assumptions, along with access to supporting evidence. Ask the reviewer to challenge the author's model and inspect omitted paths. The reviewer identifies findings; the author owns authorized repairs and integration.
+When independent review is available and permitted by current instructions, supply the reviewer with the objective, change, constraints, invariants, input sources, and known assumptions, along with access to supporting evidence. Ask the reviewer to challenge the author's model and inspect omitted paths. The reviewer identifies findings; the author owns authorized repairs and integration.
 
 For concurrent work, a snapshot, commit, or separate worktree can preserve the reviewed state.
 
