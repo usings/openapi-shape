@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["tests/__snapshots__", "tests/fixtures"],
+  "ignorePatterns": ["tests/fixtures"],
   "semi": false,
   "quoteProps": "consistent",
   "sortImports": {

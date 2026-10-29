@@ -11,16 +11,14 @@ import type {
   TypedResponse,
 } from "../../src/client"
 import { createClient, defineMiddleware } from "../../src/client"
-import type { Endpoints, Schemas } from "../__snapshots__/client-api"
-import { contract } from "../__snapshots__/client-api"
+import type { Endpoints, Schemas } from "../fixtures/output/client-api"
+import { contract } from "../fixtures/output/client-api"
 
 // Compile-time checks below are checked by `pnpm typecheck`; their bodies never run.
 void function inputChecks(client: Client<Endpoints>): void {
-  const formType: "application/x-www-form-urlencoded" =
-    contract.endpoints["POST /token"].contentType
-  void formType
   const field =
-    contract.endpoints["POST /token"].bodyEncodings["application/x-www-form-urlencoded"].grant_type
+    contract.endpoints["POST /token"].requestBody.content["application/x-www-form-urlencoded"]
+      .encoding.grant_type
   // @ts-expect-error generated endpoint metadata remains deeply readonly
   field.repeat = false
 
@@ -31,27 +29,38 @@ void function inputChecks(client: Client<Endpoints>): void {
   // @ts-expect-error a required query parameter
   void client.fetch("GET /search", { query: {} })
   // @ts-expect-error no request body on this operation
-  void client.fetch("GET /pets", { body: {} })
+  void client.fetch("GET /pets", { body: {}, headers: { "content-type": "application/json" } })
   // @ts-expect-error the body is required
   void client.result("POST /pets")
+
   // @ts-expect-error body type is checked
-  void client.result("POST /pets", { body: { name: 1 } })
+  void client.result("POST /pets", {
+    body: { name: 1 },
+    headers: { "content-type": "application/json" },
+  })
   // An optional body can be omitted.
   void client.result("PATCH /pets/{id}", { params: { id: 1 } })
+
   // @ts-expect-error the body is still checked
-  void client.result("POST /charges", { body: { amount: "1" } })
-  // @ts-expect-error two media types and no JSON: the call names one
+  void client.result("POST /charges", {
+    body: { amount: "1" },
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+  })
+  // @ts-expect-error structured bodies require an explicit Content-Type
   void client.result("POST /upload", { body: { file: new Blob([]) } })
   void client.result("POST /upload", {
-    contentType: "multipart/form-data",
     body: { file: new Blob([]) },
+    headers: { "content-type": "multipart/form-data" },
   })
+
   // @ts-expect-error the body must match the chosen media type
-  void client.result("POST /upload", { contentType: "multipart/form-data", body: { name: "x" } })
+  void client.result("POST /upload", {
+    body: { name: "x" },
+    headers: { "content-type": "application/octet-stream" },
+  })
   void client.result("POST /token", {
-    // @ts-expect-error only declared media types
-    contentType: "application/json",
     body: { grant_type: "x" },
+    headers: { "content-type": "application/x-www-form-urlencoded" },
   })
   // @ts-expect-error a query of undeclared parameters
   void client.result("GET /search", { query: { q: "x", size: 10 } })
@@ -61,12 +70,19 @@ void function inputChecks(client: Client<Endpoints>): void {
   void client.result("GET /pets/{id}", { params: { id: 1 }, cookies: { session: "s" } })
 
   // An encoded form body is taken as it is.
-  void client.result("POST /token", { body: "grant_type=client_credentials" })
+  void client.result("POST /token", {
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: "grant_type=client_credentials",
+  })
 
   // A sync iterable is not a body fetch sends.
   const iterable = [new Uint8Array()][Symbol.iterator]()
+
   // @ts-expect-error a sync iterable is sent as nothing useful
-  void client.fetch("POST /upload", { contentType: "application/octet-stream", body: iterable })
+  void client.fetch("POST /upload", {
+    body: iterable,
+    headers: { "content-type": "application/octet-stream" },
+  })
 }
 
 void function endpointChecks(client: Client<Endpoints>): void {
@@ -88,12 +104,17 @@ void function clientOptionChecks(): void {
   void createClient(contract, { baseUrl: "https://api.test" })
   // @ts-expect-error one signal would cancel every request; a call or the fetch option takes it
   void createClient(contract, { signal: AbortSignal.timeout(10_000) })
-  // @ts-expect-error contract entries name declared endpoints
-  void createClient<Endpoints>({ version: 6, endpoints: { "GET /nope": {} } })
+  void createClient<Endpoints>({
+    version: 7,
+    endpoints: {
+      // @ts-expect-error a contract cannot have unrelated endpoint keys
+      "GET /nope": { responses: { default: { content: { "*/*": {} } } } },
+    },
+  })
   // @ts-expect-error an older contract must be regenerated
   void createClient({ ...contract, version: 4 })
   // @ts-expect-error a newer contract must be regenerated with the installed package
-  void createClient({ ...contract, version: 7 })
+  void createClient({ ...contract, version: 8 })
 }
 
 void function callBaseURLChecks(client: Client<Endpoints>): void {
@@ -121,17 +142,18 @@ void function middlewareContextChecks(context: MiddlewareContext): void {
 // Compile-time checks below are checked by `pnpm typecheck`; their bodies never run.
 void async function fetchTypeChecks(client: Client<Endpoints>): Promise<void> {
   const pet = await client.fetch("GET /pets/{id}", { params: { id: 1 } })
-  if (pet.ok) expectTypeOf(await pet.json()).toEqualTypeOf<Schemas.Pet>()
+  if (pet.status === 200) expectTypeOf(await pet.json()).toEqualTypeOf<Schemas.Pet>()
   if (pet.status === 404) expectTypeOf(await pet.json()).toEqualTypeOf<Schemas.Error>()
   // Undeclared error statuses have unknown bodies.
   if (pet.status === 500) expectTypeOf(await pet.json()).toEqualTypeOf<unknown>()
   expectTypeOf(pet).toExtend<Response>()
+  if (pet.status === 0) expectTypeOf(await pet.json()).toEqualTypeOf<never>()
 
   // A declared 2xx is the only success; `default` covers every other status.
   const pets = await client.fetch("GET /pets")
-  if (pets.ok) expectTypeOf(await pets.json()).toEqualTypeOf<Schemas.Pet[]>()
+  if (pets.ok) expectTypeOf(await pets.json()).toEqualTypeOf<Schemas.Pet[] | Schemas.Error>()
   if (!pets.ok) expectTypeOf(await pets.json()).toEqualTypeOf<Schemas.Error>()
-  expectTypeOf<201>().not.toExtend<typeof pets.status>()
+  expectTypeOf<201>().toExtend<typeof pets.status>()
 
   // A range stands for each of its statuses; text content has no typed `json()`.
   const search = await client.fetch("GET /search", { query: { q: "x" } })
@@ -158,7 +180,7 @@ void async function resultTypeChecks(client: Client<Endpoints>): Promise<void> {
   } else {
     expectTypeOf(data).toEqualTypeOf<undefined>()
     // Undeclared statuses may carry anything; `status` tells the declared ones apart.
-    expectTypeOf(error).toEqualTypeOf<Schemas.Error | NonNullable<unknown> | null>()
+    expectTypeOf(error).toEqualTypeOf<Schemas.Error>()
     if (status === 404) expectTypeOf(error).toEqualTypeOf<Schemas.Error>()
   }
   if (status === 200) expectTypeOf(data).toEqualTypeOf<Schemas.Pet | Blob>()
@@ -166,8 +188,9 @@ void async function resultTypeChecks(client: Client<Endpoints>): Promise<void> {
   // A 304 has no body even under `default`: a truthiness check misses it.
   const listed = await client.result("GET /pets")
   if (listed.error) expectTypeOf(listed.error).toEqualTypeOf<Schemas.Error>()
-  else expectTypeOf(listed.data).toEqualTypeOf<Schemas.Pet[] | undefined>()
-  if (listed.error === undefined) expectTypeOf(listed.data).toEqualTypeOf<Schemas.Pet[]>()
+  else expectTypeOf(listed.data).toEqualTypeOf<Schemas.Pet[] | Schemas.Error | undefined>()
+  if (listed.error === undefined)
+    expectTypeOf(listed.data).toEqualTypeOf<Schemas.Pet[] | Schemas.Error | undefined>()
   const deleted = await client.result("DELETE /pets/{id}", { params: { id: 1 } })
   if (deleted.error === undefined) expectTypeOf(deleted.data).toEqualTypeOf<undefined>()
   // A range includes the statuses that have no content.
@@ -178,7 +201,7 @@ void async function resultTypeChecks(client: Client<Endpoints>): Promise<void> {
   if (searched.status === 204) expectTypeOf(searched.data).toEqualTypeOf<undefined>()
   if (searched.status === 200) expectTypeOf(searched.data).toEqualTypeOf<string>()
   const checked = await client.result("GET /health")
-  if (checked.error === undefined) expectTypeOf(checked.data).toEqualTypeOf<unknown>()
+  expectTypeOf(checked).toEqualTypeOf<never>()
   const file = await client.result("GET /files/{names}", { params: { names: [] } })
   if (file.error === undefined) expectTypeOf(file.data).toEqualTypeOf<Blob>()
 }
@@ -190,7 +213,7 @@ void async function forwardingChecks(client: Client<Endpoints>): Promise<void> {
     endpoint: K,
     ...args: EndpointArgs<Endpoints, K>
   ): Promise<EndpointData<Endpoints, K>> => {
-    const { data: succeeded, error: failed } = await client.result(endpoint, ...args)
+    const { data: succeeded, error: failed } = await client.result<K, object>(endpoint, ...args)
     if (failed !== undefined) throw new Error(`${endpoint} failed`)
     return succeeded
   }

@@ -44,7 +44,8 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm test --run && pnpm typecheck && pnpm lint && pnpm format --check"
+    "verify": "pnpm test --run && pnpm typecheck && pnpm test:types && pnpm lint && pnpm format --check",
+    "test:types": "tsc -p tests/types/tsconfig.json && tsc -p tests/types/tsconfig.strict.json"
   },
   "dependencies": {
     "citty": "^0.2.2",

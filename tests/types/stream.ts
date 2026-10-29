@@ -113,7 +113,10 @@ api.stream("GET /events", { ...limited, retry: false })
 export function limitedEvents(maxMessageBytes?: number) {
   return api.stream("GET /events", { maxMessageBytes })
 }
-api.stream("GET /events", { accept: "text/event-stream", retry: { delay: 12, maxRetries: 2 } })
+api.stream("GET /events", {
+  retry: { delay: 12, maxRetries: 2 },
+  headers: { accept: "text/event-stream" },
+})
 // @ts-expect-error Web Streams return synchronously
 api.stream("GET /events").then()
 export async function eventFields() {
@@ -128,7 +131,7 @@ export async function eventFields() {
 api.stream("GET /sequence") satisfies ReadableStream<{ id: number } | null>
 api.stream("GET /sequence", limited) satisfies ReadableStream<{ id: number } | null>
 api.stream("GET /records", limited)
-api.stream("GET /jsonl", { ...limited, accept: "Application/JSONL; charset=utf-8" })
+api.stream("GET /jsonl", { ...limited, headers: { accept: "Application/JSONL; charset=utf-8" } })
 // @ts-expect-error the per-message limit is numeric
 api.stream("GET /events", { maxMessageBytes: "8 MiB" })
 // @ts-expect-error parser limits do not apply to raw fetch responses
@@ -137,32 +140,31 @@ api.fetch("GET /events", limited)
 api.result("GET /plain", limited)
 // @ts-expect-error a byte limit does not supply required request inputs
 api.stream("POST /events/{id}", limited)
-// @ts-expect-error sequence endpoints must use stream or fetch
+// @ts-expect-error sequence operations must use stream or fetch
 api.result("GET /sequence")
-// @ts-expect-error JSON sequences do not retry
 api.stream("GET /sequence", { retry: false })
 api.stream("GET /records") satisfies ReadableStream<
   { kind: "record" } | null | string | number | boolean | number[]
 >
-api.stream("GET /jsonl", { accept: "Application/JSONL; charset=utf-8" }) satisfies ReadableStream<
-  null | "one" | [1, 2]
->
-// @ts-expect-error accept retains exact declared spelling and parameters
-api.stream("GET /jsonl", { accept: "application/jsonl" })
+api.stream("GET /jsonl", {
+  headers: { accept: "Application/JSONL; charset=utf-8" },
+}) satisfies ReadableStream<null | "one" | [1, 2]>
+api.stream("GET /jsonl", { headers: { accept: "application/jsonl" } })
 // @ts-expect-error JSON line streams cannot reconnect
 api.stream("GET /records", { retry: { delay: 10 } })
-// @ts-expect-error even retry:false is SSE-only
 api.stream("GET /jsonl", { retry: false })
 api.stream("POST /events/{id}", {
   params: { id: 1 },
   query: { topic: "orders" },
   body: { name: "a" },
+  headers: { "content-type": "application/json" },
 })
 api.stream("POST /events/{id}", {
   baseURL: new URL("https://events.test"),
   params: { id: 1 },
   query: { topic: "orders" },
   body: { name: "a" },
+  headers: { "content-type": "application/json" },
 })
 // @ts-expect-error baseURL does not make the stream's inputs optional
 api.stream("POST /events/{id}", { baseURL: "https://events.test" })
@@ -171,22 +173,28 @@ api.stream("GET /events", { baseURL: 42 })
 // @ts-expect-error required operation inputs stay required
 api.stream("POST /events/{id}")
 // @ts-expect-error query remains required
-api.stream("POST /events/{id}", { params: { id: 1 }, body: { name: "a" } })
+api.stream("POST /events/{id}", {
+  params: { id: 1 },
+  body: { name: "a" },
+  headers: { "content-type": "application/json" },
+})
 // @ts-expect-error required body stays required
 api.stream("POST /events/{id}", { params: { id: 1 }, query: { topic: "orders" } })
-// @ts-expect-error a streaming request body cannot be replayed
 api.stream("POST /events/{id}", {
+  headers: { "content-type": "application/json" },
   params: { id: 1 },
   query: { topic: "orders" },
   body: new ReadableStream<Uint8Array>(),
 })
 api.stream("POST /events/{id}", {
+  headers: { "content-type": "application/json" },
   params: { id: 1 },
   query: { topic: "orders" },
   body: new ReadableStream<Uint8Array>(),
   retry: false,
 })
 api.stream("POST /events/{id}", {
+  headers: { "content-type": "application/json" },
   params: { id: 1 },
   query: { topic: "orders" },
   body: new ReadableStream<Uint8Array>(),
@@ -195,79 +203,84 @@ api.stream("POST /events/{id}", {
 })
 // @ts-expect-error a reconnecting subscription still requires replayable bytes
 api.stream("POST /events/{id}", {
+  headers: { "content-type": "application/json" },
   params: { id: 1 },
   query: { topic: "orders" },
   body: new ReadableStream<Uint8Array>(),
   retry: { maxRetries: 1 },
 })
 declare const body: AsyncIterable<Uint8Array>
-// @ts-expect-error async iterable bodies cannot be replayed
 api.stream("POST /events/{id}", { params: { id: 1 }, query: { topic: "orders" }, body })
 // @ts-expect-error GET cannot have request bodies
 api.stream("GET /events", { body: "hello" })
 
-// @ts-expect-error several declared stream media require accept
 api.stream("GET /mixed")
-// @ts-expect-error an empty init still lacks its media choice
 api.stream("GET /mixed", {})
 api.stream("GET /mixed", {
-  accept: "text/event-stream",
   retry: { maxRetries: 3 },
+  headers: { accept: "text/event-stream" },
 }) satisfies ReadableStream<StreamMessage & { event: "update"; data: "wire" }>
-api.stream("GET /mixed", { accept: "application/x-ndjson" }) satisfies ReadableStream<{
+api.stream("GET /mixed", { headers: { accept: "application/x-ndjson" } }) satisfies ReadableStream<{
   kind: "record"
 }>
-api.stream("GET /mixed", { accept: "application/jsonl" }) satisfies ReadableStream<number[]>
-api.stream("GET /mixed", { accept: "application/json-seq" }) satisfies ReadableStream<boolean>
+api.stream("GET /mixed", { headers: { accept: "application/jsonl" } }) satisfies ReadableStream<
+  number[]
+>
 api.stream("GET /mixed", {
-  accept: "application/jsonl",
+  headers: { accept: "application/json-seq" },
+}) satisfies ReadableStream<boolean>
+api.stream("GET /mixed", {
   maxMessageBytes: 1024,
+  headers: { accept: "application/jsonl" },
 }) satisfies ReadableStream<number[]>
-// @ts-expect-error ordinary JSON is not a streaming choice
-api.stream("GET /mixed", { accept: "application/json" })
+api.stream("GET /mixed", { headers: { accept: "application/json" } })
 // @ts-expect-error the selected JSON line media forbids retry
-api.stream("GET /mixed", { accept: "application/x-ndjson", retry: { delay: 1 } })
-// @ts-expect-error selected JSONL item is an array, not an SSE event
-api.stream("GET /mixed", { accept: "application/jsonl" }) satisfies ReadableStream<StreamMessage>
-// @ts-expect-error several SSE declarations still need an exact accept choice
+api.stream("GET /mixed", { retry: { delay: 1 }, headers: { accept: "application/x-ndjson" } })
+
+api.stream("GET /mixed", {
+  headers: { accept: "application/jsonl" },
+  // @ts-expect-error selected JSONL item is an array, not an SSE event
+}) satisfies ReadableStream<StreamMessage>
 api.stream("GET /two-events")
 api.stream("GET /two-events", {
-  accept: "Text/Event-Stream; charset=utf-8",
   retry: false,
+  headers: { accept: "Text/Event-Stream; charset=utf-8" },
 }) satisfies ReadableStream<StreamMessage & { event: "two" }>
 const selected: StreamArgs<Endpoints, "GET /mixed"> = [
-  { accept: "text/event-stream", retry: false },
+  { retry: false, headers: { accept: "text/event-stream" } },
 ]
-api.stream("GET /mixed", ...selected)
+api.stream<"GET /mixed", StreamMedia<Endpoints, "GET /mixed">, object>("GET /mixed", ...selected)
 export const invalid: StreamArgs<Endpoints, "GET /mixed"> = [
   // @ts-expect-error a default StreamArgs union must preserve the media/retry association
-  { accept: "application/jsonl", retry: false },
+  { retry: false, headers: { accept: "application/jsonl" } },
 ]
 function forward<K extends StreamEndpoint<Endpoints>, const M extends StreamMedia<Endpoints, K>>(
   key: K,
   ...args: StreamArgs<Endpoints, K, M>
 ): ReadableStream<EndpointStreamItem<Endpoints, K, M>> {
-  return api.stream(key, ...args)
+  return api.stream<K, M, object>(key, ...args)
 }
 function anyApi<E, K extends StreamEndpoint<E>, const M extends StreamMedia<E, K>>(
   client: Client<E>,
   key: K,
   ...args: StreamArgs<E, K, M>
 ): ReadableStream<EndpointStreamItem<E, K, M>> {
-  return client.stream(key, ...args)
+  return client.stream<K, M, object>(key, ...args)
 }
-anyApi(api, "GET /mixed", { accept: "application/jsonl" }) satisfies ReadableStream<number[]>
+anyApi(api, "GET /mixed", { headers: { accept: "application/jsonl" } }) satisfies ReadableStream<
+  number[]
+>
 anyApi(api, "GET /mixed", {
-  accept: "application/jsonl",
   maxMessageBytes: 1024,
+  headers: { accept: "application/jsonl" },
 }) satisfies ReadableStream<number[]>
 function forwardDefault<K extends StreamEndpoint<Endpoints>>(
   key: K,
   ...args: StreamArgs<Endpoints, K>
 ): ReadableStream<EndpointStreamItem<Endpoints, K>> {
-  return api.stream(key, ...args)
+  return api.stream<K, StreamMedia<Endpoints, K>, object>(key, ...args)
 }
-forward("GET /mixed", { accept: "application/x-ndjson" }) satisfies ReadableStream<{
+forward("GET /mixed", { headers: { accept: "application/x-ndjson" } }) satisfies ReadableStream<{
   kind: "record"
 }>
 forwardDefault("GET /events") satisfies ReadableStream<EndpointMessage<Endpoints, "GET /events">>
@@ -278,10 +291,17 @@ api.stream(Math.random() ? "GET /events" : "POST /events/{id}", {
   params: { id: 1 },
   query: { topic: "orders" },
   body: { name: "a" },
+  headers: { "content-type": "application/json" },
 })
+// Dynamic negotiation retains every supported item alternative.
+api.stream("GET /mixed", {
+  headers: new Headers({ accept: "text/event-stream, application/jsonl" }),
+}) satisfies ReadableStream<EndpointStreamItem<Endpoints, "GET /mixed">>
+api.stream("GET /mixed", { headers: { accept: "application/*" } }) satisfies ReadableStream<
+  EndpointStreamItem<Endpoints, "GET /mixed">
+>
 declare const media: "text/event-stream" | "application/jsonl"
-// @ts-expect-error a possibly JSONL selection cannot promise SSE retry
-api.stream("GET /mixed", { accept: media, retry: false })
+api.stream("GET /mixed", { retry: false, headers: { accept: media } })
 export type Media = Check<
   Equal<
     StreamMedia<Endpoints, "GET /mixed">,
@@ -311,11 +331,10 @@ api.result("GET /records")
 api.stream("HEAD /records")
 // @ts-expect-error bodyless statuses have no streaming response
 api.stream("GET /headless")
-// @ts-expect-error a failed stream response is not a stream endpoint
 api.stream("GET /error-stream")
 // @ts-expect-error unsupported media stays outside stream
 api.stream("GET /unsupported")
 // @ts-expect-error fetch-forbidden methods remain unavailable
 api.stream("TRACE /records")
-// @ts-expect-error unknown endpoints remain unavailable
+// @ts-expect-error unknown operations remain unavailable
 api.stream("GET /missing")
