@@ -2,7 +2,7 @@
 
 `openapi-shape` projects an API description into TypeScript types and request serialization metadata. It supports OpenAPI 3.0.x, 3.1.x, and 3.2.x. Successful generation is not full specification validation, and the client does not validate payloads against schemas. Use the original description with a validator when runtime validation is required.
 
-The rules below define the projection. Some widen what TypeScript accepts, while others deliberately narrow it; they do not change the API's source contract. Incorrect output within the documented rules is a generator defect.
+The rules below define the projection. Some widen what TypeScript accepts, while others deliberately narrow it; they do not change the API's source contract.
 
 ## Input and versions
 

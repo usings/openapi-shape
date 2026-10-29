@@ -73,16 +73,10 @@ export const contract: {
 
 Every declared operation has an own registry entry, including methods unavailable to Fetch. It groups declared parameters under `parameters.path/query/header/cookie`, recording requiredness and optional `encoding`. Whole-query input uses `querystring.required` and `querystring.content`. It also records request body declarations with per-media encodings, and response declarations by status and media type. The client uses these declarations to match request and response media. The registry contains no executable schemas, server selection, or transport implementation.
 
-The header records API metadata and declared root servers as comments; directive-like metadata is escaped. Formatting suppressions preserve the registry's one-entry-per-line layout. Lint and TypeScript diagnostic suppressions apply inside the generated file; exported types still check consuming code. Generator tests remove `@ts-nocheck` before compilation to check the generated declarations themselves.
+The generated header includes API metadata and root servers as comments. Formatting and diagnostic suppressions apply to the generated file; consuming code still checks its exported types.
 
 ## Contract compatibility
 
 Generate with the package installed alongside the client. The client checks the contract format version and endpoints object; a mismatch requires regeneration. Editing the version number does not migrate a contract, and individual registry entries are not revalidated at client creation.
 
 Keep the types and runtime registry together. After package upgrades, [regenerate and check](./generation.md#keep-generated-code-current) the whole module so call typing and serialization continue to describe the same API.
-
-## Regenerate for contract version 7
-
-Regenerate the entire module when migrating from earlier formats. The operation description is exported as `Endpoints`, and the registry is `contract.endpoints`. Runtime parameter declarations are grouped by location and include requiredness; whole-query input has its own content declaration. Request and response media remain explicit declarations, while JSON defaults belong to the client. Fetch-forbidden methods remain descriptive operations and are filtered by client types.
-
-Calls select media through headers. Structured JSON calls may omit Content-Type when the client fallback or a literal client default establishes it. SSE reconnection requires an explicit retry option. `result()` rejects undeclared response statuses; `fetch()` retains native response ownership and conservatively types undeclared responses.

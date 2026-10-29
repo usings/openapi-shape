@@ -18,9 +18,9 @@ Plain records and native buffers from other JavaScript realms retain their ordin
 
 For structured input, JSON media use JSON encoding, URL-encoded forms use a field map, `multipart/form-data` uses parts, and other text takes strings. Other media and sequential formats need an encoded string or ready body; an array is not automatically converted to SSE or JSON records.
 
-Structured bodies use a literal client Content-Type default, explicit call header, or the client fallback `application/json`. The fallback must match a contract declaration. The client matches concrete media against `requestBody.content`; exact media and declared parameters take precedence over media ranges. Form encodings belong to each media entry's `encoding`. The generator records no preferred or default request media.
+The effective Content-Type follows the [client media selection rules](./client.md#select-media). At runtime, concrete media match `requestBody.content`; exact media and declared parameters take precedence over media ranges. Form encodings belong to each media entry's `encoding`.
 
-Ready bodies preserve their data: `Blob`, buffers, `FormData`, `URLSearchParams`, Web streams, and byte async iterables. `FormData` and `URLSearchParams` supply their own content types, overriding call headers. Other ready bodies use the selected Content-Type unless call headers override it; without a concrete label, a `Blob` uses its own type. A wildcard cannot label a request body.
+Ready bodies preserve their data: `Blob`, buffers, `FormData`, `URLSearchParams`, Web streams, and byte async iterables. `FormData` and `URLSearchParams` supply their own content types, overriding call headers. Other ready bodies use the effective Content-Type; without a concrete label, a `Blob` uses its own type. A wildcard cannot label a request body.
 
 Byte async iterables are adapted to Web streams in browsers and Node.js. Canceling the request body closes the iterator when it provides `return()`.
 

@@ -38,6 +38,8 @@ Commit the generated module and add paired scripts:
 
 Run `pnpm api:generate` after changing the description or upgrading the package; run `pnpm api:check` in CI. Check mode compares complete UTF-8 bytes, including formatting. A missing or stale output exits `1`; regenerate with the same installed package rather than editing the output. See [contract compatibility](./contract.md#contract-compatibility).
 
+### Output file replacement
+
 Writing uses a temporary file beside the resolved destination and renames it over the complete output. It follows existing symlinks and preserves ordinary permission bits; the destination directory must be writable. Hard links keep the old file, and ownership, ACLs, and special permission bits are not copied. This avoids partial replacement, not power-loss corruption; abrupt termination can leave a temporary file.
 
 ## Programmatic API
@@ -95,8 +97,6 @@ console.log(code)
 
 The entry URI locates the document and resolves `./pet.json` against the same origin. Returning `undefined` delegates external documents to the built-in loader. The entry also passes through parsing and document size limits.
 
-The `base` option has been removed: replace `generate(document, { base: uri, … })` with `generate(uri, { loader, … })`, returning the document for that entry URI as above.
-
 ### Authenticate document loading
 
 A loader receives an absolute `file:`, `http:`, or `https:` URI without a fragment. Delegate sources you do not handle, and pass its signal to your own asynchronous work. This example supplies a placeholder credential only to one origin:
@@ -132,6 +132,10 @@ Numeric limits must be positive safe integers. Size limits apply separately to t
 Each load has a 30-second deadline covering its hook and body reading. The supplied signal combines that deadline with the caller's signal. Cancellation stops queued loads, cancels active bodies, and rejects even if a hook ignores its signal. Such a hook can continue outside the concurrency count; late responses are canceled. Generation checks cancellation between work units; parsing or one large schema can delay it.
 
 The response media type selects JSON or YAML parsing. If unknown, the final URL's extension is used; otherwise parsing tries JSON, then YAML. YAML merge keys are supported; cyclic object graphs, including recursive aliases, are rejected. Recursive schemas expressed with `$ref` are supported.
+
+## Migrate document loading
+
+The `base` option has been removed: replace `generate(document, { base: uri, … })` with `generate(uri, { loader, … })`, returning the document for that entry URI as above. See [in-memory documents with external references](#load-an-in-memory-document-with-external-references) for the current loader pattern.
 
 ## Diagnostics
 

@@ -18,7 +18,11 @@ for await (const pet of api.stream("GET /records", { headers: { accept: "applica
 
 An endpoint qualifies when an effective successful response declares a supported stream. Wildcards, `HEAD`, bodyless statuses, and error-only declarations do not qualify. An endpoint offering both JSON and a supported stream can use `result()` to decode its complete representation, `stream()` for streaming items, or `fetch()` for direct response access.
 
-With one streaming declaration, `headers.accept` is optional. A single exact declared value narrows the item type and requires the actual response to match that same declaration. Lists, ranges, dynamic headers, or an omitted choice with multiple declarations retain a union of item types. With no Accept header the client advertises all supported declarations. Negotiated subscriptions use the actual response to choose a parser and make one connection; automatic SSE reconnection requires a single declared SSE choice. A wrong status, media type, or missing/consumed/locked body raises `StreamResponseError`; its `response` retains status and headers after cleanup. HTTP 204 closes normally.
+The effective Accept comes from call headers, then client defaults. With no Accept, the client selects the sole streaming declaration or advertises all supported declarations when there are several.
+
+A single exact declared value, including a known client default, narrows the item type and requires the response to match that declaration. Lists, ranges, and opaque or dynamic headers retain the union of possible items and use the actual response to choose a parser. These negotiated subscriptions make one connection. Automatic SSE reconnection requires a statically selected SSE representation; override uncertain defaults with an explicit call Accept to enable it.
+
+A wrong status, media type, or missing/consumed/locked body raises `StreamResponseError`; its `response` retains status and headers after cleanup. HTTP 204 closes normally.
 
 Use `itemSchema` to describe one item, or an array `schema` to describe complete sequence content. An item schema takes precedence. SSE only narrows its standard message fields; it does not decode JSON in `data`. See [sequence projections](./openapi.md#sequence-projections) for the type rules.
 

@@ -2,6 +2,40 @@
 
 The client derives inputs and responses from the generated `Endpoints`. It does not validate payload values at runtime.
 
+## Narrow successful responses
+
+`result()` puts declared 2xx responses in `data` and other declared statuses in `error`. Checking `error !== undefined` handles HTTP failure; it does not select one particular successful response schema.
+
+A success check narrows `data` to the union of successful payloads. When these have different shapes, check `status` to select one. For example, `200` can describe a list while `default` describes other statuses, including other successes:
+
+<!-- example: standalone -->
+
+```ts
+import type { Client } from "openapi-shape/client"
+
+declare const api: Client<{
+  "GET /fallback": {
+    responses: {
+      200: { content: { "application/json": Array<{ name: string }> } }
+      default: { content: { "application/json": { message?: string } } }
+    }
+  }
+}>
+
+const { data, error, status } = await api.result("GET /fallback")
+if (error !== undefined) throw new Error(`HTTP ${status}`, { cause: error })
+
+if (status === 200) {
+  console.log(data.map((pet) => pet.name))
+} else if (status === 204 || status === 205) {
+  console.log("No content")
+} else {
+  console.log(data?.message)
+}
+```
+
+A `2XX` range includes 204 and 205, so its successful data can also be `undefined`. See [status rules](./client.md#status-typing) and [rejected calls](./client.md#handle-rejected-calls) for runtime behavior.
+
 ## Forward typed calls
 
 Use the exported helpers rather than reconstructing operation types:
@@ -40,6 +74,8 @@ A call names one endpoint, not a union of keys. Stream wrappers should preserve 
 
 ## Preserve configured defaults
 
-Configured clients carry their known default media as the second `Client<Endpoints, D>` type parameter. Wrappers that preserve configured defaults should also forward `D` through `EndpointArgs<Endpoints, K, D>` or `StreamArgs<Endpoints, K, M, D>`. Omit it for the ordinary JSON fallback.
+`Client<Endpoints, D, A>` records a known default Content-Type in `D` and default Accept information in `A`. Default header values affect which structured inputs and stream selections the compiler can establish; see [media selection](./client.md#select-media) and [stream selection](./streaming.md#select-a-representation).
 
-When a generic wrapper forwards an already checked `EndpointArgs<Endpoints, K>` tuple, use `client.result<K, object>(endpoint, ...args)`. For `StreamArgs<Endpoints, K, M>`, use `client.stream<K, M, object>(endpoint, ...args)`. The explicit header parameter keeps the helper's canonical header constraints; direct calls infer header spelling and media values automatically.
+Forward `D` through `EndpointArgs<Endpoints, K, D>` or `StreamArgs<Endpoints, K, M, D>` when wrapping a configured client. Omit it for the ordinary JSON fallback. The stream helper describes a call's selected media through `M`; default Accept selection belongs to the configured client method.
+
+Generic result wrappers can forward tuples with `client.result(endpoint, ...args)`. Stream wrappers preserving generic `K` and `M` use `client.stream<K, M, object>(endpoint, ...args)` so the helper's canonical header constraints are retained.

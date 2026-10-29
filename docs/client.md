@@ -55,10 +55,11 @@ Endpoint paths append to `baseURL` after trailing slashes are removed. A per-cal
 <!-- example: client -->
 
 ```ts
-await api.result("POST /pets", {
+const { data, error, status } = await api.result("POST /pets", {
   body: { name: "Milo" },
-  headers: { "content-type": "application/json" },
 })
+if (error !== undefined) throw new Error(`HTTP ${status}`, { cause: error })
+console.log(data.name) // This operation declares a 201 response.
 
 const file = new Blob(["example"], { type: "text/plain" })
 await api
@@ -70,13 +71,17 @@ await api
   .then((response) => response.body?.cancel())
 ```
 
-The client encodes JSON, URL-encoded forms, and `multipart/form-data`; text takes strings. Structured bodies default to application/json when allowed by the contract. Other media require an explicit Content-Type header. Header record names are case-insensitive, including declared parameter headers. The JSON fallback is client policy and is not stored in the generated contract. The client matches that header against `requestBody.content` and uses the selected media's encoding rules.
+The client encodes JSON, URL-encoded forms, and `multipart/form-data`; other text takes strings. Other media and sequential request formats need encoded data. See [serialization](./serialization.md) for wire formats, multipart parts, styles, and escaping.
 
-`Blob`, buffers, `FormData`, `URLSearchParams`, Web streams, and byte async iterables are ready bodies. Streams use half duplex. Other media types and sequential request bodies need encoded data. See [serialization](./serialization.md) for content types, multipart parts, styles, and escaping.
+`Blob`, buffers, `FormData`, `URLSearchParams`, `ReadableStream<Uint8Array>`, and byte async iterables are ready bodies. Streaming uploads use half duplex. `FormData` and `URLSearchParams` supply their own Content-Type.
 
 ## Select media
 
-Use `headers.accept` or `headers.Accept` for response preferences. Ordinary `fetch()` and `result()` allow HTTP Accept lists and ranges; the preference does not narrow their response types. Structured request bodies use a typed header object so the selected Content-Type stays associated with the body schema. Opaque `Headers` and entries remain usable when no static media association is needed, including native request bodies.
+Header record names are case-insensitive. For each header, call values override client defaults.
+
+For structured bodies, the effective Content-Type selects a declaration in `requestBody.content` and its encoding rules. If no header supplies it, the client falls back to `application/json` when the contract permits JSON. A known literal default or call header keeps the body associated with its schema; opaque defaults require an explicit call header for structured input. Content-Type type/subtype casing and additional parameters are accepted when the declaration is unambiguous. Parameterized declarations require an exact match where static parameter precedence cannot be established. The [serialization rules](./serialization.md#bodies-and-content-types) describe runtime matching and ready bodies.
+
+Accept expresses response preferences. `fetch()` and `result()` allow lists and ranges without narrowing their response types; [stream selection](./streaming.md#select-a-representation) can narrow parsed items. `Headers` and entry lists are usable for native bodies and dynamic response negotiation when no static media association is needed.
 
 ## Handle a decoded result
 
@@ -85,15 +90,11 @@ Use `headers.accept` or `headers.Accept` for response preferences. Ordinary `fet
 <!-- example: client -->
 
 ```ts
-const {
-  data: pet,
-  error,
-  status,
-} = await api.result("GET /pets/{petId}", {
+const { data, error, status } = await api.result("GET /pets/{petId}", {
   params: { petId: 1 },
 })
 if (error === undefined) {
-  console.log(pet.name)
+  console.log(data.name)
 } else if (status === 404) {
   console.warn(error.message)
 } else {
@@ -101,31 +102,37 @@ if (error === undefined) {
 }
 ```
 
-All 2xx statuses are runtime successes. Success has `error: undefined`; failure has `data: undefined` and an error body, or `null` when empty. Use `error === undefined`, not truthiness: an error can be `null`, `false`, or an empty string. The top-level `status` narrows the corresponding data and error, including after destructuring; `response.status` does not narrow its sibling fields.
+Declared 2xx responses have `error: undefined`; other declared statuses have `data: undefined` and an error body, or `null` when empty. Check `error === undefined`: error bodies can be falsy. Use the top-level `status` to select a particular response schema, including after destructuring; `response.status` does not narrow sibling fields. See [type narrowing](./types.md#narrow-successful-responses) for multiple successful representations.
 
-HTTP error statuses resolve normally. Construction, transport, middleware, and decoding errors reject. For JSON, empty or malformed content rejects with the native parsing error.
+### Decode the body
 
-The call signal remains active while `result()` reads the body, including responses supplied directly by middleware or a custom transport. Abort rejects with `signal.reason` and cancels the body without waiting for its cleanup to finish.
+| Actual response                                               | Decoding                                                             |
+| ------------------------------------------------------------- | -------------------------------------------------------------------- |
+| JSON (`…/json`, `…+json`)                                     | `response.json()`                                                    |
+| Other `text/*`                                                | String                                                               |
+| `HEAD`, 204, 205, 304, or a declared response without content | `undefined`; a supplied body is canceled for HTTP bodyless responses |
+| No Content-Type with declared wildcard content                | `Blob`, including zero bytes                                         |
+| Other media                                                   | `Blob`                                                               |
 
-| Actual response           | Decoding                                                   |
-| ------------------------- | ---------------------------------------------------------- |
-| JSON (`…/json`, `…+json`) | `response.json()`                                          |
-| Other `text/*`            | String                                                     |
-| `HEAD`, 204, 205, 304     | `undefined`; a supplied body is canceled                   |
-| No `Content-Type`         | `Blob` for declared wildcard content, including zero bytes |
-| Other media               | `Blob`                                                     |
+Content-Type selection follows Fetch MIME extraction, including multi-value headers. Multiple complete media at one status retain a union of decoded types.
 
-Content type selection follows Fetch MIME extraction, including multi-value headers. Multiple declared media produce a union of their decoded types; narrow the value before using schema properties. `response` remains useful for headers, but its body is already read or canceled. Use `fetch()` when you need body ownership.
+### Handle rejected calls
 
-An endpoint offering both complete and streaming responses can use `result()` for its complete representation. `result()` matches declared response media using the actual status and Content-Type. A declared media mismatch or a supported streaming response raises `ContractResponseError` after canceling the body; status and headers remain available on its `response`. Undeclared statuses raise `ContractResponseError`; use `fetch()` to inspect arbitrary responses. This checks the HTTP representation, not JSON schema validity. HEAD and bodyless statuses follow HTTP semantics before media matching. The result retains `data`, `error`, `status`, and `response`; multiple complete media at one status retain a union type.
+Declared HTTP error statuses resolve normally. Construction, transport, middleware, and decoding failures reject; empty or malformed JSON rejects with the native parsing error.
 
-When a declared wildcard response has no Content-Type, `result()` reads a `Blob`, including a zero-byte Blob for empty content. Declared responses without content and HTTP bodyless responses return `undefined`.
+`result()` checks the actual status and Content-Type against the contract. An undeclared status, media mismatch, unexpected body on a declaration without content, or supported streaming representation raises `ContractResponseError` after canceling the body; the error's `response` retains status and headers. An endpoint offering both complete and streaming media can use `result()` for the complete representation. HTTP bodyless responses are handled before media matching. These checks do not validate payloads against JSON schemas.
+
+### Response ownership and cancellation
+
+`result()` reads or cancels the body. Its `response` exposes metadata; use `fetch()` to own body consumption or inspect responses outside the contract.
+
+The call signal remains active during body reading, including responses supplied by middleware or custom transports. Abort rejects with `signal.reason` and cancels the body without waiting for cleanup to finish.
 
 ### Status typing
 
-Exact response codes take precedence over ranges such as `2XX`. `default` covers all statuses not matched by an exact code or range, including other successful statuses. `fetch()` types undeclared response bodies conservatively as unknown; check an explicit status for precise JSON types. `result()` rejects undeclared statuses.
+Exact response codes take precedence over ranges such as `2XX`, then `default`. The fallback covers any remaining status, including successes. `HEAD` and statuses 204, 205, and 304 have no content regardless of schema; a 304 result has `error: null`.
 
-`HEAD` and statuses 204, 205, and 304 have no content regardless of the description; a 304 result has `error: null`. Fetch types also include native opaque status `0`, whose empty body cannot be parsed as JSON. Decoded results include only declared HTTP representations.
+`fetch()` includes undeclared responses with conservatively typed bodies and native opaque status `0`, whose empty body cannot be parsed as JSON. `result()` returns only declared representations.
 
 ## Own the response with Fetch
 
@@ -135,6 +142,7 @@ Exact response codes take precedence over ranges such as `2XX`. `default` covers
 
 ```ts
 const response = await api.fetch("GET /pets/{petId}", { params: { petId: 1 } })
+
 if (response.status === 200) {
   console.log((await response.json()).name)
 } else if (response.status === 404) {
@@ -168,6 +176,7 @@ const logger = defineMiddleware(async (request, next, context) => {
   console.log(context.kind, context.endpoint, response.status)
   return response
 })
+
 const api = createClient(contract, {
   baseURL: "https://api.example.com/v1",
   middleware: [logger, auth],
