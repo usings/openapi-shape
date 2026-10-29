@@ -65,3 +65,18 @@ expectTypeOf<SingleMedia<`application/${string}`>>().toEqualTypeOf<never>()
 expectTypeOf<SingleMedia<Uppercase<string>>>().toEqualTypeOf<never>()
 expectTypeOf<SingleMedia<"application/json" | "text/plain">>().toEqualTypeOf<never>()
 expectTypeOf<SingleMedia<"application/json">>().toEqualTypeOf<"application/json">()
+
+void function wildcardChecks(
+  contract: Contract<{
+    "POST /wild": { body: { "application/*": { id: number } }; responses: { 204: object } }
+  }>,
+) {
+  const api = createClient(contract)
+  api.fetch("POST /wild", { headers: { "content-type": "application/json" }, body: { id: 1 } })
+  // @ts-expect-error PDF needs an encoded body
+  api.fetch("POST /wild", { headers: { "content-type": "application/pdf" }, body: { id: 1 } })
+  const pdf = createClient(contract, { headers: { "content-type": "application/pdf" } })
+  // @ts-expect-error a PDF default cannot encode a structured value
+  pdf.fetch("POST /wild", { body: { id: 1 } })
+  pdf.fetch("POST /wild", { body: new Blob() })
+}

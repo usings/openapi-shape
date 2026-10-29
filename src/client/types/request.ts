@@ -1,7 +1,7 @@
 import type { Empty, Endpoint, Essence, IsJson, MethodOf, Operation, OperationOf } from "./endpoint"
 import type { HeadersField, MediaHeader, WithHeaders, SingleMedia } from "./headers"
 import type { TextOf } from "./response"
-import type { IsUnion, UnionToIntersection, LowercaseKeys } from "./utils"
+import type { IsUnion, LowercaseKeys } from "./utils"
 
 /** Ready-made request bodies, including async byte iterables adapted to Web streams. */
 export type BodyLike =
@@ -89,7 +89,7 @@ type ExplicitBody<C, H, N = LowercaseKeys<H>> = "content-type" extends keyof N
         ? [K] extends [never]
           ? never
           : K extends keyof C & string
-            ? { headers: Record<"content-type", M>; body: BodyValue<C, K> }
+            ? { headers: Record<"content-type", M>; body: BodyValue<C, K, M> }
             : never
         : never
     : never
@@ -106,7 +106,7 @@ export type DefaultBody<
     ? never
     : M extends keyof C & string
       ? {
-          body: BodyValue<C, M>
+          body: BodyValue<C, M, D>
           headers?: { "content-type"?: never; "Content-Type"?: never; [Symbol.iterator]?: never }
         }
       : never
@@ -122,9 +122,7 @@ export type BodyVariant<Content> =
   | {
       [M in keyof Content & string]: {
         headers: MediaHeader<"content-type", ConcreteMedia<M>, true>
-        body: M extends `${string}*${string}`
-          ? BodyValue<Content, M> & CompatibleBodies<Content, M>
-          : BodyValue<Content, M>
+        body: M extends `${string}*${string}` ? BodyLike : BodyValue<Content, M>
       }
     }[keyof Content & string]
   | {
@@ -135,34 +133,22 @@ export type BodyVariant<Content> =
       >
     }
 
-/** Intersect properties, preserving each body's own union of native alternatives. */
-export type CompatibleBodies<C, M extends string> =
-  UnionToIntersection<
-    {
-      [K in keyof C & string]: K extends ConcreteMedia<M>
-        ? { body: BodyValue<C, K> }
-        : { body: unknown }
-    }[keyof C & string]
-  > extends { body: infer B }
-    ? B
-    : unknown
-
 type IntersectFunctionParameters<F> = [F] extends [(value: infer V) => void] ? V : never
 
 /**
  * What the client encodes for a media type; others take ready-made bodies. Text is sent as given, a
  * string, though `text/*` content may also be JSON.
  */
-export type BodyValue<Content, M extends keyof Content & string> =
-  IsEncodable<M> extends true
+export type BodyValue<Content, M extends keyof Content & string, A extends string = M> =
+  IsEncodable<A> extends true
     ?
-        | (IsJson<M> extends true
+        | (IsJson<A> extends true
             ? Content[M]
-            : Essence<M> extends `text/${string}`
+            : Essence<A> extends `text/${string}`
               ? TextOf<Content[M]>
               : FormValue<Content[M]>)
         | BodyLike
-        | (Essence<M> extends "application/x-www-form-urlencoded" ? string : never)
+        | (Essence<A> extends "application/x-www-form-urlencoded" ? string : never)
     : BodyLike | string
 
 /** Structured forms encode named fields; arrays and scalar schemas need a ready-made body. */
