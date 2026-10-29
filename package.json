@@ -36,16 +36,16 @@
   "scripts": {
     "prepare": "lefthook install",
     "prepublishOnly": "pnpm run build",
-    "release": "bumpp",
+    "release": "pnpm verify && bumpp",
     "build": "tsdown",
     "test": "vitest",
     "test:node": "vitest run --project=node",
     "test:browser": "vitest run --project=browser",
+    "test:types": "tsc -p tests/types/tsconfig.json && tsc -p tests/types/tsconfig.strict.json",
     "lint": "oxlint",
     "format": "oxfmt",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm test --run && pnpm typecheck && pnpm test:types && pnpm lint && pnpm format --check",
-    "test:types": "tsc -p tests/types/tsconfig.json && tsc -p tests/types/tsconfig.strict.json"
+    "verify": "pnpm test --run && pnpm typecheck && pnpm test:types && pnpm lint && pnpm format --check"
   },
   "dependencies": {
     "citty": "^0.2.2",
