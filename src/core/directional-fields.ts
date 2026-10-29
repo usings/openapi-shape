@@ -1,4 +1,4 @@
-import type { Declaration, Field, Side, Type } from "./model"
+import type { Field, Side, TypeDeclaration, TypeNode } from "./model"
 import { UNKNOWN } from "./model"
 
 // Bits name the side on which a requirement is relaxed, not the annotation's applicable side.
@@ -27,9 +27,9 @@ function required(field: Field): number {
 
 /** Annotations on this object level survive normalization until all enclosing scopes are known. */
 export function hasDirections(
-  type: Type,
-  available: (declaration: Declaration) => boolean,
-  seen = new Set<Declaration>(),
+  type: TypeNode,
+  available: (declaration: TypeDeclaration) => boolean,
+  seen = new Set<TypeDeclaration>(),
 ): boolean {
   switch (type.kind) {
     case "unknown":
@@ -56,12 +56,12 @@ export function hasDirections(
  * start a new scope and are never traversed. All memoization belongs to this invocation.
  */
 export function directionScopes(
-  members: Type[],
-  available: (declaration: Declaration) => boolean,
+  members: TypeNode[],
+  available: (declaration: TypeDeclaration) => boolean,
   widen: (reason: string) => void,
-): Type[][] {
-  const memo = new Map<Type, Summary>()
-  const summarize = (type: Type): Summary => {
+): TypeNode[][] {
+  const memo = new Map<TypeNode, Summary>()
+  const summarize = (type: TypeNode): Summary => {
     const cached = memo.get(type)
     if (cached) return cached
     const out: Summary = new Map()
@@ -103,7 +103,7 @@ export function directionScopes(
   )
   if (relevant.size === 0) return [members]
 
-  const mixed = (type: Type): boolean =>
+  const mixed = (type: TypeNode): boolean =>
     [...summarize(type)].some(
       ([name, p]) =>
         relevant.has(name) &&
@@ -111,14 +111,14 @@ export function directionScopes(
         (p.possible & ~(combined.get(name)?.certain ?? 0)) !== 0,
     )
   let steps = 0
-  const split = (type: Type): Type[][] | undefined => {
+  const split = (type: TypeNode): TypeNode[][] | undefined => {
     if (++steps > MAX_STEPS) return undefined
     if (!mixed(type)) return [[type]]
     switch (type.kind) {
       case "ref":
         return split(type.target.type)
       case "union": {
-        const out: Type[][] = []
+        const out: TypeNode[][] = []
         for (const member of type.members) {
           const branches = split(member)
           if (!branches || out.length + branches.length > MAX_SCOPES) return undefined
@@ -132,12 +132,12 @@ export function directionScopes(
         return [[type]]
     }
   }
-  const product = (types: Type[]): Type[][] | undefined => {
-    let scopes: Type[][] = [[]]
+  const product = (types: TypeNode[]): TypeNode[][] | undefined => {
+    let scopes: TypeNode[][] = [[]]
     for (const type of types) {
       const branches = split(type)
       if (!branches || scopes.length * branches.length > MAX_SCOPES) return undefined
-      const next: Type[][] = []
+      const next: TypeNode[][] = []
       for (const scope of scopes) for (const branch of branches) next.push([...scope, ...branch])
       scopes = next
     }
@@ -156,13 +156,13 @@ export function directionScopes(
     return relax(scope, summary, false)
   })
 
-  function relax(types: Type[], summary: Summary, possible: boolean): Type[] {
-    const copies = new Map<Type, Type>()
+  function relax(types: TypeNode[], summary: Summary, possible: boolean): TypeNode[] {
+    const copies = new Map<TypeNode, TypeNode>()
     const maskFor = (name: string): number => {
       const property = summary.get(name) ?? EMPTY
       return possible ? property.possible : property.certain
     }
-    const visit = (type: Type): Type => {
+    const visit = (type: TypeNode): TypeNode => {
       const cached = copies.get(type)
       if (cached) return cached
       // A recursive reference alone cannot establish an additional requirement.
@@ -208,13 +208,13 @@ function combine(target: Summary, source: Summary): void {
 
 /** Widen values without erasing annotations needed by requirements at later use sites. */
 export function retainDirections(
-  replacement: Type,
-  original: Type,
-  available: (declaration: Declaration) => boolean,
-): Type {
+  replacement: TypeNode,
+  original: TypeNode,
+  available: (declaration: TypeDeclaration) => boolean,
+): TypeNode {
   const annotations = new Map<string, Side | "both">()
-  const seen = new Set<Type>()
-  const visit = (type: Type): void => {
+  const seen = new Set<TypeNode>()
+  const visit = (type: TypeNode): void => {
     if (seen.has(type)) return
     seen.add(type)
     if (type.kind === "object" || type.kind === "unknown") {

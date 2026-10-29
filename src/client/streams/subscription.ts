@@ -1,18 +1,21 @@
-import { mediaTypeEssence, streamFormat } from "../shared/media"
-import type { BodyOwner } from "./cancellation"
-import { abortable, cancelBody } from "./cancellation"
+import type { EndpointContract } from "../../shared/contract"
+import { streamFormat } from "../../shared/media"
+import type { BodyOwner } from "../cancellation"
+import { abortable, cancelBody } from "../cancellation"
+import { mergeHeaders } from "../headers"
+import { matchDeclaredMedia, responseContentType } from "../media"
+import type { MiddlewareContext, Sender } from "../middleware"
+import type { CallInit, RequestDefaults } from "../request"
+import { buildRequest } from "../request"
+import { resolveResponseDeclaration } from "../response"
+import type { StreamOptions } from "../types"
+import { isStream } from "../values"
 import { readJsonSequence } from "./json-seq-parser"
 import { readJsonLines } from "./jsonl-parser"
-import { responseMediaType } from "./media"
 import { messageLimit } from "./message-buffer"
-import type { MiddlewareContext, Sender } from "./middleware"
-import type { CallInit, RequestDefaults } from "./request"
-import { buildRequest } from "./request"
 import type { EventState } from "./sse-parser"
-import { readEvents, StreamReadError } from "./sse-parser"
+import { StreamReadError, readEvents } from "./sse-parser"
 import { RetryableStreamError, retryAfterDelay, sseSession, validateRetry } from "./sse-retry"
-import type { StreamOptions } from "./types"
-import { isStream } from "./values"
 
 /** A refused response. Status and headers remain readable after its body is canceled. */
 export class StreamResponseError extends Error {
@@ -116,20 +119,30 @@ async function* subscription(
 ): AsyncGenerator<unknown, void> {
   signal.throwIfAborted()
   const media = Object.hasOwn(defaults.endpoints, endpoint)
-    ? defaults.endpoints[endpoint]?.stream
+    ? defaults.endpoints[endpoint] &&
+      collectStreamMedia(defaults.endpoints[endpoint], endpoint.split(" ")[0])
     : undefined
   if (!media?.length)
     throw new TypeError(`Endpoint "${endpoint}" does not declare a successful streaming response`)
-  const { accept, retry, maxMessageBytes, ...call } = init
+  const { retry, maxMessageBytes, ...call } = init
+  const selectionHeaders = mergeHeaders(
+    defaults.headers,
+    init.headers,
+    defaults.endpoints[endpoint]?.parameters?.header,
+  )
+  const accept = selectionHeaders.get("accept") ?? undefined
   const limit = messageLimit(maxMessageBytes)
-  const selected = accept ?? (media.length === 1 ? media[0] : undefined)
-  if (selected === undefined || !media.includes(selected))
-    throw new TypeError(`Choose a declared streaming media type with accept for "${endpoint}"`)
-  const format = streamFormat(selected)
-  if (format === undefined) throw new TypeError(`Unsupported streaming media type "${selected}"`)
-  if (format !== "sse" && retry !== undefined)
-    throw new TypeError("JSON streams do not support automatic retry")
-  const replay = format === "sse" && retry !== false && retry?.maxRetries !== 0
+  const selected =
+    accept && media.includes(accept)
+      ? accept
+      : accept === undefined && media.length === 1
+        ? media[0]
+        : undefined
+  const format = selected ? streamFormat(selected) : undefined
+  if (format !== "sse" && retry !== undefined && retry !== false)
+    throw new TypeError("Automatic retry requires a single SSE media selection")
+  const replay =
+    format === "sse" && retry !== undefined && retry !== false && retry.maxRetries !== 0
   if (replay && isStream(call.body))
     throw new TypeError("SSE reconnection cannot replay a streaming request body; set retry: false")
   const state: EventState = { id: "", retry: format === "sse" ? validateRetry(retry) : 1000 }
@@ -137,7 +150,7 @@ async function* subscription(
   const body =
     !replay || template.body === null ? undefined : await abortable(template.arrayBuffer(), signal)
   const headers = new Headers(template.headers)
-  headers.set("accept", selected)
+  if (!accept) headers.set("accept", selected ?? media.join(", "))
   const initialId = headers.get("last-event-id") ?? ""
   state.id = new TextDecoder().decode(Uint8Array.from(initialId, (char) => char.charCodeAt(0)))
   const context: MiddlewareContext = { endpoint, kind: "stream" }
@@ -150,7 +163,17 @@ async function* subscription(
     }
     first = false
     const request = new Request(template, { headers: own, ...(body === undefined ? {} : { body }) })
-    return connection(request, selected, state, send, context, signal, owner, limit)
+    return connection(
+      request,
+      selected,
+      state,
+      send,
+      context,
+      signal,
+      owner,
+      limit,
+      defaults.endpoints[endpoint],
+    )
   }
   if (format === "sse") yield* sseSession(connect, state, retry, signal)
   else yield* connect()
@@ -163,17 +186,18 @@ async function* subscription(
  */
 async function* connection(
   request: Request,
-  selected: string,
+  selected: string | undefined,
   state: EventState,
   send: Sender,
   context: MiddlewareContext,
   signal: AbortSignal,
   owner: BodyOwner,
   maxMessageBytes: number,
+  declared?: EndpointContract,
 ): AsyncGenerator<unknown, boolean> {
   const transportFailures: unknown[] = []
   let response: Response | undefined
-  const sse = streamFormat(selected) === "sse"
+  const sse = selected !== undefined && streamFormat(selected) === "sse"
   try {
     signal.throwIfAborted()
     try {
@@ -200,22 +224,35 @@ async function* connection(
         throw new RetryableStreamError(error, retryAfterDelay(response))
       throw error
     }
+    const shape = declared && resolveResponseDeclaration(declared, response.status)
+    if (!shape)
+      throw new StreamResponseError("Response status is not declared by this operation", response)
+    const actual = responseContentType(response.headers)
+    const matched = actual && shape.content && matchDeclaredMedia(shape.content, actual)
+    const format = matched ? streamFormat(matched) : undefined
     if (
-      responseMediaType(response.headers) !== mediaTypeEssence(selected) ||
+      !format ||
+      (selected !== undefined && matched !== selected) ||
       response.body === null ||
       response.bodyUsed ||
       response.body.locked
     )
-      throw new StreamResponseError(`Expected an unused ${selected} response body`, response)
-    if (sse) {
+      throw new StreamResponseError(
+        `Expected an unused ${selected ?? "declared streaming"} response body`,
+        response,
+      )
+    if (format === "sse") {
       try {
         yield* readEvents(response.body, state, signal, owner, maxMessageBytes)
       } catch (error) {
         signal.throwIfAborted()
-        if (error instanceof StreamReadError) throw new RetryableStreamError(error.cause)
+        if (error instanceof StreamReadError) {
+          if (sse) throw new RetryableStreamError(error.cause)
+          throw error.cause
+        }
         throw error
       }
-    } else if (streamFormat(selected) === "json-seq")
+    } else if (format === "json-seq")
       yield* readJsonSequence(response.body, signal, owner, maxMessageBytes)
     else yield* readJsonLines(response.body, signal, owner, maxMessageBytes)
     return false
@@ -229,4 +266,25 @@ function headerId(id: string): string {
   let value = ""
   for (const byte of new TextEncoder().encode(id)) value += String.fromCharCode(byte)
   return value
+}
+
+/** Successful streaming media, excluding statuses whose responses cannot carry content. */
+export function collectStreamMedia(endpoint: EndpointContract, method = "GET"): string[] {
+  if (method.toUpperCase() === "HEAD") return []
+  const effective = new Set<object>()
+  for (let status = 200; status < 300; status++) {
+    if (status === 204 || status === 205) continue
+    const shape =
+      endpoint.responses[String(status)] ?? endpoint.responses["2XX"] ?? endpoint.responses.default
+    if (shape) effective.add(shape)
+  }
+  return [
+    ...new Set(
+      Object.values(endpoint.responses).flatMap((shape) =>
+        effective.has(shape)
+          ? Object.keys(shape.content ?? {}).filter((key) => streamFormat(key))
+          : [],
+      ),
+    ),
+  ]
 }

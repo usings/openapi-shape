@@ -1,7 +1,8 @@
 import { CONTRACT_VERSION } from "../shared/contract"
 import { indentTail, jsdoc, text } from "./jsdoc"
-import type { Declaration, Info, Media, Operation, OutputModel, OutputOperation } from "./model"
+import type { Info, Media, OperationModel, TypeDeclaration } from "./model"
 import { propertyKey } from "./naming"
+import type { EndpointOutput, ModuleModel } from "./prepare-output"
 import type { TypeContext } from "./render-types"
 import { block, indexOf, renderFields, renderType } from "./render-types"
 
@@ -10,7 +11,7 @@ import { block, indexOf, renderFields, renderType } from "./render-types"
  * `contract` for openapi-shape/client.
  */
 export async function renderModule(
-  model: OutputModel,
+  model: ModuleModel,
   workpoint?: () => Promise<void> | undefined,
 ): Promise<string> {
   // Inside `Schemas`, a schema named `Blob` would capture raw bytes.
@@ -21,7 +22,7 @@ export async function renderModule(
   }
 
   const parts = [header(model.info)]
-  parts.push(await operations("Endpoints", model.endpoints, outside, workpoint))
+  parts.push(await operations("Endpoints", model.operations, outside, workpoint))
   // The API sends webhook and callback requests, and receives their responses.
   if (model.webhooks.length > 0) {
     parts.push(await operations("Webhooks", model.webhooks, outside, workpoint))
@@ -31,7 +32,7 @@ export async function renderModule(
   }
   if (model.declarations.length > 0)
     parts.push(await schemas(model.declarations, inside, workpoint))
-  parts.push(await contract(model.endpoints, workpoint))
+  parts.push(await contract(model.operations, workpoint))
   return `${parts.join("\n\n")}\n`
 }
 
@@ -62,7 +63,7 @@ function header(info: Info): string {
 
 async function operations(
   name: string,
-  list: Operation[],
+  list: OperationModel[],
   context: TypeContext,
   workpoint?: () => Promise<void> | undefined,
 ): Promise<string> {
@@ -120,7 +121,7 @@ function contentMap(content: Media[], context: TypeContext): string {
 }
 
 async function schemas(
-  declarations: Declaration[],
+  declarations: TypeDeclaration[],
   context: TypeContext,
   workpoint?: () => Promise<void> | undefined,
 ): Promise<string> {
@@ -135,7 +136,7 @@ async function schemas(
   return `export namespace Schemas {\n${body}\n}`
 }
 
-function declare(name: string, declaration: Declaration, context: TypeContext): string {
+function declare(name: string, declaration: TypeDeclaration, context: TypeContext): string {
   const annotations = jsdoc(declaration.annotations)
   const type = declaration.type
   if (type.kind === "object") {
@@ -145,15 +146,15 @@ function declare(name: string, declaration: Declaration, context: TypeContext): 
 }
 
 /**
- * How requests go over the wire, for `openapi-shape/client`: each endpoint's serialization and
- * default media type, where they differ from OpenAPI's defaults.
+ * How requests go over the wire, for `openapi-shape/client`: each endpoint's serialization, request
+ * media, and response declarations.
  */
 async function contract(
-  endpoints: OutputOperation[],
+  entriesToRender: EndpointOutput[],
   workpoint?: () => Promise<void> | undefined,
 ): Promise<string> {
   const entries: string[] = []
-  for (const operation of endpoints) {
+  for (const operation of entriesToRender) {
     const entry = operation.contract
     entries.push(`  ${literalKey(operation.key)}: ${flatLiteral(entry)},`)
     const pending = workpoint?.()

@@ -1,5 +1,5 @@
-import type { BodyOwner } from "./cancellation"
-import { bodyReader } from "./cancellation"
+import type { BodyOwner } from "../cancellation"
+import { bodyReader } from "../cancellation"
 import { MessageBuffer } from "./message-buffer"
 
 /**

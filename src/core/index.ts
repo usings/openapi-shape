@@ -4,14 +4,13 @@ import { Diagnostics } from "./diagnostics"
 import type { LoadingOptions } from "./document-reader"
 import { DocumentReader } from "./document-reader"
 import { loadDocuments } from "./documents"
-import { GenerationControl } from "./generation-control"
+import { GenerationControl, GenerationLimitError } from "./generation-control"
 import { PatternTimeoutError } from "./patterns"
 import { prepareOutput } from "./prepare-output"
-import { assignInputVariants } from "./projection"
 import { renderModule } from "./render-module"
 
-export type { DocumentLoader } from "./document-reader"
 export type { Diagnostic, DiagnosticCode } from "./diagnostics"
+export type { DocumentLoader } from "./document-reader"
 
 export interface GenerateOptions extends LoadingOptions {
   /** Cancel loading and stop at generation checkpoints; rejection preserves signal.reason. */
@@ -61,13 +60,18 @@ export async function generate(
   } catch (error) {
     control.throwIfAborted()
     // Deeply nested documents can exhaust the stack at any stage.
-    if (!(error instanceof RangeError) && !(error instanceof PatternTimeoutError)) throw error
+    if (
+      !(error instanceof RangeError) &&
+      !(error instanceof PatternTimeoutError) &&
+      !(error instanceof GenerationLimitError)
+    )
+      throw error
     throw new GenerateError([
       {
         severity: "error",
         code: "invalid-document",
         message:
-          error instanceof PatternTimeoutError
+          error instanceof PatternTimeoutError || error instanceof GenerationLimitError
             ? error.message
             : "The description nests too deeply to process (the call stack overflowed)",
         location: "#",
@@ -86,7 +90,6 @@ async function run(
   const documents = await loadDocuments(input, loading, reader, control)
   if (documents === undefined) throw new GenerateError(loading.list)
   const { model, diagnostics } = await buildModel(documents, control)
-  assignInputVariants(model, diagnostics)
   if (diagnostics.hasErrors) throw new GenerateError(diagnostics.list)
   await control.checkpoint()
   const output = await prepareOutput(model, () => control.workpoint())

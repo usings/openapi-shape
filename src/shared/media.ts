@@ -36,3 +36,16 @@ export function isJsonEssence(essence: string): boolean {
 export function isJsonWildcardEssence(essence: string): boolean {
   return essence === "*/*" || essence === "application/*"
 }
+
+export function mediaParameters(value: string): Map<string, string> {
+  const result = new Map<string, string>()
+  const pattern = /;\s*([^=;\s]+)\s*=\s*("(?:[^"\\]|\\.)*"|[^;]*)/g
+  for (const match of value.matchAll(pattern)) {
+    const raw = (match[2] ?? "").trim()
+    const decoded = raw.startsWith('"') ? raw.slice(1, -1).replaceAll(/\\(.)/g, "$1") : raw
+    const name = (match[1] ?? "").toLowerCase()
+    if (result.has(name)) continue
+    result.set(name, (match[1] ?? "").toLowerCase() === "charset" ? decoded.toLowerCase() : decoded)
+  }
+  return result
+}

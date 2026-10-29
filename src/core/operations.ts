@@ -1,32 +1,26 @@
 import { objectAnnotations } from "./annotations"
 import type { BuildContext } from "./build-context"
-import { typeOfContent } from "./content-types"
 import { identity } from "./document-nodes"
 import type { DocumentNode } from "./documents"
 import { formEncoding } from "./form-encoding"
+import { typeOfContent } from "./media-schema"
 import { classifyMediaType, isFormData } from "./media-types"
-import type { Body, Media, Operation, Response } from "./model"
+import type { Body, Media, OperationGroups, OperationModel, ResponseModel } from "./model"
 import { isRecord } from "./object"
+import { reportSourceIssues, resolveObject } from "./object-references"
 import { selectOperations, selectPathItem } from "./operation-sources"
 import { ParameterBuilder } from "./parameters"
-import { reportSourceIssues, resolveObject } from "./references"
 import type { SchemaBuilder } from "./schemas"
 import { union } from "./type-algebra"
 
 type Kind = "endpoint" | "webhook" | "callback"
 
-export interface Operations {
-  endpoints: Operation[]
-  webhooks: Operation[]
-  callbacks: Operation[]
-}
-
 /** Every operation under `paths`, `webhooks`, and (recursively) `callbacks`, in document order. */
 export async function buildOperations(
   context: BuildContext,
   schemas: SchemaBuilder,
-): Promise<Operations> {
-  const out: Operations = { endpoints: [], webhooks: [], callbacks: [] }
+): Promise<OperationGroups> {
+  const out: OperationGroups = { operations: [], webhooks: [], callbacks: [] }
   const ops = new OperationBuilder(context, schemas, out)
   const root = context.documents.root(context.documents.entry)
   const paths = context.documents.child(root, "paths")
@@ -59,7 +53,7 @@ class OperationBuilder {
   constructor(
     private readonly context: BuildContext,
     private readonly schemas: SchemaBuilder,
-    private readonly out: Operations,
+    private readonly out: OperationGroups,
   ) {
     this.parameterBuilder = new ParameterBuilder(context, schemas)
   }
@@ -103,7 +97,7 @@ class OperationBuilder {
       this.context.documents.child(node, "parameters"),
     )
 
-    const operation: Operation = {
+    const operation: OperationModel = {
       key,
       params: this.parameterBuilder.pathParams(params.path, kind, label, node),
       query: params.query,
@@ -137,7 +131,7 @@ class OperationBuilder {
 
     const list =
       kind === "endpoint"
-        ? this.out.endpoints
+        ? this.out.operations
         : kind === "webhook"
           ? this.out.webhooks
           : this.out.callbacks
@@ -203,16 +197,16 @@ class OperationBuilder {
     })
   }
 
-  private responses(node: DocumentNode): Response[] {
+  private responses(node: DocumentNode): ResponseModel[] {
     if (!isRecord(node.value)) return []
-    const out: Response[] = []
+    const out: ResponseModel[] = []
     for (const key of Object.keys(node.value)) {
       if (key.startsWith("x-")) continue
       const status = this.statusKey(key, node)
       const resolved = resolveObject(this.context, this.context.documents.child(node, key))
       if (resolved === undefined || !isRecord(resolved.node.value)) continue
       const value = resolved.node.value
-      const response: Response = {
+      const response: ResponseModel = {
         status,
         content: this.content(this.context.documents.child(resolved.node, "content")),
         headers: this.parameterBuilder.responseHeaders(

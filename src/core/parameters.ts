@@ -1,17 +1,17 @@
 import { mergeAnnotations, objectAnnotations, schemaAnnotations } from "./annotations"
 import type { BuildContext } from "./build-context"
 import { selectParameterValue } from "./content-sources"
-import { typeOfContent } from "./content-types"
 import type { DocumentNode } from "./documents"
 import { encodingOf } from "./encoding"
 import { formEncoding } from "./form-encoding"
+import { typeOfContent } from "./media-schema"
 import { classifyMediaType } from "./media-types"
-import type { Annotations, Field, Operation, Type } from "./model"
+import type { Annotations, Field, OperationModel, TypeNode } from "./model"
 import { UNKNOWN } from "./model"
 import { isRecord } from "./object"
+import type { Resolved } from "./object-references"
+import { reportSourceIssues, resolveObject } from "./object-references"
 import { selectParameterSources } from "./operation-sources"
-import type { Resolved } from "./references"
-import { reportSourceIssues, resolveObject } from "./references"
 import type { SchemaBuilder } from "./schemas"
 
 type Location = "path" | "query" | "header" | "cookie"
@@ -43,7 +43,7 @@ export class ParameterBuilder {
       query: [] as Field[],
       header: [] as Field[],
       cookie: [] as Field[],
-      querystring: undefined as Operation["querystring"],
+      querystring: undefined as OperationModel["querystring"],
     }
     let ignoredQuery = false
     for (const parameter of parameters) {
@@ -112,8 +112,8 @@ export class ParameterBuilder {
     return field
   }
 
-  /** Type of a Parameter or Header Object: its `schema`, or its single `content` entry. */
-  private valueType(node: DocumentNode, value: Record<string, unknown>, what: string): Type {
+  /** TypeNode of a Parameter or Header Object: its `schema`, or its single `content` entry. */
+  private valueType(node: DocumentNode, value: Record<string, unknown>, what: string): TypeNode {
     const hasSchema = "schema" in value
     const content = isRecord(value.content) ? Object.keys(value.content) : []
     if (hasSchema && content.length > 0) {
@@ -163,7 +163,7 @@ export class ParameterBuilder {
     )
   }
 
-  /** Path parameters must match the path template one-to-one (endpoints only). */
+  /** Path parameters must match the path template one-to-one (operations only). */
   pathParams(
     declared: Field[],
     kind: "endpoint" | "webhook" | "callback",
@@ -208,7 +208,7 @@ export class ParameterBuilder {
     if (!isRecord(node.value)) return []
     const fields: Field[] = []
     for (const name of Object.keys(node.value)) {
-      // "If a response header is defined with the name "Content-Type", it SHALL be ignored."
+      // "If a response header is defined with the name "Content-TypeNode", it SHALL be ignored."
       if (name.toLowerCase() === "content-type") continue
       const at = resolveObject(this.context, this.context.documents.child(node, name))
       if (at === undefined || !isRecord(at.node.value)) continue

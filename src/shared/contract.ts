@@ -1,10 +1,7 @@
+import type { Encoding } from "./encoding"
+export type { Encoding } from "./encoding"
 /** The only contract format version this client reads. */
-export const CONTRACT_VERSION = 6
-
-/** Whether a serialization style explodes by default; deepObject requires explode: true. */
-export function defaultExplode(style: string): boolean {
-  return style === "form" || style === "cookie" || style === "deepObject"
-}
+export const CONTRACT_VERSION = 7
 
 /**
  * The runtime details a generated module exports as `contract`. Encodings record deviations from
@@ -21,31 +18,38 @@ export interface Contract<Endpoints = unknown> {
   readonly endpoints: { readonly [K in keyof Endpoints]: EndpointContract }
 }
 
-/** How a value is serialized; generated form content types include schema-derived defaults. */
-export interface Encoding {
-  readonly style?: string
-  readonly explode?: boolean
-  readonly allowReserved?: boolean
-  /** The media type of a parameter's `content`, or a form field's Encoding Object `contentType`. */
-  readonly contentType?: string
-  /** Encode each array item as contentType in a named form field. */
-  readonly repeat?: boolean
+/** One endpoint's parameter encodings, request body, and response representations. */
+export interface EndpointContract {
+  readonly parameters?: {
+    readonly path?: Readonly<Record<string, ParameterContract>>
+    readonly query?: Readonly<Record<string, ParameterContract>>
+    readonly header?: Readonly<Record<string, ParameterContract>>
+    readonly cookie?: Readonly<Record<string, ParameterContract>>
+  }
+  readonly querystring?: {
+    readonly required: boolean
+    readonly content: Readonly<
+      Record<string, { readonly encoding?: Readonly<Record<string, Encoding>> }>
+    >
+  }
+  readonly requestBody?: {
+    readonly required: boolean
+    readonly content: Readonly<
+      Record<string, { readonly encoding?: Readonly<Record<string, Encoding>> }>
+    >
+  }
+  readonly responses: Readonly<
+    Record<
+      string,
+      {
+        readonly content?: Readonly<Record<string, object>>
+      }
+    >
+  >
 }
 
-/** One endpoint's parameter encodings, media selection, and form serialization. */
-export interface EndpointContract {
-  /** Explicit streaming success media types, in declaration order. */
-  readonly stream?: readonly string[]
-  readonly params?: Readonly<Record<string, Encoding>>
-  readonly query?: Readonly<Record<string, Encoding>>
-  /** Media type of the 3.2 `querystring` parameter. */
-  readonly querystring?: string
-  readonly headers?: Readonly<Record<string, Encoding>>
-  /** The media type sent when the call names none. */
-  readonly contentType?: string
-  /**
-   * URL-encoded and multipart form encodings, by full media type (including parameters), then
-   * field.
-   */
-  readonly bodyEncodings?: Readonly<Record<string, Readonly<Record<string, Encoding>>>>
+/** Presence and serialization of a declared parameter; schemas remain type-only. */
+export interface ParameterContract {
+  readonly required: boolean
+  readonly encoding?: Encoding
 }

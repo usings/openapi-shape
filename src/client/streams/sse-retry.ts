@@ -1,6 +1,6 @@
-import { wait } from "./cancellation"
+import { wait } from "../cancellation"
+import type { StreamRetryOptions } from "../types"
 import type { EventState } from "./sse-parser"
-import type { StreamRetryOptions } from "./types"
 
 /** An internal connection failure carrying the original public error. */
 export class RetryableStreamError extends Error {
@@ -26,7 +26,7 @@ export async function* sseSession(
   retry: false | StreamRetryOptions | undefined,
   signal: AbortSignal,
 ): AsyncGenerator<unknown> {
-  const maxRetries = retry === false ? 0 : (retry?.maxRetries ?? Infinity)
+  const maxRetries = retry === undefined || retry === false ? 0 : (retry.maxRetries ?? Infinity)
   let retries = 0
   while (true) {
     signal.throwIfAborted()

@@ -1,5 +1,5 @@
-import type { Encoding, EndpointContract } from "../shared/contract"
-import { defaultExplode } from "../shared/contract"
+import type { Encoding, EndpointContract, ParameterContract } from "../shared/contract"
+import { defaultExplode } from "../shared/encoding"
 import { isJsonEssence, isJsonWildcardEssence, mediaTypeEssence } from "../shared/media"
 import { isPlainObject, scalar, toJson } from "./values"
 
@@ -28,7 +28,7 @@ export function normalize(spec: Encoding | undefined, defaultStyle: string): Nor
 export function expandPath(
   path: string,
   params: Record<string, unknown> | undefined,
-  declared: EndpointContract["params"],
+  declared: Readonly<Record<string, Encoding>> | undefined,
 ): string {
   if (!path.includes("{")) return path
   // A slash inside a placeholder belongs to its name, not to the URL hierarchy.
@@ -93,16 +93,18 @@ export function delimited(
 
 export function serializeQuery(query: unknown, declared: EndpointContract | undefined): string {
   if (declared?.querystring !== undefined) {
-    if (mediaTypeEssence(declared.querystring) === "application/x-www-form-urlencoded") {
+    const [media, shape] = Object.entries(declared.querystring.content)[0] ?? []
+    if (!media) throw new TypeError("A querystring needs a media declaration")
+    if (mediaTypeEssence(media) === "application/x-www-form-urlencoded") {
       if (typeof query === "string") return query
       if (!isPlainObject(query))
         throw new TypeError("A form querystring must be an object or encoded string")
-      return formFields(query, declared.query ?? {}, true)
+      return formFields(query, shape?.encoding ?? {}, true)
     }
-    return encode(encodeContent(query, declared.querystring), null)
+    return encode(encodeContent(query, media), null)
   }
   if (!isPlainObject(query)) return encode(scalar(query), null)
-  return formFields(query, declared?.query ?? {})
+  return formFields(query, parameterEncodings(declared?.parameters?.query))
 }
 
 /** Fields as `name=value&…`, without a content encoding, use the form style, exploded by default. */
@@ -221,4 +223,14 @@ function encode(value: string, reserved: RegExp | null): string {
 /** Bracket notation stays readable: `created[gte]`. */
 function encodeKey(key: string): string {
   return encode(key, null).replaceAll("%5B", "[").replaceAll("%5D", "]")
+}
+
+export function parameterEncodings(
+  parameters: Readonly<Record<string, ParameterContract>> | undefined,
+): Readonly<Record<string, Encoding>> {
+  return Object.fromEntries(
+    Object.entries(parameters ?? {}).flatMap(([name, field]) =>
+      field.encoding ? [[name, field.encoding]] : [],
+    ),
+  )
 }

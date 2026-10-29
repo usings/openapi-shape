@@ -1,37 +1,19 @@
-import type { EndpointContract } from "../shared/contract"
+import type { Encoding as SharedEncoding } from "../shared/encoding"
 
 /**
  * The resolved schema and operation graph. Compilation projects schemas for each exchange and
  * records endpoint serialization settings before rendering.
  */
-export interface Model {
+export interface ApiModel {
   info: Info
-  endpoints: Operation[]
-  webhooks: Operation[]
-  callbacks: Operation[]
+  operations: OperationModel[]
+  webhooks: OperationModel[]
+  callbacks: OperationModel[]
   /** Named types, in output order. */
-  declarations: Declaration[]
+  declarations: TypeDeclaration[]
 }
 
-/** Projected model ready for TypeScript output. */
-export interface OutputModel extends Omit<Model, "endpoints"> {
-  endpoints: OutputOperation[]
-}
-
-export interface OutputOperation extends Operation {
-  contract: EndpointContract
-}
-
-/** How a value is serialized, where it differs from OpenAPI's default for its location. */
-export interface Encoding {
-  /** Apply contentType separately to array items in a named form field. */
-  repeat?: boolean
-  style?: string
-  explode?: boolean
-  allowReserved?: boolean
-  /** A parameter's `content` media type, or an Encoding Object's `contentType`. */
-  contentType?: string
-}
+export type Encoding = { -readonly [K in keyof SharedEncoding]: SharedEncoding[K] }
 
 export interface Info {
   /** The entry document's `openapi` field. */
@@ -49,7 +31,7 @@ export interface Info {
  */
 export type Side = "request" | "response"
 
-export interface Operation {
+export interface OperationModel {
   /** `"GET /pets"`, `"POST pet.created"`, or `"<parent> > <callback> > POST <expression>"`. */
   key: string
   annotations?: Annotations
@@ -59,7 +41,7 @@ export interface Operation {
   querystring?: {
     /** Source location for generation diagnostics; never rendered. */
     location?: string
-    type: Type
+    type: TypeNode
     required: boolean
     annotations?: Annotations
     /** The media type, including form-urlencoded. */
@@ -70,7 +52,7 @@ export interface Operation {
   headers: Field[]
   cookies: Field[]
   body?: Body
-  responses: Response[]
+  responses: ResponseModel[]
 }
 
 export interface Body {
@@ -84,12 +66,12 @@ export interface Media {
   /** Source location for generation diagnostics; never rendered. */
   location?: string
   mediaType: string
-  type: Type
+  type: TypeNode
   /** Request form bodies: field encodings, including explicit multipart styles. */
   encoding?: Record<string, Encoding>
 }
 
-export interface Response {
+export interface ResponseModel {
   /** Status key as declared: `"200"`, `"4XX"`, or `"default"`. */
   status: string
   annotations?: Annotations
@@ -102,7 +84,7 @@ export interface Field {
   /** Source location for generation diagnostics; never rendered. */
   location?: string
   name: string
-  type: Type
+  type: TypeNode
   required: boolean
   /** Set when `required` holds on one side only (readOnly/writeOnly). */
   requiredOnly?: Side
@@ -113,7 +95,7 @@ export interface Field {
   encoding?: Encoding
 }
 
-export interface Declaration {
+export interface TypeDeclaration {
   /** Source location for diagnostics during output projection; never rendered. */
   location?: string
   /** The reference graph has finished defining this declaration. */
@@ -122,7 +104,7 @@ export interface Declaration {
   name: string
   /** Name of the request-side variant, when it differs (see {@link Side}). */
   inputName?: string
-  type: Type
+  type: TypeNode
   annotations?: Annotations
 }
 
@@ -140,7 +122,7 @@ export type Literal = string | number | boolean | null | Literal[] | { [key: str
 /** Diagnostic provenance is excluded from structural identity and emitted output. */
 export const TYPE_LOCATION: unique symbol = Symbol("schema location")
 
-export type Type =
+export type TypeNode =
   /** Widening keeps its provenance so later implied shapes cannot narrow it again. */
   | {
       kind: "unknown"
@@ -160,15 +142,15 @@ export type Type =
   /** Raw media content, independent of schema string annotations. */
   | { kind: "blob" }
   | { kind: "literal"; value: Literal }
-  | { kind: "ref"; target: Declaration }
+  | { kind: "ref"; target: TypeDeclaration }
   /**
    * `inferred` marks shapes implied only by type-specific keywords (no `type`): JSON Schema applies
    * those keywords to arrays/objects alone, so an inferred shape yields to a definite non-matching
    * type in an intersection.
    */
-  | { kind: "array"; items: Type; inferred?: true }
+  | { kind: "array"; items: TypeNode; inferred?: true }
   /** Leading elements; those at index `>= required` are optional. `rest` absent means closed. */
-  | { kind: "tuple"; items: Type[]; required: number; rest?: Type; inferred?: true }
+  | { kind: "tuple"; items: TypeNode[]; required: number; rest?: TypeNode; inferred?: true }
   /**
    * `additional` types properties no field or pattern names (additionalProperties); `patterns`
    * types properties whose names match a regular expression.
@@ -176,19 +158,19 @@ export type Type =
   | {
       kind: "object"
       fields: Field[]
-      additional?: Type
-      patterns?: Array<{ pattern: string; type: Type }>
+      additional?: TypeNode
+      patterns?: Array<{ pattern: string; type: TypeNode }>
       inferred?: true
     }
-  | { kind: "union"; members: Type[] }
-  | { kind: "intersection"; members: Type[]; [TYPE_LOCATION]?: string }
+  | { kind: "union"; members: TypeNode[] }
+  | { kind: "intersection"; members: TypeNode[]; [TYPE_LOCATION]?: string }
   /**
    * A discriminator's values for `property`, applied to `type` once every declaration is built (the
    * schema's own literals win). Never rendered.
    */
   | {
       kind: "narrow"
-      type: Type
+      type: TypeNode
       property: string
       values: string[]
       explicit: boolean
@@ -196,7 +178,7 @@ export type Type =
     }
 
 /** The types directly inside `type`, not looking through references. */
-export function childTypes(type: Type): Type[] {
+export function childTypes(type: TypeNode): TypeNode[] {
   switch (type.kind) {
     case "object":
       return [
@@ -218,7 +200,9 @@ export function childTypes(type: Type): Type[] {
   }
 }
 
-export const UNKNOWN: Type = { kind: "unknown" }
-export const NEVER: Type = { kind: "never" }
-export const UNDEFINED: Type = { kind: "undefined" }
-export const NULL: Type = { kind: "null" }
+export const UNKNOWN: TypeNode = { kind: "unknown" }
+export const NEVER: TypeNode = { kind: "never" }
+export const UNDEFINED: TypeNode = { kind: "undefined" }
+export const NULL: TypeNode = { kind: "null" }
+
+export type OperationGroups = Pick<ApiModel, "operations" | "webhooks" | "callbacks">

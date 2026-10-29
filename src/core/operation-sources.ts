@@ -1,8 +1,8 @@
 import { identity } from "./document-nodes"
 import type { DocumentNode, DocumentSet } from "./documents"
 import { isRecord } from "./object"
-import type { Resolved, SourceIssue, SourceResult } from "./references"
-import { inspectObject } from "./references"
+import type { Resolved, SourceIssue, SourceResult } from "./object-references"
+import { inspectObject } from "./object-references"
 
 /** Path Item method fields, including OpenAPI 3.2's query method in older descriptions. */
 const METHODS = ["get", "put", "post", "delete", "options", "head", "patch", "trace", "query"]

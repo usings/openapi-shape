@@ -1,23 +1,27 @@
 import { schemaAnnotations } from "./annotations"
 import type { BuildContext } from "./build-context"
-import { createDiscriminatorAnalysis } from "./discriminators"
+import { createDiscriminatorAnalysis } from "./discriminator-mapping"
 import { componentNameOf, identity } from "./document-nodes"
 import type { DocumentNode } from "./documents"
 import { parsePointer } from "./json-pointer"
-import type { Declaration, Field, Type } from "./model"
+import type { Field, TypeDeclaration, TypeNode } from "./model"
 import { NEVER, NULL, UNKNOWN } from "./model"
 import { toIdentifier, uniqueName } from "./naming"
 import { isRecord } from "./object"
+import { referencesOf } from "./object-references"
 import { matchesPattern } from "./patterns"
-import { referencesOf } from "./references"
-import { aliasReference, describesRawBytes } from "./schema-rules"
+import {
+  ARRAY_KEYWORDS,
+  COMPOSITION_KEYWORDS,
+  OBJECT_KEYWORDS,
+  aliasReference,
+  describesRawBytes,
+  supportedDialect,
+} from "./schema-rules"
 import { includesJson, intersect, isJsonValue, isOfType, literal, union } from "./type-algebra"
 
-const OBJECT_KEYWORDS = ["properties", "patternProperties", "additionalProperties", "required"]
-const ARRAY_KEYWORDS = ["items", "prefixItems"]
-
 interface DeclarationState {
-  decl: Declaration
+  decl: TypeDeclaration
   node: DocumentNode
   /** The component that lent its name, when `node` is the schema it aliases. */
   origin?: DocumentNode
@@ -41,15 +45,15 @@ interface DeclarationState {
  * wins, as docs/openapi.md describes: the types must work against the real API.
  */
 export class SchemaBuilder {
-  readonly declarations: Declaration[] = []
+  readonly declarations: TypeDeclaration[] = []
   private readonly discriminators: ReturnType<typeof createDiscriminatorAnalysis>
   private readonly byIdentity = new Map<string, DeclarationState>()
-  private readonly states = new Map<Declaration, DeclarationState>()
+  private readonly states = new Map<TypeDeclaration, DeclarationState>()
   private readonly queue: DeclarationState[] = []
   private readonly taken = new Set<string>()
   private readonly inlining = new Set<string>()
   /** Inline types are memoized after declaration planning, so later uses keep the same shape. */
-  private readonly inlined = new Map<string, Type>()
+  private readonly inlined = new Map<string, TypeNode>()
 
   constructor(
     readonly context: BuildContext,
@@ -107,15 +111,13 @@ export class SchemaBuilder {
   }
 
   /** The model type of a schema node. */
-  type(node: DocumentNode): Type {
+  type(node: DocumentNode): TypeNode {
+    this.context.control.consume()
+    this.validate(node)
     const schema = node.value
     if (schema === undefined || schema === true) return UNKNOWN
     if (schema === false) return NEVER
-    if (!isRecord(schema)) {
-      this.context.warn("invalid-schema", "A schema must be an object or a boolean", node)
-      return UNKNOWN
-    }
-
+    if (!isRecord(schema)) return UNKNOWN
     const parts = referencesOf(schema).map(([keyword, ref]) => this.ref(node, ref, keyword))
     parts.push(this.structure(node, schema))
     const type = this.intersect(parts, node)
@@ -123,8 +125,47 @@ export class SchemaBuilder {
     return schema.nullable === true ? union([type, NULL]) : type
   }
 
+  private validate(node: DocumentNode): void {
+    const root = node.document.root
+    if (
+      isRecord(root) &&
+      typeof root.jsonSchemaDialect === "string" &&
+      !supportedDialect(root.jsonSchemaDialect)
+    )
+      this.context.error(
+        "unsupported-version",
+        `Unsupported JSON Schema dialect "${root.jsonSchemaDialect}"`,
+        this.context.documents.root(node.document),
+        "jsonSchemaDialect",
+      )
+    const schema = node.value
+    if (schema === undefined || schema === true) return
+    if (schema === false) return
+    if (!isRecord(schema)) {
+      this.context.warn("invalid-schema", "A schema must be an object or a boolean", node)
+      return
+    }
+
+    if (typeof schema.$schema === "string" && !supportedDialect(schema.$schema)) {
+      this.context.error(
+        "unsupported-version",
+        `Unsupported JSON Schema dialect "${schema.$schema}"`,
+        node,
+        "$schema",
+      )
+      return
+    }
+    if (typeof schema.$dynamicRef === "string")
+      this.context.warn(
+        "schema-precision-loss",
+        "$dynamicRef is approximated by static reference resolution; dynamic scope is not represented",
+        node,
+        "$dynamicRef",
+      )
+  }
+
   /** Normalize an intersection, retaining its source for analysis after references are built. */
-  intersect(members: Type[], at?: DocumentNode | string): Type {
+  intersect(members: TypeNode[], at?: DocumentNode | string): TypeNode {
     const location =
       typeof at === "string" ? at : at && this.context.documents.locate(at.document, at.pointer)
     return intersect(members, {
@@ -140,12 +181,15 @@ export class SchemaBuilder {
   }
 
   /** The declaration's source, for diagnostics and discriminators. */
-  stateOf(declaration: Declaration): { node: DocumentNode; componentName?: string } | undefined {
+  stateOf(
+    declaration: TypeDeclaration,
+  ): { node: DocumentNode; componentName?: string } | undefined {
     return this.states.get(declaration)
   }
 
   /** Follow references that carry no other type keywords; `undefined` when `node` is not one. */
   aliasTarget(node: DocumentNode, seen = new Set<string>()): DocumentNode | undefined {
+    this.validate(node)
     const reference = aliasReference(node)
     if (reference === undefined) return undefined
     const [, ref] = reference
@@ -158,13 +202,13 @@ export class SchemaBuilder {
   }
 
   /** Everything except references: value keywords, applicators, discriminators. */
-  private structure(node: DocumentNode, schema: Record<string, unknown>): Type {
+  private structure(node: DocumentNode, schema: Record<string, unknown>): TypeNode {
     // `not` is otherwise unrepresentable; ignoring it keeps the type sound (wider).
     if (schema.not === true || (isRecord(schema.not) && Object.keys(schema.not).length === 0)) {
       return NEVER
     }
-    const parts: Type[] = [this.valueType(node, schema)]
-    for (const keyword of ["allOf", "anyOf", "oneOf"] as const) {
+    const parts: TypeNode[] = [this.valueType(node, schema)]
+    for (const keyword of COMPOSITION_KEYWORDS) {
       const branches = schema[keyword]
       if (!Array.isArray(branches)) continue
       if (branches.length === 0) {
@@ -184,7 +228,7 @@ export class SchemaBuilder {
    * `if`/`then`/`else` as the sound union `(if & then) | else` (the negation of `if` is not
    * expressible).
    */
-  private conditional(node: DocumentNode, schema: Record<string, unknown>): Type {
+  private conditional(node: DocumentNode, schema: Record<string, unknown>): TypeNode {
     if (!("if" in schema) || !("else" in schema)) return UNKNOWN
     const condition = this.type(this.context.documents.child(node, "if"))
     const otherwise = this.type(this.context.documents.child(node, "else"))
@@ -196,7 +240,7 @@ export class SchemaBuilder {
   }
 
   /** `type`, `const`, `enum`, and the type-specific keywords. */
-  private valueType(node: DocumentNode, schema: Record<string, unknown>): Type {
+  private valueType(node: DocumentNode, schema: Record<string, unknown>): TypeNode {
     let types: string[] | undefined
     if (typeof schema.type === "string") types = [schema.type]
     else if (Array.isArray(schema.type)) {
@@ -232,14 +276,14 @@ export class SchemaBuilder {
     if (types !== undefined) return union(types.map((t) => this.ofType(node, schema, t)))
 
     // No `type`: shape keywords imply the shape they constrain (see `inferred`).
-    const implied: Type[] = []
+    const implied: TypeNode[] = []
     if (OBJECT_KEYWORDS.some((k) => k in schema)) implied.push(this.objectType(node, schema, true))
     if (ARRAY_KEYWORDS.some((k) => k in schema)) implied.push(this.arrayType(node, schema, true))
     if (implied.length === 0) return UNKNOWN
     return union(implied)
   }
 
-  private ofType(node: DocumentNode, schema: Record<string, unknown>, type: string): Type {
+  private ofType(node: DocumentNode, schema: Record<string, unknown>, type: string): TypeNode {
     switch (type) {
       case "null":
         return NULL
@@ -265,7 +309,11 @@ export class SchemaBuilder {
     }
   }
 
-  private arrayType(node: DocumentNode, schema: Record<string, unknown>, inferred: boolean): Type {
+  private arrayType(
+    node: DocumentNode,
+    schema: Record<string, unknown>,
+    inferred: boolean,
+  ): TypeNode {
     const flag = inferred ? ({ inferred: true } as const) : {}
     // Tuple form: `items` array (drafts before 2020-12) or `prefixItems` (2020-12).
     let prefixKey: "items" | "prefixItems" | undefined
@@ -294,7 +342,11 @@ export class SchemaBuilder {
     return { kind: "tuple", items: prefix, required, rest, ...flag }
   }
 
-  private objectType(node: DocumentNode, schema: Record<string, unknown>, inferred: boolean): Type {
+  private objectType(
+    node: DocumentNode,
+    schema: Record<string, unknown>,
+    inferred: boolean,
+  ): TypeNode {
     const required = new Set(
       Array.isArray(schema.required)
         ? schema.required.filter((r): r is string => typeof r === "string")
@@ -314,7 +366,7 @@ export class SchemaBuilder {
       fields.push(field)
     }
 
-    const patterns: Array<{ pattern: string; type: Type }> = []
+    const patterns: Array<{ pattern: string; type: TypeNode }> = []
     if (isRecord(schema.patternProperties)) {
       for (const pattern of Object.keys(schema.patternProperties)) {
         patterns.push({
@@ -324,7 +376,7 @@ export class SchemaBuilder {
       }
     }
     const additional = schema.additionalProperties
-    let additionalType: Type | undefined
+    let additionalType: TypeNode | undefined
     if (additional === true) additionalType = UNKNOWN
     else if (isRecord(additional)) {
       additionalType = this.type(this.context.documents.child(node, "additionalProperties"))
@@ -335,7 +387,7 @@ export class SchemaBuilder {
     for (const name of required) {
       if (Object.hasOwn(properties, name)) continue
       const matches = patterns.map((p) => matchesPattern(p.pattern, name))
-      let type: Type
+      let type: TypeNode
       // A pattern JavaScript cannot evaluate might match: stay wide.
       if (matches.includes(undefined)) type = UNKNOWN
       else if (matches.includes(true))
@@ -348,7 +400,7 @@ export class SchemaBuilder {
       fields.push({ name, type, required: true })
     }
 
-    const out: Type = { kind: "object", fields }
+    const out: TypeNode = { kind: "object", fields }
     if (additionalType) out.additional = additionalType
     if (patterns.length > 0) out.patterns = patterns
     if (inferred) out.inferred = true
@@ -380,7 +432,7 @@ export class SchemaBuilder {
     )
   }
 
-  private ref(node: DocumentNode, ref: string, keyword: string): Type {
+  private ref(node: DocumentNode, ref: string, keyword: string): TypeNode {
     const resolution = this.context.documents.resolveSchema(ref, node)
     if (resolution.kind === "pending") return UNKNOWN
     if (resolution.kind === "error") {
@@ -395,7 +447,7 @@ export class SchemaBuilder {
     return this.refTo(resolution.node)
   }
 
-  private refTo(target: DocumentNode): Type {
+  private refTo(target: DocumentNode): TypeNode {
     const id = identity(target)
     const existing = this.byIdentity.get(id)
     if (existing) return { kind: "ref", target: existing.decl }
@@ -438,7 +490,7 @@ export class SchemaBuilder {
       )
     }
     this.taken.add(unique)
-    const decl: Declaration = {
+    const decl: TypeDeclaration = {
       name: unique,
       type: UNKNOWN,
       location: this.context.documents.locate(node.document, node.pointer),

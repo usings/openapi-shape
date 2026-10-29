@@ -1,46 +1,49 @@
-import type { BuildContext } from "./build-context"
-import { applyNarrowing } from "./discriminators"
-import type { Declaration, Field, Operation, Type } from "./model"
-import { UNKNOWN, TYPE_LOCATION } from "./model"
-import type { Operations } from "./operations"
-import type { SchemaBuilder } from "./schemas"
-import { union } from "./type-algebra"
+import type { Diagnostics } from "./diagnostics"
+import { applyNarrowing } from "./discriminator-narrowing"
+import type { GenerationControl } from "./generation-control"
+import type { Field, OperationGroups, OperationModel, TypeDeclaration, TypeNode } from "./model"
+import { TYPE_LOCATION, UNKNOWN } from "./model"
+import { intersect, union } from "./type-algebra"
 
 /** Finalize model types once all referenced declarations have been built. */
 export async function normalizeModel(
-  schemas: SchemaBuilder,
-  operations: Operations,
+  declarations: TypeDeclaration[],
+  operations: OperationGroups,
+  context: NormalizeContext,
 ): Promise<void> {
-  const context = schemas.context
-  await applyDiscriminators(context, schemas, operations)
+  await applyDiscriminators(context, declarations, operations)
   await context.control.checkpoint()
-  breakDirectCycles(context, schemas)
+  breakDirectCycles(context, declarations)
   await context.control.checkpoint()
-  await normalizeTypes(schemas, operations)
+  await normalizeTypes(context, declarations, operations)
   await context.control.checkpoint()
 }
 
-function allOperations(operations: Operations): Operation[] {
-  return [...operations.endpoints, ...operations.webhooks, ...operations.callbacks]
+function allOperations(operations: OperationGroups): OperationModel[] {
+  return [...operations.operations, ...operations.webhooks, ...operations.callbacks]
 }
 
 /** Narrow discriminated alternatives by their values (see `discriminators`). */
 async function applyDiscriminators(
-  context: BuildContext,
-  schemas: SchemaBuilder,
-  operations: Operations,
+  context: NormalizeContext,
+  declarations: TypeDeclaration[],
+  operations: OperationGroups,
 ): Promise<void> {
   const report = (message: string, location: string): void =>
     context.diagnostics.warn("discriminator-mismatch", message, location)
-  await transformAll(schemas, allOperations(operations), (type) =>
+  await transformAll(context, declarations, allOperations(operations), (type) =>
     type.kind === "narrow" ? applyNarrowing(type, report) : type,
   )
 }
 
 /** With references final, simplify every type again: shapes behind references are known now. */
-async function normalizeTypes(schemas: SchemaBuilder, operations: Operations): Promise<void> {
-  for (const declaration of schemas.declarations) declaration.complete = true
-  await transformAll(schemas, allOperations(operations), (type) => type)
+async function normalizeTypes(
+  context: NormalizeContext,
+  declarations: TypeDeclaration[],
+  operations: OperationGroups,
+): Promise<void> {
+  for (const declaration of declarations) declaration.complete = true
+  await transformAll(context, declarations, allOperations(operations), (type) => type)
 }
 
 /**
@@ -48,17 +51,17 @@ async function normalizeTypes(schemas: SchemaBuilder, operations: Operations): P
  * each node through `finish`.
  */
 async function transformAll(
-  schemas: SchemaBuilder,
-  operations: Operation[],
-  finish: (type: Type) => Type,
+  context: NormalizeContext,
+  declarations: TypeDeclaration[],
+  operations: OperationModel[],
+  finish: (type: TypeNode) => TypeNode,
 ): Promise<void> {
   const fields = (list: Field[]): Field[] =>
-    list.map((f) => ({ ...f, type: rebuild(f.type, finish, schemas, f.location) }))
-  for (const declaration of schemas.declarations) {
-    const source = schemas.stateOf(declaration)?.node
-    const location = source && schemas.context.documents.locate(source.document, source.pointer)
-    declaration.type = rebuild(declaration.type, finish, schemas, location)
-    const pending = schemas.context.control.workpoint()
+    list.map((f) => ({ ...f, type: rebuild(f.type, finish, context, f.location) }))
+  for (const declaration of declarations) {
+    const location = declaration.location
+    declaration.type = rebuild(declaration.type, finish, context, location)
+    const pending = context.control.workpoint()
     // oxlint-disable-next-line no-await-in-loop -- yield between declarations, never inside algebra
     if (pending) await pending
   }
@@ -71,33 +74,33 @@ async function transformAll(
       operation.querystring.type = rebuild(
         operation.querystring.type,
         finish,
-        schemas,
+        context,
         operation.querystring.location,
       )
     }
     for (const media of operation.body?.content ?? [])
-      media.type = rebuild(media.type, finish, schemas, media.location)
+      media.type = rebuild(media.type, finish, context, media.location)
     for (const response of operation.responses) {
       for (const media of response.content)
-        media.type = rebuild(media.type, finish, schemas, media.location)
+        media.type = rebuild(media.type, finish, context, media.location)
       response.headers = fields(response.headers)
     }
-    const pending = schemas.context.control.workpoint()
+    const pending = context.control.workpoint()
     // oxlint-disable-next-line no-await-in-loop -- yield between complete operations
     if (pending) await pending
   }
 }
 
 function rebuild(
-  type: Type,
-  finish: (type: Type) => Type,
-  schemas: SchemaBuilder,
+  type: TypeNode,
+  finish: (type: TypeNode) => TypeNode,
+  context: NormalizeContext,
   location?: string,
-): Type {
-  const again = (t: Type): Type => rebuild(t, finish, schemas, location)
+): TypeNode {
+  const again = (t: TypeNode): TypeNode => rebuild(t, finish, context, location)
   switch (type.kind) {
     case "object": {
-      const out: Type = {
+      const out: TypeNode = {
         ...type,
         fields: type.fields.map((f) => ({ ...f, type: again(f.type) })),
       }
@@ -108,14 +111,14 @@ function rebuild(
     case "array":
       return finish({ ...type, items: again(type.items) })
     case "tuple": {
-      const out: Type = { ...type, items: type.items.map(again) }
+      const out: TypeNode = { ...type, items: type.items.map(again) }
       if (type.rest) out.rest = again(type.rest)
       return finish(out)
     }
     case "union":
       return finish(union(type.members.map(again)))
     case "intersection":
-      return finish(schemas.intersect(type.members.map(again), type[TYPE_LOCATION] ?? location))
+      return finish(intersection(context, type.members.map(again), type[TYPE_LOCATION] ?? location))
     case "narrow":
       return finish({ ...type, type: again(type.type) })
     default:
@@ -129,22 +132,21 @@ function rebuild(
  * such a reference is replaced by the referenced type minus the parts that lead back, which is
  * sound.
  */
-function breakDirectCycles(context: BuildContext, schemas: SchemaBuilder): void {
-  const report = (owner: Declaration, target: Declaration): void => {
-    const at = schemas.stateOf(owner)?.node ?? context.documents.root(context.documents.entry)
-    context.warn(
+function breakDirectCycles(context: NormalizeContext, declarations: TypeDeclaration[]): void {
+  const report = (owner: TypeDeclaration, target: TypeDeclaration): void => {
+    context.diagnostics.warn(
       "circular-schema",
       `${owner.name} and ${target.name} are defined in terms of each other only through allOf/anyOf/oneOf/$ref, which never terminates; inside ${owner.name}, ${target.name} is expanded without the parts that lead back`,
-      at,
+      owner.location ?? "#",
     )
   }
-  const state = new Map<Declaration, "active" | "done">()
-  const visit = (declaration: Declaration): void => {
+  const state = new Map<TypeDeclaration, "active" | "done">()
+  const visit = (declaration: TypeDeclaration): void => {
     state.set(declaration, "active")
     declaration.type = rewrite(declaration.type, declaration)
     state.set(declaration, "done")
   }
-  const rewrite = (type: Type, owner: Declaration): Type => {
+  const rewrite = (type: TypeNode, owner: TypeDeclaration): TypeNode => {
     switch (type.kind) {
       case "ref": {
         const status = state.get(type.target)
@@ -158,7 +160,8 @@ function breakDirectCycles(context: BuildContext, schemas: SchemaBuilder): void 
       case "union":
         return union(type.members.map((m) => rewrite(m, owner)))
       case "intersection":
-        return schemas.intersect(
+        return intersection(
+          context,
           type.members.map((m) => rewrite(m, owner)),
           type[TYPE_LOCATION],
         )
@@ -166,19 +169,35 @@ function breakDirectCycles(context: BuildContext, schemas: SchemaBuilder): void 
         return type
     }
   }
-  const withoutActive = (type: Type): Type => {
+  const withoutActive = (type: TypeNode): TypeNode => {
     switch (type.kind) {
       case "ref":
         return state.get(type.target) === "active" ? UNKNOWN : type
       case "union":
         return union(type.members.map(withoutActive))
       case "intersection":
-        return schemas.intersect(type.members.map(withoutActive), type[TYPE_LOCATION])
+        return intersection(context, type.members.map(withoutActive), type[TYPE_LOCATION])
       default:
         return type
     }
   }
-  for (const declaration of schemas.declarations) {
+  for (const declaration of declarations) {
     if (!state.has(declaration)) visit(declaration)
   }
+}
+
+interface NormalizeContext {
+  diagnostics: Diagnostics
+  control: GenerationControl
+}
+function intersection(context: NormalizeContext, members: TypeNode[], location?: string): TypeNode {
+  return intersect(members, {
+    location,
+    onWiden: (source, reason) =>
+      context.diagnostics.warn(
+        "schema-precision-loss",
+        reason ?? "The intersection is widened to keep TypeScript compilable",
+        source ?? "#",
+      ),
+  })
 }

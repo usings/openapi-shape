@@ -1,6 +1,8 @@
 import type { EndpointContract } from "../shared/contract"
-import { encodeBody } from "./body"
-import { delimited, encodeContent, expandPath, normalize, serializeQuery } from "./serialization"
+import { mergeHeaders } from "./headers"
+import { matchDeclaredMedia } from "./media"
+import { encodeBody, isReadyBody } from "./request-body"
+import { expandPath, parameterEncodings, serializeQuery } from "./serialization"
 import { isStream } from "./values"
 
 /** What a call takes at run time: its parameters, its body, and any other `RequestInit` field. */
@@ -10,7 +12,6 @@ export interface CallInit extends Omit<RequestInit, "headers" | "body"> {
   query?: unknown
   headers?: Headers | Array<[string, string]> | Record<string, unknown>
   body?: unknown
-  contentType?: string
 }
 
 /** What every request of a client shares. */
@@ -32,44 +33,53 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
   const separator = endpoint.indexOf(" ")
   const method = endpoint.slice(0, separator)
   const path = endpoint.slice(separator + 1)
-  const { baseURL, params, query, headers: given, body: value, contentType, ...rest } = init
+  const { baseURL, params, query, headers: given, body: value, ...rest } = init
 
   const prefix = baseURL === undefined ? defaults.prefix : normalizeBaseURL(baseURL)
-  let url = prefix + expandPath(path, params, declared.params)
+  let url = prefix + expandPath(path, params, parameterEncodings(declared.parameters?.path))
+  if (query === undefined && declared.querystring?.required)
+    throw new TypeError("This operation requires query input")
+  for (const [name, field] of Object.entries(declared.parameters?.query ?? {})) {
+    if (
+      field.required &&
+      (query === null ||
+        typeof query !== "object" ||
+        !Object.hasOwn(query, name) ||
+        (query as Record<string, unknown>)[name] === undefined)
+    )
+      throw new TypeError(`Missing query parameter "${name}"`)
+  }
   if (query !== undefined) url = appendQuery(url, serializeQuery(query, declared))
 
-  const headers = new Headers(defaults.headers)
+  const headers = mergeHeaders(defaults.headers, given, declared.parameters?.header)
+  if (
+    value === undefined &&
+    declared.requestBody?.required &&
+    !["GET", "HEAD"].includes(method.toUpperCase())
+  )
+    throw new TypeError("This endpoint requires a request body")
+  const selected =
+    headers.get("content-type") ??
+    (value !== undefined && !isReadyBody(value) ? "application/json" : undefined)
+  if (selected && !headers.has("content-type")) headers.set("content-type", selected)
+  if (value !== undefined && selected?.split(";")[0]?.includes("*"))
+    throw new TypeError("Content-Type must identify a concrete request media type")
+  const content = declared.requestBody?.content
+  const representation =
+    content && selected ? content[matchDeclaredMedia(content, selected) ?? ""] : undefined
+  if (
+    value !== undefined &&
+    !isReadyBody(value) &&
+    selected &&
+    declared.requestBody &&
+    !representation
+  )
+    throw new TypeError(`Undeclared request Content-Type "${selected}"`)
   const encoded =
-    value === undefined
-      ? undefined
-      : encodeBody(value, contentType ?? declared.contentType, declared)
+    value === undefined ? undefined : encodeBody(value, selected, representation?.encoding)
   const body = encoded?.body
-  if (encoded) {
-    // Without a label, the body's own type (a Blob's, FormData's boundary) applies.
-    if (encoded.contentType.kind === "default" && encoded.contentType.value !== undefined) {
-      headers.set("content-type", encoded.contentType.value)
-    } else headers.delete("content-type")
-  }
-  // The call's own headers go over the client's and the body's. Iterable ones,
-  // a `Headers` of any implementation or its entries, are taken as they are, as
-  // `new Headers()` tells them from a record, repeated names too; a record's
-  // values are serialized by their declared style.
-  if (typeof given === "object" && given !== null && Symbol.iterator in given) {
-    const own = new Headers(given)
-    for (const name of own.keys()) headers.delete(name)
-    for (const [name, header] of own) headers.append(name, header)
-  } else {
-    for (const [name, header] of Object.entries(given ?? {})) {
-      if (header == null) continue
-      const encoding = normalize(byLowercase(declared.headers, name), "simple")
-      headers.set(
-        name,
-        encoding.contentType
-          ? encodeContent(header, encoding.contentType)
-          : delimited(header, encoding.explode, ",", (s) => s),
-      )
-    }
-  }
+  if (encoded?.contentType.kind === "default" && encoded.contentType.value !== undefined)
+    headers.set("content-type", encoded.contentType.value)
   // The encoder may require Request to supply a multipart boundary or form encoding.
   if (encoded?.contentType.kind === "native") headers.delete("content-type")
   const requestInit: RequestInit & { duplex?: "half" } = {
@@ -81,7 +91,20 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
   }
   // Streaming request bodies need half duplex (Fetch Standard).
   if (isStream(body)) requestInit.duplex = "half"
-  return new Request(url, requestInit)
+  const request = new Request(url, requestInit)
+  const actual = request.headers.get("content-type")
+  if (
+    value !== undefined &&
+    declared.requestBody &&
+    actual &&
+    !matchDeclaredMedia(declared.requestBody.content, actual)
+  ) {
+    void request.body?.cancel().catch(() => {
+      /* Construction failed; retain the contract error. */
+    })
+    throw new TypeError(`Undeclared request Content-Type "${actual}"`)
+  }
+  return request
 }
 
 /** Endpoint paths append to this prefix, so a query or fragment cannot be part of it. */
@@ -98,10 +121,4 @@ function appendQuery(url: string, query: string): string {
   const fragment = hash === -1 ? "" : url.slice(hash)
   const separator = !base.includes("?") ? "?" : base.endsWith("?") || base.endsWith("&") ? "" : "&"
   return `${base}${separator}${query}${fragment}`
-}
-
-/** A header's entry, whatever the case of its name. */
-function byLowercase<T>(map: Readonly<Record<string, T>> | undefined, name: string): T | undefined {
-  const key = Object.keys(map ?? {}).find((k) => k.toLowerCase() === name.toLowerCase())
-  return key === undefined ? undefined : map?.[key]
 }

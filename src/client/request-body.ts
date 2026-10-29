@@ -1,12 +1,10 @@
-import type { Encoding, EndpointContract } from "../shared/contract"
+import type { Encoding } from "../shared/contract"
 import { isJsonEssence, isJsonWildcardEssence, mediaTypeEssence } from "../shared/media"
-import { abortable } from "./cancellation"
-import { responseMediaType } from "./media"
 import { encodeContent, formFields, formPairs, normalize } from "./serialization"
 import type { BodyLike } from "./types"
-import { isInstance, isStream, isPlainObject, scalar, toJson } from "./values"
+import { isInstance, isPlainObject, isStream, scalar, toJson } from "./values"
 
-// Request bodies encoded by their media type, and response bodies decoded by theirs.
+// Encode request values while preserving native body ownership.
 
 /** Native types override explicit headers; defaults can be overridden by the call. */
 type ContentTypePolicy = { kind: "native" } | { kind: "default"; value: string | undefined }
@@ -19,15 +17,14 @@ type ContentTypePolicy = { kind: "native" } | { kind: "default"; value: string |
 export function encodeBody(
   body: unknown,
   contentType: string | undefined,
-  declared: EndpointContract | undefined,
+  encoding?: Readonly<Record<string, Encoding>>,
 ): {
   body: BodyLike | string
   contentType: ContentTypePolicy
 } {
-  const type = contentType ?? "application/json"
-  const essence = contentType === undefined ? "application/json" : mediaTypeEssence(contentType)
-  // A wildcard media type cannot label a request; a `*` in a parameter can.
-  const label = contentType !== undefined && essence.includes("*") ? undefined : contentType
+  const type = contentType ?? ""
+  const essence = mediaTypeEssence(type)
+  const label = contentType
   const ready = readyBody(body)
   if (ready !== undefined) {
     // fetch derives multipart boundaries and form encodings itself.
@@ -37,14 +34,13 @@ export function encodeBody(
       contentType: own ? { kind: "native" } : { kind: "default", value: label },
     }
   }
-  if (isJsonEssence(essence) || isJsonWildcardEssence(essence)) {
+  if (!contentType) throw new TypeError("Structured bodies require a Content-Type header")
+  if (isJsonEssence(essence)) {
     return {
       body: toJson(body),
-      contentType: { kind: "default", value: label ?? "application/json" },
+      contentType: { kind: "default", value: label },
     }
   }
-  const encodings = declared?.bodyEncodings
-  const encoding = encodings && Object.hasOwn(encodings, type) ? encodings[type] : undefined
   if (essence === "application/x-www-form-urlencoded") {
     // A string is already encoded.
     if (typeof body === "string") return { body, contentType: { kind: "default", value: label } }
@@ -128,45 +124,19 @@ function holdsBinary(value: unknown): boolean {
   return isPlainObject(value) && Object.values(value).some((item) => holdsBinary(item))
 }
 
-/**
- * A response body, by its content type: JSON parsed, `text/*` as a string, no content as
- * `undefined`, anything else as a `Blob`.
- */
-export async function decodeBody(
-  response: Response,
-  method: string,
-  signal: AbortSignal,
-): Promise<unknown> {
-  if (method === "HEAD" || [204, 205, 304].includes(response.status)) {
-    await abortable(response.body?.cancel(signal.reason) ?? Promise.resolve(), signal)
-    return undefined
-  }
-  // Own cancellation even when middleware supplied a body unrelated to native Fetch's signal.
-  // The pipeline cancels its source; abortable keeps a slow cleanup from delaying rejection.
-  const readable =
-    response.body && !response.bodyUsed
-      ? new Response(
-          response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal }),
-          { headers: response.headers },
-        )
-      : response
-  return await abortable(readBody(readable), signal)
-}
-
-/** Decode through native Response methods without changing the original response's metadata. */
-async function readBody(response: Response): Promise<unknown> {
-  const essence = responseMediaType(response.headers)
-  if (essence === undefined) {
-    const blob = await response.blob()
-    return blob.size === 0 ? undefined : blob
-  }
-  if (isJsonEssence(essence)) return response.json()
-  if (essence.startsWith("text/")) return response.text()
-  return response.blob()
-}
-
 /** A body `fetch` sends as it is, `undefined` for a value to encode. */
-function readyBody(value: unknown): BodyLike | undefined {
+/** Detect ready request bodies without acquiring an async iterator. */
+export function isReadyBody(value: unknown): boolean {
+  return (
+    bytes(value) !== undefined ||
+    isStream(value) ||
+    (["Blob", "FormData", "URLSearchParams", "ReadableStream"] as const).some((name) =>
+      isInstance(value, name),
+    )
+  )
+}
+
+export function readyBody(value: unknown): BodyLike | undefined {
   const ready =
     isInstance(value, "Blob") ||
     isInstance(value, "FormData") ||
@@ -188,8 +158,8 @@ function iterableBody(value: AsyncIterable<Uint8Array>): ReadableStream<Uint8Arr
         if (result.done) controller.close()
         else controller.enqueue(result.value)
       },
-      async cancel() {
-        await iterator.return?.()
+      async cancel(reason) {
+        await iterator.return?.(reason)
       },
     },
     { highWaterMark: 0 },

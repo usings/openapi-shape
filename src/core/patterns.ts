@@ -1,4 +1,4 @@
-import { createContext, Script } from "node:vm"
+import { Script, createContext } from "node:vm"
 
 const MATCH_TIMEOUT = 100
 

@@ -1,5 +1,5 @@
-import type { BodyOwner } from "./cancellation"
-import { bodyReader } from "./cancellation"
+import type { BodyOwner } from "../cancellation"
+import { bodyReader } from "../cancellation"
 import { MessageBuffer } from "./message-buffer"
 
 /** A malformed JSON line; line is one-based and input contents are never embedded in the message. */

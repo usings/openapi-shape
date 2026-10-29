@@ -1,17 +1,15 @@
-import type { Diagnostics } from "./diagnostics"
-import type { Declaration, Encoding, Field, Model, Operation, Side, Type } from "./model"
-import { childTypes } from "./model"
+import type { Encoding, Field, Side, TypeDeclaration, TypeNode } from "./model"
 import { uniqueName } from "./naming"
 
 /** A schema's values and the values of one transport are distinct projections. */
 type Wire = "json" | "multipart" | "part" | "item"
 
-export class Projection {
-  readonly declarations: Declaration[] = []
-  private readonly cache = new Map<Declaration, Map<string, Declaration>>()
+export class TypeProjection {
+  readonly declarations: TypeDeclaration[] = []
+  private readonly cache = new Map<TypeDeclaration, Map<string, TypeDeclaration>>()
   private readonly names: Set<string>
 
-  constructor(declarations: Declaration[]) {
+  constructor(declarations: TypeDeclaration[]) {
     this.names = new Set(
       declarations.flatMap((d) => [d.name, ...(d.inputName ? [d.inputName] : [])]),
     )
@@ -21,7 +19,7 @@ export class Projection {
     }
   }
 
-  type(type: Type, side: Side, wire: Wire = "json"): Type {
+  type(type: TypeNode, side: Side, wire: Wire = "json"): TypeNode {
     switch (type.kind) {
       case "binary":
         return wire === "part" || wire === "item" ? type : { kind: "string" }
@@ -71,10 +69,10 @@ export class Projection {
     }
   }
 
-  multipart(type: Type, encodings?: Record<string, Encoding>): Type {
+  multipart(type: TypeNode, encodings?: Record<string, Encoding>): TypeNode {
     if (!encodings || !Object.values(encodings).some((encoding) => styled(encoding)))
       return this.type(type, "request", "multipart")
-    const visit = (value: Type, seen = new Set<Declaration>()): Type => {
+    const visit = (value: TypeNode, seen = new Set<TypeDeclaration>()): TypeNode => {
       if (value.kind === "ref") {
         if (seen.has(value.target)) return this.type(value, "request", "multipart")
         return visit(value.target.type, new Set(seen).add(value.target))
@@ -107,7 +105,7 @@ export class Projection {
     }
   }
 
-  private reference(source: Declaration, side: Side, wire: Wire): Declaration {
+  private reference(source: TypeDeclaration, side: Side, wire: Wire): TypeDeclaration {
     // Input variants are needed only where directional requiredness reaches this declaration.
     const input = side === "request" && source.inputName !== undefined
     const binary = wire !== "json" && binaryProjection(source.type, wire, new Set())
@@ -124,7 +122,7 @@ export class Projection {
       ? uniqueName(`${base}${wire === "multipart" ? "Multipart" : "Binary"}`, this.names)
       : base
     this.names.add(name)
-    const declaration: Declaration = {
+    const declaration: TypeDeclaration = {
       name,
       type: { kind: "unknown" },
       complete: true,
@@ -141,7 +139,7 @@ export class Projection {
   }
 }
 
-function binaryProjection(type: Type, wire: Wire, seen: Set<Declaration>): boolean {
+function binaryProjection(type: TypeNode, wire: Wire, seen: Set<TypeDeclaration>): boolean {
   switch (type.kind) {
     case "binary":
       return wire === "part" || wire === "item"
@@ -177,86 +175,4 @@ function styled(encoding: Encoding): boolean {
     encoding.explode !== undefined ||
     encoding.allowReserved !== undefined
   )
-}
-
-/** Name directional variants only for declarations used in outgoing data. */
-export function assignInputVariants(model: Model, diagnostics: Diagnostics): void {
-  const sent = [
-    ...model.endpoints.flatMap((op) => requestTypes(op)),
-    ...[...model.webhooks, ...model.callbacks].flatMap((op) => responseTypes(op)),
-  ]
-  for (const declaration of assignInputNames(model.declarations, sent)) {
-    if (declaration.inputName !== `${declaration.name}Input`) {
-      diagnostics.warn(
-        "renamed-schema",
-        `The request-side variant of ${declaration.name} is emitted as ${declaration.inputName} because ${declaration.name}Input is already taken`,
-        declaration.location ?? "#",
-      )
-    }
-  }
-}
-
-function requestTypes(op: Operation): Type[] {
-  return [
-    ...[...op.params, ...op.query, ...op.headers, ...op.cookies].map((f) => f.type),
-    ...(op.querystring ? [op.querystring.type] : []),
-    ...(op.body?.content ?? []).map((media) => media.type),
-  ]
-}
-
-function responseTypes(op: Operation): Type[] {
-  return op.responses.flatMap((r) => [
-    ...r.content.map((media) => media.type),
-    ...r.headers.map((f) => f.type),
-  ])
-}
-
-/**
- * Give a request-side name to declarations whose required properties differ between the two sides
- * (readOnly/writeOnly), when something the client sends (`sent`) uses them.
- */
-function assignInputNames(declarations: Declaration[], sent: Type[]): Declaration[] {
-  const differs = new Set<Declaration>()
-  for (let changed = true; changed;) {
-    changed = false
-    for (const declaration of declarations) {
-      if (!differs.has(declaration) && hasOneSidedField(declaration.type, differs, new Set())) {
-        differs.add(declaration)
-        changed = true
-      }
-    }
-  }
-  if (differs.size === 0) return []
-
-  const used = new Set<Declaration>()
-  const mark = (type: Type): void =>
-    forEachRef(type, (target) => {
-      if (!differs.has(target) || used.has(target)) return
-      used.add(target)
-      mark(target.type)
-    })
-  for (const type of sent) mark(type)
-
-  const taken = new Set(declarations.map((d) => d.name))
-  const variants: Declaration[] = []
-  for (const declaration of declarations) {
-    if (!used.has(declaration)) continue
-    declaration.inputName = uniqueName(`${declaration.name}Input`, taken)
-    taken.add(declaration.inputName)
-    variants.push(declaration)
-  }
-  return variants
-}
-
-function hasOneSidedField(type: Type, differs: Set<Declaration>, seen: Set<Type>): boolean {
-  if (seen.has(type)) return false
-  seen.add(type)
-  if (type.kind === "ref") return differs.has(type.target)
-  if (type.kind === "object" && type.fields.some((f) => f.requiredOnly !== undefined)) return true
-  return childTypes(type).some((t) => hasOneSidedField(t, differs, seen))
-}
-
-function forEachRef(type: Type, visit: (target: Declaration) => void): void {
-  if (type.kind === "ref") visit(type.target)
-  for (const child of childTypes(type)) forEachRef(child, visit)
 }

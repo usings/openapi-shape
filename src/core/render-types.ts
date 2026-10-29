@@ -1,5 +1,5 @@
 import { indentTail, jsdoc } from "./jsdoc"
-import type { Field, Literal, Type } from "./model"
+import type { Field, Literal, TypeNode } from "./model"
 import { UNDEFINED, UNKNOWN } from "./model"
 import { propertyKey } from "./naming"
 import { union } from "./type-algebra"
@@ -22,12 +22,12 @@ interface Rendered {
 
 const MAX_INLINE_OBJECT = 100
 
-export function renderType(type: Type, context: TypeContext): string {
+export function renderType(type: TypeNode, context: TypeContext): string {
   return render(type, context).text
 }
 
 /** The index signature value of an object type, if it has one (before widening). */
-export function indexOf(type: Extract<Type, { kind: "object" }>): Type | undefined {
+export function indexOf(type: Extract<TypeNode, { kind: "object" }>): TypeNode | undefined {
   const members = [
     ...(type.patterns ?? []).map((p) => p.type),
     ...(type.additional ? [type.additional] : []),
@@ -40,7 +40,7 @@ export function indexOf(type: Extract<Type, { kind: "object" }>): Type | undefin
 /** `{ a: string; b?: number }`, or one member per line when documented or long. */
 export function renderFields(
   fields: Field[],
-  index: Type | undefined,
+  index: TypeNode | undefined,
   context: TypeContext,
   multiline = false,
 ): string {
@@ -61,7 +61,7 @@ export function block(lines: string[], multiline = false): string {
   return `{\n  ${lines.map((line) => indentTail(line, "  ")).join("\n  ")}\n}`
 }
 
-function render(type: Type, context: TypeContext): Rendered {
+function render(type: TypeNode, context: TypeContext): Rendered {
   switch (type.kind) {
     case "unknown":
     case "never":
@@ -135,7 +135,7 @@ function render(type: Type, context: TypeContext): Rendered {
 }
 
 /** A TypeScript index signature must admit every property's type. */
-function widenIndex(index: Type, fields: Field[]): Type {
+function widenIndex(index: TypeNode, fields: Field[]): TypeNode {
   if (index.kind === "unknown") return index
   const members = [index, ...fields.map((f) => f.type)]
   if (fields.some((f) => !f.required || f.requiredOnly !== undefined)) members.push(UNDEFINED)
@@ -146,7 +146,7 @@ function widenIndex(index: Type, fields: Field[]): Type {
  * Whether a type names a type alias that may lead back (a declaration that is not an interface), or
  * unites some.
  */
-function namesAlias(type: Type): boolean {
+function namesAlias(type: TypeNode): boolean {
   switch (type.kind) {
     case "ref":
       return type.target.type.kind !== "object"
@@ -159,7 +159,7 @@ function namesAlias(type: Type): boolean {
 }
 
 /** Whether a type names a type alias inside array or tuple syntax (`inList` once inside). */
-function aliasInList(type: Type, inList: boolean): boolean {
+function aliasInList(type: TypeNode, inList: boolean): boolean {
   switch (type.kind) {
     case "union":
     case "intersection":

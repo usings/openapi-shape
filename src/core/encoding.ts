@@ -1,4 +1,4 @@
-import { defaultExplode } from "../shared/contract"
+import { defaultExplode } from "../shared/encoding"
 import type { Encoding } from "./model"
 import { isRecord } from "./object"
 

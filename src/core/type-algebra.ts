@@ -1,11 +1,11 @@
-import { directionScopes, hasDirections, retainDirections } from "./directions"
-import type { Declaration, Field, Literal, Type } from "./model"
-import { NEVER, UNKNOWN, TYPE_LOCATION } from "./model"
+import { directionScopes, hasDirections, retainDirections } from "./directional-fields"
+import type { Field, Literal, TypeDeclaration, TypeNode } from "./model"
+import { NEVER, TYPE_LOCATION, UNKNOWN } from "./model"
 import { matchesPattern } from "./patterns"
 
 /** Normalized union: flattened, deduplicated, with absorbed members removed. */
-export function union(members: Type[]): Type {
-  const flat: Type[] = []
+export function union(members: TypeNode[]): TypeNode {
+  const flat: TypeNode[] = []
   for (const member of members) {
     if (member.kind === "union") flat.push(...member.members)
     else flat.push(member)
@@ -42,7 +42,7 @@ interface IntersectionContext {
 }
 
 /** Normalized intersection: flattened, scalar conflicts resolved, plain objects merged. */
-export function intersect(members: Type[], context?: IntersectionContext): Type {
+export function intersect(members: TypeNode[], context?: IntersectionContext): TypeNode {
   return intersectScoped(
     members,
     { ...context, referenceDepth: 0, budget: { distribution: 16, combinations: 10_000 } },
@@ -56,8 +56,12 @@ interface CalculationContext extends IntersectionContext {
   budget: { distribution: number; combinations: number }
 }
 
-function intersectScoped(members: Type[], context: CalculationContext, directions: boolean): Type {
-  const flat: Type[] = []
+function intersectScoped(
+  members: TypeNode[],
+  context: CalculationContext,
+  directions: boolean,
+): TypeNode {
+  const flat: TypeNode[] = []
   for (const member of members) {
     if (member.kind === "intersection") flat.push(...member.members)
     else flat.push(member)
@@ -141,7 +145,7 @@ function intersectScoped(members: Type[], context: CalculationContext, direction
   return simplify(out, implied, { ...context, referenceDepth: context.referenceDepth + 1 })
 }
 
-function simplify(members: Type[], implied: boolean, context: CalculationContext): Type {
+function simplify(members: TypeNode[], implied: boolean, context: CalculationContext): TypeNode {
   let out = members
 
   // `{ a?, b? } & ({ a } | { b })` reads better as `{ a, b? } | { a?, b }`, as long
@@ -157,12 +161,12 @@ function simplify(members: Type[], implied: boolean, context: CalculationContext
         (shapeOf(t) !== undefined || t.kind === "object" || isArrayLike(t)),
     )
   ) {
-    const first = alternatives[0] as Extract<Type, { kind: "union" }>
+    const first = alternatives[0] as Extract<TypeNode, { kind: "union" }>
     const rest = out.filter((t) => t !== first)
     return union(first.members.map((member) => intersectScoped([...rest, member], context, true)))
   }
 
-  // Type-specific keywords without `type` constrain only their own type.
+  // TypeNode-specific keywords without `type` constrain only their own type.
   const shapes = out.map((t) => shapeOf(t))
   // Unexpanded constraints may admit other shapes, whether they are unions,
   // intersections, or references to a widened type. Infer their rendered shape
@@ -247,7 +251,7 @@ function simplify(members: Type[], implied: boolean, context: CalculationContext
   }
 }
 
-export function literal(value: unknown): Type {
+export function literal(value: unknown): TypeNode {
   return { kind: "literal", value: toLiteral(value) }
 }
 
@@ -297,18 +301,18 @@ function canonicalJson(value: unknown): string {
 }
 
 /** Structural identity of a type; declarations compare by identity. */
-function typeKey(type: Type, declarations = new Map<Declaration, number>()): string {
+function typeKey(type: TypeNode, declarations = new Map<TypeDeclaration, number>()): string {
   // Documentation does not affect identity; declarations compare by reference.
   return JSON.stringify(type, (key, value: unknown) =>
     key === "annotations"
       ? undefined
       : key === "target"
-        ? `#${declarationId(value as Declaration, declarations)}`
+        ? `#${declarationId(value as TypeDeclaration, declarations)}`
         : value,
   )
 }
 
-function declarationId(declaration: Declaration, ids: Map<Declaration, number>): number {
+function declarationId(declaration: TypeDeclaration, ids: Map<TypeDeclaration, number>): number {
   const existing = ids.get(declaration)
   if (existing !== undefined) return existing
   const id = ids.size
@@ -324,9 +328,9 @@ function toLiteral(value: unknown): Literal {
   return value as Literal
 }
 
-function dedupe(types: Type[]): Type[] {
+function dedupe(types: TypeNode[]): TypeNode[] {
   const seen = new Set<string>()
-  const declarations = new Map<Declaration, number>()
+  const declarations = new Map<TypeDeclaration, number>()
   return types.filter((t) => {
     const key = typeKey(t, declarations)
     if (seen.has(key)) return false
@@ -335,11 +339,15 @@ function dedupe(types: Type[]): Type[] {
   })
 }
 
-function hasLiteral(types: Type[], value: boolean): boolean {
+function hasLiteral(types: TypeNode[], value: boolean): boolean {
   return types.some((t) => t.kind === "literal" && t.value === value)
 }
 
-function replaceAll(types: Type[], match: (t: Type) => boolean, replacement: Type[]): Type[] {
+function replaceAll(
+  types: TypeNode[],
+  match: (t: TypeNode) => boolean,
+  replacement: TypeNode[],
+): TypeNode[] {
   const at = types.findIndex(match)
   const rest = types.filter((t) => !match(t))
   rest.splice(at, 0, ...replacement)
@@ -348,7 +356,7 @@ function replaceAll(types: Type[], match: (t: Type) => boolean, replacement: Typ
 
 type ScalarKind = "null" | "boolean" | "string" | "number"
 
-function scalarKind(type: Type): ScalarKind | undefined {
+function scalarKind(type: TypeNode): ScalarKind | undefined {
   switch (type.kind) {
     case "null":
     case "boolean":
@@ -370,20 +378,20 @@ function scalarKind(type: Type): ScalarKind | undefined {
   }
 }
 
-function isScalar(type: Type): boolean {
+function isScalar(type: TypeNode): boolean {
   return scalarKind(type) !== undefined
 }
 
 /** Any object: what a union of objects widens to. */
-const OPEN_OBJECT: Type = { kind: "object", fields: [], additional: UNKNOWN }
-const WIDENED_UNKNOWN: Type = { kind: "unknown", widened: true }
+const OPEN_OBJECT: TypeNode = { kind: "object", fields: [], additional: UNKNOWN }
+const WIDENED_UNKNOWN: TypeNode = { kind: "unknown", widened: true }
 
 type Shape = "object" | "array" | ScalarKind
 
 /** The JSON type every value of `type` has, when there is exactly one. */
 function shapeOf(
-  type: Type,
-  known = new Map<Declaration, Shape | undefined>(),
+  type: TypeNode,
+  known = new Map<TypeDeclaration, Shape | undefined>(),
   includeInferred = false,
 ): Shape | undefined {
   switch (type.kind) {
@@ -433,7 +441,7 @@ function shapeOf(
   }
 }
 
-function isBareObject(type: Type): boolean {
+function isBareObject(type: TypeNode): boolean {
   return (
     type.kind === "object" &&
     type.fields.length === 0 &&
@@ -447,7 +455,7 @@ function isBareObject(type: Type): boolean {
  * A union whose members an intersection can simplify with: objects, arrays, literals, scalars; and
  * references, where an implied shape must give way to them.
  */
-function isDistributable(type: Type, references: boolean, limit: number): boolean {
+function isDistributable(type: TypeNode, references: boolean, limit: number): boolean {
   return (
     type.kind === "union" &&
     type.members.length <= limit &&
@@ -467,7 +475,7 @@ function isDistributable(type: Type, references: boolean, limit: number): boolea
  * declarations; each declaration is counted once per call, and a reference back into itself counts
  * as one.
  */
-function expansions(type: Type, counted = new Map<Declaration, number>()): number {
+function expansions(type: TypeNode, counted = new Map<TypeDeclaration, number>()): number {
   switch (type.kind) {
     case "union":
       return type.members.reduce((n, m) => n + expansions(m, counted), 0)
@@ -489,9 +497,9 @@ function expansions(type: Type, counted = new Map<Declaration, number>()): numbe
 
 /** The union a type is, directly or through references to complete declarations. */
 function unionBehind(
-  type: Type,
-  seen = new Set<Declaration>(),
-): Extract<Type, { kind: "union" }> | undefined {
+  type: TypeNode,
+  seen = new Set<TypeDeclaration>(),
+): Extract<TypeNode, { kind: "union" }> | undefined {
   if (type.kind === "union") return type
   if (type.kind !== "ref" || type.target.complete !== true || seen.has(type.target))
     return undefined
@@ -499,16 +507,16 @@ function unionBehind(
   return unionBehind(type.target.type, seen)
 }
 
-function isArrayLike(type: Type): type is Extract<Type, { kind: "array" | "tuple" }> {
+function isArrayLike(type: TypeNode): type is Extract<TypeNode, { kind: "array" | "tuple" }> {
   return type.kind === "array" || type.kind === "tuple"
 }
 
-function isImplied(type: Type): boolean {
+function isImplied(type: TypeNode): boolean {
   return (type.kind === "object" || isArrayLike(type)) && type.inferred === true
 }
 
-function intersectScalars(scalars: Type[]): Type {
-  let result: Type | undefined
+function intersectScalars(scalars: TypeNode[]): TypeNode {
+  let result: TypeNode | undefined
   for (const scalar of scalars) {
     if (result === undefined) {
       result = scalar
@@ -520,7 +528,7 @@ function intersectScalars(scalars: Type[]): Type {
   return result ?? UNKNOWN
 }
 
-function intersectTwoScalars(a: Type, b: Type): Type {
+function intersectTwoScalars(a: TypeNode, b: TypeNode): TypeNode {
   const kindA = scalarKind(a)
   const kindB = scalarKind(b)
   // Binary is a string annotation; retain it unless a literal narrows the value.
@@ -535,9 +543,11 @@ function intersectTwoScalars(a: Type, b: Type): Type {
   return a
 }
 
-function mergeObjects(objects: Type[], context: CalculationContext): Type {
-  const members = objects.filter((t): t is Extract<Type, { kind: "object" }> => t.kind === "object")
-  const merged = new Map<string, { types: Type[]; field: Field; sides: Field[] }>()
+function mergeObjects(objects: TypeNode[], context: CalculationContext): TypeNode {
+  const members = objects.filter(
+    (t): t is Extract<TypeNode, { kind: "object" }> => t.kind === "object",
+  )
+  const merged = new Map<string, { types: TypeNode[]; field: Field; sides: Field[] }>()
   for (const object of members) {
     for (const field of object.fields) {
       const entry = merged.get(field.name)
@@ -566,7 +576,7 @@ function mergeObjects(objects: Type[], context: CalculationContext): Type {
       direction: combinedDirection(entry.sides),
     })
   }
-  const out: Type = { kind: "object", fields }
+  const out: TypeNode = { kind: "object", fields }
   const additional = members.flatMap((t) => (t.additional ? [t.additional] : []))
   if (additional.length > 0) out.additional = intersectScoped(additional, context, true)
   const patterns = members.flatMap((t) => t.patterns ?? [])

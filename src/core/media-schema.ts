@@ -1,14 +1,14 @@
 import { selectContentSource } from "./content-sources"
 import type { DocumentNode } from "./documents"
-import type { Type } from "./model"
+import type { TypeNode } from "./model"
 import { UNKNOWN } from "./model"
 import type { SchemaBuilder } from "./schemas"
 
-const BLOB: Type = { kind: "blob" }
-const STRING: Type = { kind: "string" }
+const BLOB: TypeNode = { kind: "blob" }
+const STRING: TypeNode = { kind: "string" }
 
 /**
- * The type of one Media Type Object's content, by the class of its media type
+ * The type of one Media TypeNode Object's content, by the class of its media type
  * (`classifyMediaType`): JSON, form, multipart, and JSON sequence content is typed by its schema;
  * `itemSchema` on a sequence describes an array of items; other text is a string, or the schema's
  * type when it says which strings (`unknown` under `text/*`, which may be JSON); anything else is
@@ -20,7 +20,7 @@ export function typeOfContent(
   node: DocumentNode,
   mediaType: string,
   parameter = false,
-): Type {
+): TypeNode {
   const { source, ignoredItemSchema } = selectContentSource(
     schemas.context.documents,
     node,

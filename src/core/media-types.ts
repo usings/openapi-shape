@@ -27,22 +27,6 @@ export function classifyMediaType(mediaType: string): MediaClass {
   return "binary"
 }
 
-/**
- * The media type a request body is sent as when the call names none: the declared
- * `application/json` one, parameters and all, where one alone is; else the only one declared; else
- * none. The client types use the same rule for the optional contentType argument.
- */
-export function defaultMediaType(mediaTypes: string[]): string | undefined {
-  const json = mediaTypes.filter((m) => isApplicationJson(m))
-  if (json.length === 1) return json[0]
-  return mediaTypes.length === 1 ? mediaTypes[0] : undefined
-}
-
-/** Whether a media type is `application/json`, whatever its parameters. */
-export function isApplicationJson(mediaType: string): boolean {
-  return mediaTypeEssence(mediaType) === "application/json"
-}
-
 /** Whether a media type is `multipart/form-data`, whose parts are named form fields. */
 export function isFormData(mediaType: string): boolean {
   return mediaTypeEssence(mediaType) === "multipart/form-data"

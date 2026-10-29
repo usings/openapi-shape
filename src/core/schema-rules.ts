@@ -1,7 +1,17 @@
 import type { DocumentNode } from "./documents"
 import { classifyMediaType } from "./media-types"
 import { isRecord } from "./object"
-import { referencesOf } from "./references"
+import { referencesOf } from "./object-references"
+
+/** Structural schema keywords shared by discovery and compilation. */
+export const OBJECT_KEYWORDS = [
+  "properties",
+  "patternProperties",
+  "additionalProperties",
+  "required",
+] as const
+export const ARRAY_KEYWORDS = ["items", "prefixItems"] as const
+export const COMPOSITION_KEYWORDS = ["allOf", "anyOf", "oneOf"] as const
 
 /** Keywords that change a schema's type. */
 const TYPE_KEYWORDS = new Set([
@@ -58,4 +68,13 @@ export function aliasReference(node: DocumentNode): ["$ref" | "$dynamicRef", str
   const [[keyword, ref]] = references
   if (Object.keys(schema).some((key) => key !== keyword && TYPE_KEYWORDS.has(key))) return undefined
   return [keyword, ref]
+}
+
+/** Explicit dialects supported by the schema projection. */
+export function supportedDialect(value: string): boolean {
+  return [
+    "https://json-schema.org/draft/2020-12/schema",
+    "https://spec.openapis.org/oas/3.1/dialect/base",
+    "https://spec.openapis.org/oas/3.2/dialect/base",
+  ].includes(value.replace(/#$/, ""))
 }

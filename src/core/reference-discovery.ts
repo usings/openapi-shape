@@ -3,9 +3,9 @@ import { componentNameOf, identity } from "./document-nodes"
 import type { DocumentNode, DocumentSet } from "./documents"
 import type { GenerationControl } from "./generation-control"
 import { isRecord } from "./object"
+import { inspectObject, referencesOf } from "./object-references"
 import { selectOperations, selectParameterSources, selectPathItem } from "./operation-sources"
-import { inspectObject, referencesOf } from "./references"
-import { aliasReference } from "./schema-rules"
+import { COMPOSITION_KEYWORDS, aliasReference } from "./schema-rules"
 
 /**
  * Discover the reference graph before compiling types. Work items describe semantic positions,
@@ -70,6 +70,7 @@ class ReferenceDiscovery {
   private task(role: string, node: DocumentNode, visit: () => boolean): void {
     const key = `${role}:${identity(node)}`
     if (this.visited.has(key)) return
+    this.control.consume()
     this.visited.add(key)
     this.queue.push(visit)
   }
@@ -126,7 +127,7 @@ class ReferenceDiscovery {
       if (componentNameOf(node) !== undefined) this.inheritance(node)
       if (value.not === true || (isRecord(value.not) && Object.keys(value.not).length === 0))
         return true
-      for (const key of ["allOf", "anyOf", "oneOf"]) {
+      for (const key of COMPOSITION_KEYWORDS) {
         const list = value[key]
         if (Array.isArray(list))
           list.forEach((_, i) => this.schema(this.documents.child(node, key, i)))
