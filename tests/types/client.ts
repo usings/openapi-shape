@@ -142,7 +142,7 @@ void function middlewareContextChecks(context: MiddlewareContext): void {
 // Compile-time checks below are checked by `pnpm typecheck`; their bodies never run.
 void async function fetchTypeChecks(client: Client<Endpoints>): Promise<void> {
   const pet = await client.fetch("GET /pets/{id}", { params: { id: 1 } })
-  if (pet.status === 200) expectTypeOf(await pet.json()).toEqualTypeOf<Schemas.Pet>()
+  if (pet.status === 200) expectTypeOf(await pet.json()).toEqualTypeOf<unknown>()
   if (pet.status === 404) expectTypeOf(await pet.json()).toEqualTypeOf<Schemas.Error>()
   // Undeclared error statuses have unknown bodies.
   if (pet.status === 500) expectTypeOf(await pet.json()).toEqualTypeOf<unknown>()
@@ -175,7 +175,7 @@ void async function resultTypeChecks(client: Client<Endpoints>): Promise<void> {
   // error is never undefined (null without a body).
   const { data, error, status } = await client.result("GET /pets/{id}", { params: { id: 1 } })
   if (error === undefined) {
-    // Raw XML is a Blob; `fetch` and `json()` give the JSON content alone.
+    // Raw XML is a Blob; result() retains both decoded representations.
     expectTypeOf(data).toEqualTypeOf<Schemas.Pet | Blob>()
   } else {
     expectTypeOf(data).toEqualTypeOf<undefined>()

@@ -314,6 +314,7 @@ async function check() {
   const json = await client.result("GET /r2")
   if (json.error === undefined) json.data.id.toFixed()
   const raw = await client.fetch("GET /r0")
+  // @ts-expect-error wildcard media do not establish the parsed JSON shape
   if (raw.status === 200) (await raw.json()).id.toFixed()
 }
 `,

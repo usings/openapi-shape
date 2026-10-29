@@ -208,15 +208,15 @@ export type ErrorBody<T> = unknown extends T
  * content, and nothing where it has none, since `json()` rejects.
  */
 export type JsonOf<Shape> = Shape extends { content: infer Content }
-  ? [JsonMedia<Content>] extends [never]
-    ? unknown
-    : Content[JsonMedia<Content>]
+  ? [Exclude<keyof Content & string, JsonMedia<Content>>] extends [never]
+    ? Content[JsonMedia<Content>]
+    : unknown
   : never
 
 export type JsonMedia<Content> = {
-  [M in keyof Content & string]: IsJson<M> extends true
-    ? M
-    : Essence<M> extends "text/*"
+  [M in keyof Content & string]: Essence<M> extends `${string}*${string}`
+    ? never
+    : IsJson<M> extends true
       ? M
       : never
 }[keyof Content & string]

@@ -231,15 +231,15 @@ async function use() {
   const response = await api.fetch("GET /mixed0")
   if (response.status === 200) {
     const data = await response.json()
-    data satisfies string | { id: number }
-    // @ts-expect-error a string alternative does not have the object fields
+    data satisfies unknown
+    // @ts-expect-error media ranges do not establish the parsed JSON shape
     data.id.toFixed()
   }
   const result = await api.result("GET /mixed1")
   if (result.status === 200) {
     const data = await result.response.json()
-    data satisfies string | { id: number }
-    // @ts-expect-error result.response preserves the same string alternative
+    data satisfies unknown
+    // @ts-expect-error result.response also requires JSON shape narrowing
     data.id.toFixed()
   }
 }
@@ -442,8 +442,8 @@ async function check() {
   const downloaded = await edge.fetch("GET /download")
   if (downloaded.status === 200) {
     const json = await downloaded.json()
-    json satisfies string
-    // @ts-expect-error the JSON schema declares a string
+    json satisfies unknown
+    // @ts-expect-error other media can contain arbitrary JSON
     json.rows
   }
   const report = await edge.result("GET /report")

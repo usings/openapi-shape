@@ -136,7 +136,7 @@ Exact response codes take precedence over ranges such as `2XX`, then `default`. 
 
 ## Own the response with Fetch
 
-`api.fetch()` accepts any callable endpoint, including streaming endpoints. It returns a native `Response` whose `ok` and `status` narrow the type returned by `json()`:
+`api.fetch()` accepts any callable endpoint, including streaming endpoints. It returns a native `Response` whose `ok` and `status` narrow the type returned by `json()`. Statuses offering non-JSON media or media ranges keep `json()` typed as `unknown`, because parsing those bytes need not produce the declared JSON schema:
 
 <!-- example: client -->
 
