@@ -142,7 +142,10 @@ async function* subscription(
   if (format !== "sse" && retry !== undefined && retry !== false)
     throw new TypeError("Automatic retry requires a single SSE media selection")
   const replay =
-    format === "sse" && retry !== undefined && retry !== false && retry.maxRetries !== 0
+    format === "sse" &&
+    retry !== undefined &&
+    retry !== false &&
+    (retry === true || retry.maxRetries !== 0)
   if (replay && isStream(call.body))
     throw new TypeError("SSE reconnection cannot replay a streaming request body; set retry: false")
   const state: EventState = { id: "", retry: format === "sse" ? validateRetry(retry) : 1000 }

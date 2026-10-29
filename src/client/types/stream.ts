@@ -19,7 +19,8 @@ export interface StreamRetryOptions {
 export interface StreamOptions {
   /** Maximum UTF-8 bytes per message; a positive safe integer. Omitted means no limit. */
   maxMessageBytes?: number | undefined
-  retry?: false | StreamRetryOptions
+  /** True enables SSE reconnection with defaults; false or omission disables it. */
+  retry?: boolean | StreamRetryOptions
 }
 
 /** Callable operations with a supported streaming success response. */
@@ -123,7 +124,7 @@ export type StreamSelection<
       : { headers?: MediaHeader<"accept", M, false> }) &
       (Essence<M> extends "text/event-stream"
         ?
-            | (Replayable<Call> & { retry: StreamRetryOptions })
+            | (Replayable<Call> & { retry: boolean | StreamRetryOptions })
             | (Call & { retry?: false | (StreamRetryOptions & { maxRetries: 0 }) })
         : Call & { retry?: never })
   : never
@@ -181,6 +182,6 @@ type DefaultSelection<Call, M extends string> = {
   headers?: { accept?: never; [Symbol.iterator]?: never }
 } & (Essence<M> extends "text/event-stream"
   ?
-      | (Replayable<Call> & { retry: StreamRetryOptions })
+      | (Replayable<Call> & { retry: boolean | StreamRetryOptions })
       | (Call & { retry?: false | (StreamRetryOptions & { maxRetries: 0 }) })
   : Call & { retry?: never })

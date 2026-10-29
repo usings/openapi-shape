@@ -338,3 +338,17 @@ api.stream("GET /unsupported")
 api.stream("TRACE /records")
 // @ts-expect-error unknown operations remain unavailable
 api.stream("GET /missing")
+
+void function retryBooleanChecks(client: Client<Endpoints>, retry: boolean) {
+  client.stream("GET /events", { retry: true })
+  client.stream("GET /events", { retry })
+  // @ts-expect-error retry true cannot replay a streaming request body
+  client.stream("POST /events/{id}", {
+    params: { id: 1 },
+    query: { topic: "orders" },
+    body: new ReadableStream<Uint8Array>(),
+    retry: true,
+  })
+  // @ts-expect-error JSON records cannot automatically reconnect
+  client.stream("GET /records", { retry: true })
+}

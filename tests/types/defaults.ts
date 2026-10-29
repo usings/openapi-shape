@@ -15,6 +15,7 @@ interface StreamingEndpoints {
 }
 void function defaultStreamChecks(contract: Contract<StreamingEndpoints>) {
   const client = createClient(contract, { headers: { Accept: "text/event-stream" } })
+  client.stream("GET /events", { retry: true })
   const stream = client.stream("GET /events", { retry: { maxRetries: 2 } })
   expectTypeOf(stream).toEqualTypeOf<ReadableStream<StreamMessage & { data: string }>>()
   const reader = stream.getReader()

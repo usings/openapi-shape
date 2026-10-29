@@ -524,3 +524,27 @@ it("preserves the original read failure for dynamically negotiated SSE", async (
   ).rejects.toBe(failure)
   expect(fetch).toHaveBeenCalledOnce()
 })
+
+it.each([true, {}])("reconnects with default options for retry %j", async (retry) => {
+  vi.useFakeTimers()
+  let calls = 0
+  const api = client({
+    fetch: () =>
+      Promise.resolve(
+        ++calls === 1 ? response("data: first\n\n") : new Response(null, { status: 204 }),
+      ),
+  })
+  const reader = api
+    .stream("GET /events", { retry, headers: { accept: "text/event-stream" } })
+    .getReader()
+  try {
+    expect(await reader.read()).toMatchObject({ value: { data: "first" } })
+    const next = reader.read()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await next).toMatchObject({ done: true })
+    expect(calls).toBe(2)
+  } finally {
+    await reader.cancel()
+    vi.useRealTimers()
+  }
+})

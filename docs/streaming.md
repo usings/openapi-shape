@@ -38,7 +38,7 @@ for await (const event of api.stream("GET /events", { retry: false })) {
 
 Messages contain `data: string`, `event: string`, `id: string`, and optional numeric `retry`. Data lines join with newlines; the default event is `"message"`. Both named and default events are emitted. Comments and blocks without data emit nothing; incomplete events at EOF are discarded.
 
-By default, EOF completes the subscription. Set `retry: {}` to enable reconnection, or provide a retry budget.
+By default, EOF completes the subscription. Set `retry: true` (or `retry: {}`) to enable reconnection, or provide a retry budget.
 
 ### SSE reconnection
 

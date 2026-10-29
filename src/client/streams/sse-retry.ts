@@ -23,10 +23,15 @@ type Connect = () => AsyncGenerator<unknown, boolean>
 export async function* sseSession(
   connect: Connect,
   state: EventState,
-  retry: false | StreamRetryOptions | undefined,
+  retry: boolean | StreamRetryOptions | undefined,
   signal: AbortSignal,
 ): AsyncGenerator<unknown> {
-  const maxRetries = retry === undefined || retry === false ? 0 : (retry.maxRetries ?? Infinity)
+  const maxRetries =
+    retry === undefined || retry === false
+      ? 0
+      : retry === true
+        ? Infinity
+        : (retry.maxRetries ?? Infinity)
   let retries = 0
   while (true) {
     signal.throwIfAborted()
@@ -48,11 +53,15 @@ export async function* sseSession(
 }
 
 /** Only a safe integer interval can be represented exactly by the parser and timer. */
-export function validateRetry(retry: false | StreamRetryOptions | undefined): number {
-  if (retry !== undefined && retry !== false && (retry === null || typeof retry !== "object"))
-    throw new TypeError("SSE retry must be false or an options object")
-  const delay = retry === false ? 1000 : (retry?.delay ?? 1000)
-  const maxRetries = retry === false ? undefined : retry?.maxRetries
+export function validateRetry(retry: boolean | StreamRetryOptions | undefined): number {
+  if (
+    retry !== undefined &&
+    typeof retry !== "boolean" &&
+    (retry === null || typeof retry !== "object")
+  )
+    throw new TypeError("SSE retry must be a boolean or an options object")
+  const delay = typeof retry === "boolean" ? 1000 : (retry?.delay ?? 1000)
+  const maxRetries = typeof retry === "boolean" ? undefined : retry?.maxRetries
   if (!Number.isSafeInteger(delay) || delay < 0)
     throw new TypeError("SSE retry delay must be a non-negative safe integer")
   if (maxRetries !== undefined && (!Number.isSafeInteger(maxRetries) || maxRetries < 0))
