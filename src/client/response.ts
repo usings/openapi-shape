@@ -48,7 +48,7 @@ export async function readResult(
   declared: EndpointContract | undefined,
 ): Promise<unknown> {
   const resolved = declared && resolveResponseDeclaration(declared, response.status)
-  if (!resolved) {
+  if (response.status === 0 || !resolved) {
     cancelBody(response, request.signal.reason)
     throw new ContractResponseError("Response status is not declared by this operation", response)
   }

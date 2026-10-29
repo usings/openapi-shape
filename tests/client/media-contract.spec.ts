@@ -105,3 +105,11 @@ it("retains an empty Blob for declared wildcard content", async () => {
   expect(result.data).toBeInstanceOf(Blob)
   expect((result.data as Blob).size).toBe(0)
 })
+
+it("rejects filtered status zero even with an empty default response", async () => {
+  const api = createClient<{ "GET /x": { responses: { default: object } } }>(
+    { version: CONTRACT_VERSION, endpoints: { "GET /x": { responses: { default: {} } } } },
+    { baseURL: "https://example.test", fetch: () => Promise.resolve(Response.error()) },
+  )
+  await expect(api.result("GET /x")).rejects.toBeInstanceOf(ContractResponseError)
+})
