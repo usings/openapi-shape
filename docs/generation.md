@@ -1,6 +1,6 @@
 # Generate a module
 
-Use the CLI for files and CI checks. Use `generate()` when your application needs the output as a string or needs custom document loading. Both produce the same [module](./generated.md) and resolve referenced documents automatically.
+Use the CLI for files and CI checks. Use `generate()` when your application needs the output as a string or needs custom document loading. Both produce the same [module](./contract.md) and resolve referenced documents automatically.
 
 Generation requires Node.js 22 or later. Inputs can be JSON or YAML, addressed by a local path, a `file:` URL, or an HTTP(S) URL. The JavaScript API also accepts parsed objects. See [OpenAPI support](./openapi.md) for versions, reference boundaries, and type limitations.
 
@@ -36,13 +36,15 @@ Commit the generated module and add paired scripts:
 }
 ```
 
-Run `pnpm api:generate` after changing the description or upgrading the package; run `pnpm api:check` in CI. Check mode compares complete UTF-8 bytes, including formatting. A missing or stale output exits `1`; regenerate with the same installed package rather than editing the output. See [contract compatibility](./generated.md#contract-compatibility).
+Run `pnpm api:generate` after changing the description or upgrading the package; run `pnpm api:check` in CI. Check mode compares complete UTF-8 bytes, including formatting. A missing or stale output exits `1`; regenerate with the same installed package rather than editing the output. See [contract compatibility](./contract.md#contract-compatibility).
 
 Writing uses a temporary file beside the resolved destination and renames it over the complete output. It follows existing symlinks and preserves ordinary permission bits; the destination directory must be writable. Hard links keep the old file, and ownership, ACLs, and special permission bits are not copied. This avoids partial replacement, not power-loss corruption; abrupt termination can leave a temporary file.
 
 ## Programmatic API
 
 `generate(input, options?)` resolves to `{ code, diagnostics }`. The caller owns writing the string and presenting warnings:
+
+<!-- example: standalone -->
 
 ```ts
 import { writeFile } from "node:fs/promises"
@@ -71,6 +73,8 @@ Generation failures reject with `GenerateError`, whose `diagnostics` includes er
 
 Parsed object inputs can reference only resources inside themselves, even when a loader is supplied. To resolve external references, supply an entry URI and return the in-memory document from its loader:
 
+<!-- example: standalone -->
+
 ```ts
 import { generate } from "openapi-shape"
 
@@ -91,11 +95,13 @@ console.log(code)
 
 The entry URI locates the document and resolves `./pet.json` against the same origin. Returning `undefined` delegates external documents to the built-in loader. The entry also passes through parsing and document size limits.
 
-When migrating, rename the `load` option to `loader`. The `base` option has been removed: replace `generate(document, { base: uri, … })` with `generate(uri, { loader, … })`, returning the document for that entry URI as above.
+The `base` option has been removed: replace `generate(document, { base: uri, … })` with `generate(uri, { loader, … })`, returning the document for that entry URI as above.
 
 ### Authenticate document loading
 
 A loader receives an absolute `file:`, `http:`, or `https:` URI without a fragment. Delegate sources you do not handle, and pass its signal to your own asynchronous work. This example supplies a placeholder credential only to one origin:
+
+<!-- example: standalone -->
 
 ```ts
 import { generate, type DocumentLoader } from "openapi-shape"
@@ -133,20 +139,20 @@ Each diagnostic has `severity` (`error` or `warning`), a stable `code`, a human-
 
 Errors prevent output. Warnings identify invalid input, unsupported fields, or reduced type precision. Successful generation is not full OpenAPI/JSON Schema validation, and not every omitted constraint produces a warning.
 
-| Code                      | Severity | Meaning                                                                                     |
-| ------------------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `invalid-document`        | error    | Invalid root, cyclic objects, excessive nesting, or a pattern match timeout.                |
-| `unsupported-version`     | error    | Missing or unsupported entry `openapi` version.                                             |
-| `read-failed`             | error    | Entry document cannot be loaded or parsed.                                                  |
-| `unresolved-ref`          | error    | Reference is missing, unreadable, unsupported, or forbidden.                                |
-| `circular-ref`            | error    | Non-schema reference cycle.                                                                 |
-| `ignored-field`           | warning  | A field cannot be applied, such as an operation server or unsupported encoding.             |
-| `invalid-schema`          | warning  | Invalid schema type, value, literal, or empty composition.                                  |
-| `circular-schema`         | warning  | A cycle through only references/compositions is cut.                                        |
-| `schema-precision-loss`   | warning  | A type is widened at a [complexity boundary](./openapi.md#precision-and-complexity-limits). |
-| `discriminator-mismatch`  | warning  | A discriminator conflicts with a schema or cannot narrow a branch.                          |
-| `invalid-parameter`       | warning  | Malformed or duplicated parameter.                                                          |
-| `path-parameter-mismatch` | warning  | Parameters and path template disagree.                                                      |
-| `invalid-status-code`     | warning  | Invalid response status key.                                                                |
-| `path-item-conflict`      | warning  | A nearer Path Item field overrides an inherited field.                                      |
-| `renamed-schema`          | warning  | A generated declaration name was changed to avoid a collision.                              |
+| Code                      | Severity | Meaning                                                                                                              |
+| ------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `invalid-document`        | error    | Invalid root, cyclic objects, excessive nesting, or a pattern match timeout.                                         |
+| `unsupported-version`     | error    | Missing/unsupported OpenAPI version or explicit schema dialect.                                                      |
+| `read-failed`             | error    | Entry document cannot be loaded or parsed.                                                                           |
+| `unresolved-ref`          | error    | Reference is missing, unreadable, unsupported, or forbidden.                                                         |
+| `circular-ref`            | error    | Non-schema reference cycle.                                                                                          |
+| `ignored-field`           | warning  | A field cannot be applied, such as an operation server or unsupported encoding.                                      |
+| `invalid-schema`          | warning  | Invalid schema type, value, literal, or empty composition.                                                           |
+| `circular-schema`         | warning  | A cycle through only references/compositions is cut.                                                                 |
+| `schema-precision-loss`   | warning  | Static reference approximation or widening at a [complexity boundary](./openapi.md#precision-and-complexity-limits). |
+| `discriminator-mismatch`  | warning  | A discriminator conflicts with a schema or cannot narrow a branch.                                                   |
+| `invalid-parameter`       | warning  | Malformed or duplicated parameter.                                                                                   |
+| `path-parameter-mismatch` | warning  | Parameters and path template disagree.                                                                               |
+| `invalid-status-code`     | warning  | Invalid response status key.                                                                                         |
+| `path-item-conflict`      | warning  | A nearer Path Item field overrides an inherited field.                                                               |
+| `renamed-schema`          | warning  | A generated declaration name was changed to avoid a collision.                                                       |

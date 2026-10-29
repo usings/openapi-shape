@@ -6,6 +6,8 @@
 
 Generate `api.ts` first using the [generation guide](./generation.md). The examples here use the [Petstore description](../docs/examples/petstore.yaml); replace the example address with your API's address.
 
+<!-- example: standalone -->
+
 ```ts
 import { createClient } from "openapi-shape/client"
 import { contract } from "./api"
@@ -25,6 +27,8 @@ const api = createClient(contract, { baseURL: "https://api.example.com/v1" })
 
 An endpoint key is `"METHOD /path"`, with the path template unchanged. Each call accepts operation inputs plus `RequestInit` options such as `signal`, `cache`, and `credentials`. The second argument is required when path parameters, query inputs, or a body are required.
 
+<!-- example: client -->
+
 ```ts
 const result = await api.result("GET /pets/{petId}", {
   params: { petId: 1 },
@@ -33,40 +37,52 @@ const result = await api.result("GET /pets/{petId}", {
 console.log(result.status)
 ```
 
-| Field         | Meaning                                                                       |
-| ------------- | ----------------------------------------------------------------------------- |
-| `params`      | Path parameter values; required variables must be own properties.             |
-| `query`       | Query parameters, or the complete OpenAPI 3.2 `querystring` value.            |
-| `headers`     | Typed header values, `Headers`, or entries; extra headers are allowed.        |
-| `body`        | Structured or ready-made body. Not accepted for `GET` or `HEAD`.              |
-| `contentType` | A declared request media type; required when no default can be selected.      |
-| `baseURL`     | Replace the client's URL prefix for this call. `undefined` keeps the default. |
+| Field                     | Meaning                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| `params`                  | Path parameter values; required variables must be own properties.              |
+| `query`                   | Query parameters, or the complete OpenAPI 3.2 `querystring` value.             |
+| `headers`                 | Typed header values, `Headers`, or entries; extra headers are allowed.         |
+| `body`                    | Structured or ready-made body. Not accepted for `GET` or `HEAD`.               |
+| `headers["content-type"]` | Explicit media selection for a structured body; checked against its body type. |
+| `baseURL`                 | Replace the client's URL prefix for this call. `undefined` keeps the default.  |
 
-Endpoint paths append to `baseURL` after trailing slashes are removed. A per-call override does not change other calls; default headers, credentials, and middleware still apply. Unknown endpoints fail before transport. `CONNECT`, `TRACE`, and `TRACK` are excluded.
+Endpoint paths append to `baseURL` after trailing slashes are removed. A per-call override does not change other calls; default headers, credentials, and middleware still apply. Unknown operations fail before transport. `CONNECT`, `TRACE`, and `TRACK` are excluded.
 
-`query` is required when any ordinary query parameter is required, or when the whole `querystring` is required even if its properties are optional. Headers are optional per call because defaults or middleware can supply them. Browsers manage cookies; other runtimes can supply a `cookie` header.
+`query` is required when any ordinary query parameter is required, or when the whole `querystring` is required even if its properties are optional. Ordinary declared headers are optional per call because defaults or middleware can supply them; structured-body media selection can come from literal client defaults, explicit call headers, or the JSON fallback. Opaque default headers require explicit media for structured bodies. Browsers manage cookies; other runtimes can supply a `cookie` header.
 
 ### Send a body
 
+<!-- example: client -->
+
 ```ts
-await api.result("POST /pets", { body: { name: "Milo" } })
+await api.result("POST /pets", {
+  body: { name: "Milo" },
+  headers: { "content-type": "application/json" },
+})
 
 const file = new Blob(["example"], { type: "text/plain" })
 await api
   .fetch("POST /upload", {
     baseURL: "https://uploads.example.com",
     body: { file, name: "notes" },
+    headers: { "content-type": "multipart/form-data" },
   })
   .then((response) => response.body?.cancel())
 ```
 
-The client encodes JSON, URL-encoded forms, and `multipart/form-data`; text takes strings. It selects the sole `application/json` declaration, including parameters, or otherwise the sole declared media type. If neither is unique, supply `contentType`.
+The client encodes JSON, URL-encoded forms, and `multipart/form-data`; text takes strings. Structured bodies default to application/json when allowed by the contract. Other media require an explicit Content-Type header. Header record names are case-insensitive, including declared parameter headers. The JSON fallback is client policy and is not stored in the generated contract. The client matches that header against `requestBody.content` and uses the selected media's encoding rules.
 
 `Blob`, buffers, `FormData`, `URLSearchParams`, Web streams, and byte async iterables are ready bodies. Streams use half duplex. Other media types and sequential request bodies need encoded data. See [serialization](./serialization.md) for content types, multipart parts, styles, and escaping.
+
+## Select media
+
+Use `headers.accept` or `headers.Accept` for response preferences. Ordinary `fetch()` and `result()` allow HTTP Accept lists and ranges; the preference does not narrow their response types. Structured request bodies use a typed header object so the selected Content-Type stays associated with the body schema. Opaque `Headers` and entries remain usable when no static media association is needed, including native request bodies.
 
 ## Handle a decoded result
 
 `api.result()` reads a complete non-streaming response and resolves to `{ data, error, status, response }`:
+
+<!-- example: client -->
 
 ```ts
 const {
@@ -91,29 +107,35 @@ HTTP error statuses resolve normally. Construction, transport, middleware, and d
 
 The call signal remains active while `result()` reads the body, including responses supplied directly by middleware or a custom transport. Abort rejects with `signal.reason` and cancels the body without waiting for its cleanup to finish.
 
-| Actual response           | Decoding                                 |
-| ------------------------- | ---------------------------------------- |
-| JSON (`…/json`, `…+json`) | `response.json()`                        |
-| Other `text/*`            | String                                   |
-| `HEAD`, 204, 205, 304     | `undefined`; a supplied body is canceled |
-| No `Content-Type`         | `undefined` if empty, otherwise `Blob`   |
-| Other media               | `Blob`                                   |
+| Actual response           | Decoding                                                   |
+| ------------------------- | ---------------------------------------------------------- |
+| JSON (`…/json`, `…+json`) | `response.json()`                                          |
+| Other `text/*`            | String                                                     |
+| `HEAD`, 204, 205, 304     | `undefined`; a supplied body is canceled                   |
+| No `Content-Type`         | `Blob` for declared wildcard content, including zero bytes |
+| Other media               | `Blob`                                                     |
 
 Content type selection follows Fetch MIME extraction, including multi-value headers. Multiple declared media produce a union of their decoded types; narrow the value before using schema properties. `response` remains useful for headers, but its body is already read or canceled. Use `fetch()` when you need body ownership.
 
+An endpoint offering both complete and streaming responses can use `result()` for its complete representation. `result()` matches declared response media using the actual status and Content-Type. A declared media mismatch or a supported streaming response raises `ContractResponseError` after canceling the body; status and headers remain available on its `response`. Undeclared statuses raise `ContractResponseError`; use `fetch()` to inspect arbitrary responses. This checks the HTTP representation, not JSON schema validity. HEAD and bodyless statuses follow HTTP semantics before media matching. The result retains `data`, `error`, `status`, and `response`; multiple complete media at one status retain a union type.
+
+When a declared wildcard response has no Content-Type, `result()` reads a `Blob`, including a zero-byte Blob for empty content. Declared responses without content and HTTP bodyless responses return `undefined`.
+
 ### Status typing
 
-Exact response codes take precedence over ranges such as `2XX`. If any 2xx response is declared, those declarations define the typed successes. Otherwise `default` also covers undeclared successes. Without `default`, undeclared errors, and successes when none were declared, have unknown bodies.
+Exact response codes take precedence over ranges such as `2XX`. `default` covers all statuses not matched by an exact code or range, including other successful statuses. `fetch()` types undeclared response bodies conservatively as unknown; check an explicit status for precise JSON types. `result()` rejects undeclared statuses.
 
-`HEAD` and statuses 204, 205, and 304 have no content regardless of the description; a 304 result has `error: null`. Types describe HTTP statuses 200–599 according to those rules, not unexpected runtime values such as opaque browser status `0`.
+`HEAD` and statuses 204, 205, and 304 have no content regardless of the description; a 304 result has `error: null`. Fetch types also include native opaque status `0`, whose empty body cannot be parsed as JSON. Decoded results include only declared HTTP representations.
 
 ## Own the response with Fetch
 
 `api.fetch()` accepts any callable endpoint, including streaming endpoints. It returns a native `Response` whose `ok` and `status` narrow the type returned by `json()`:
 
+<!-- example: client -->
+
 ```ts
 const response = await api.fetch("GET /pets/{petId}", { params: { petId: 1 } })
-if (response.ok) {
+if (response.status === 200) {
   console.log((await response.json()).name)
 } else if (response.status === 404) {
   console.warn((await response.json()).message)
@@ -129,6 +151,8 @@ For SSE and JSON record consumption, use the [streaming guide](./streaming.md).
 ## Middleware
 
 Middleware wraps all three methods and every managed SSE connection. Supply refreshed credentials here; static headers can live in client defaults. This example assumes `getToken(): Promise<string>` from your authentication code:
+
+<!-- example: auth -->
 
 ```ts
 import { createClient, defineMiddleware } from "openapi-shape/client"
@@ -158,6 +182,8 @@ Result decoding and stream parsing happen after the chain returns, so middleware
 
 Pass the call signal per request; preserve `request.signal` when replacing a request. A per-attempt timeout can combine it with a deadline:
 
+<!-- example: standalone -->
+
 ```ts
 import { defineMiddleware } from "openapi-shape/client"
 
@@ -173,36 +199,4 @@ Requests pass by reference. Use `new Request(request, init)` to isolate changes;
 
 Each `next()` transfers its delivered response to the awaiting middleware. That middleware owns any response it discards, including on an error, plus its reader locks, clones, and tee branches. The client cleans up responses that cannot cross a pending boundary after cancellation; it does not revoke already delivered responses. Avoid reading clones of indefinite streams to completion or leaving tee branches unread.
 
-## Preserve types in wrappers
-
-Use the exported helpers rather than reconstructing operation types:
-
-```ts
-import {
-  createClient,
-  type EndpointArgs,
-  type EndpointData,
-  type ResultEndpoint,
-} from "openapi-shape/client"
-import { contract, type Endpoints } from "./api"
-
-const { result } = createClient(contract, { baseURL: "https://api.example.com/v1" })
-export async function data<K extends ResultEndpoint<Endpoints>>(
-  endpoint: K,
-  ...args: EndpointArgs<Endpoints, K>
-): Promise<EndpointData<Endpoints, K>> {
-  const { data, error, status } = await result(endpoint, ...args)
-  if (error !== undefined) throw new Error(`HTTP ${status}`, { cause: error })
-  return data
-}
-const pet = await data("GET /pets/{petId}", { params: { petId: 1 } })
-console.log(pet.name)
-```
-
-| API      | Endpoint keys               | Arguments                     | Value                                          |
-| -------- | --------------------------- | ----------------------------- | ---------------------------------------------- |
-| `fetch`  | `Endpoint<Endpoints>`       | `EndpointArgs<Endpoints, K>`  | `TypedResponse`, narrowed by status            |
-| `result` | `ResultEndpoint<Endpoints>` | `EndpointArgs<Endpoints, K>`  | `EndpointData<Endpoints, K>` for success data  |
-| `stream` | `StreamEndpoint<Endpoints>` | `StreamArgs<Endpoints, K, M>` | `EndpointStreamItem<Endpoints, K, M>` per item |
-
-A call names one endpoint, not a union of keys. Stream wrappers should preserve `M extends StreamMedia<Endpoints, K>` so `accept` narrows the item. `EndpointMessage` is SSE-specific; `StreamOptions` and `StreamRetryOptions` describe stream settings. `Middleware`, `MiddlewareContext`, and `Fetcher` type request wrappers and transports.
+See [type inference and wrappers](./types.md) for reusable generic calls and client default media types.

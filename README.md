@@ -22,22 +22,20 @@ pnpm exec openapi-shape ./openapi.yaml -o src/api.ts
 
 Import the generated contract and set `baseURL` to your API's address. Adjust the import path to match your generated file:
 
+<!-- example: standalone -->
+
 ```ts
 import { createClient } from "openapi-shape/client"
 import { contract } from "./api"
 
 const api = createClient(contract, { baseURL: "https://api.example.com/v1" })
 
-const {
-  data: pets,
-  error,
-  status,
-} = await api.result("GET /pets", {
+const { data, error, status } = await api.result("GET /pets", {
   query: { limit: 10 },
 })
 if (error !== undefined) throw new Error(`HTTP ${status}`, { cause: error })
 
-console.log(pets.map((pet) => pet.name))
+console.log(data.map((pet) => pet.name))
 ```
 
 Endpoint keys such as `GET /pets` select the request and response types. When using your own description, use its declared endpoints and parameters.
@@ -50,7 +48,7 @@ Endpoint keys such as `GET /pets` select the request and response types. When us
 | `api.stream()` | Consume SSE messages or JSON records as a `ReadableStream`     | The subscription reads it; cancel when finished.                              |
 | `api.fetch()`  | Work with a typed native `Response` from any callable endpoint | You read or cancel it.                                                        |
 
-All three share typed inputs, request defaults, and middleware. You can also use the [generated types](./docs/generated.md) with your own client.
+All three share typed inputs, request defaults, and middleware. You can also use the [generated types](./docs/contract.md) with your own client.
 
 ## Documentation
 
@@ -60,8 +58,10 @@ All three share typed inputs, request defaults, and middleware. You can also use
 | Send requests, handle responses, add middleware, or write typed wrappers | [Client](./docs/client.md)               |
 | Consume SSE, JSONL, NDJSON, or JSON Text Sequences                       | [Streaming](./docs/streaming.md)         |
 | Control parameters, forms, multipart uploads, and escaping               | [Serialization](./docs/serialization.md) |
-| Use schemas, endpoint types, webhooks, or callbacks directly             | [Generated module](./docs/generated.md)  |
+| Use schemas, endpoint types, webhooks, or callbacks directly             | [Generated module](./docs/contract.md)   |
 | Check supported features, reference rules, and type approximations       | [OpenAPI support](./docs/openapi.md)     |
+
+For status narrowing, configured defaults, and generic wrappers, see [type inference](./docs/types.md).
 
 ## License
 

@@ -8,19 +8,23 @@ The examples use the client and API description from the [client guide](./client
 
 Supported response media are `text/event-stream`, `application/jsonl`, `application/x-ndjson`, and `application/json-seq`:
 
+<!-- example: client -->
+
 ```ts
-for await (const pet of api.stream("GET /records", { accept: "application/x-ndjson" })) {
+for await (const pet of api.stream("GET /records", { headers: { accept: "application/x-ndjson" } })) {
   console.log(pet.id, pet.name)
 }
 ```
 
-An endpoint qualifies when an effective successful response declares a supported stream. Wildcards, `HEAD`, bodyless statuses, and error-only declarations do not qualify. An endpoint offering both JSON and a supported stream uses `stream()` or `fetch()`, not `result()`; use `fetch()` to read its JSON representation.
+An endpoint qualifies when an effective successful response declares a supported stream. Wildcards, `HEAD`, bodyless statuses, and error-only declarations do not qualify. An endpoint offering both JSON and a supported stream can use `result()` to decode its complete representation, `stream()` for streaming items, or `fetch()` for direct response access.
 
-With one streaming declaration, `accept` is optional. With several, provide its exact declared spelling and parameters. It selects the item type and replaces default/call `Accept` headers. The actual response is matched by media essence, ignoring case and parameters. A wrong status, media type, or missing/consumed/locked body raises `StreamResponseError`; its `response` retains status and headers after cleanup. HTTP 204 closes normally.
+With one streaming declaration, `headers.accept` is optional. A single exact declared value narrows the item type and requires the actual response to match that same declaration. Lists, ranges, dynamic headers, or an omitted choice with multiple declarations retain a union of item types. With no Accept header the client advertises all supported declarations. Negotiated subscriptions use the actual response to choose a parser and make one connection; automatic SSE reconnection requires a single declared SSE choice. A wrong status, media type, or missing/consumed/locked body raises `StreamResponseError`; its `response` retains status and headers after cleanup. HTTP 204 closes normally.
 
 Use `itemSchema` to describe one item, or an array `schema` to describe complete sequence content. An item schema takes precedence. SSE only narrows its standard message fields; it does not decode JSON in `data`. See [sequence projections](./openapi.md#sequence-projections) for the type rules.
 
 ## SSE messages
+
+<!-- example: client -->
 
 ```ts
 for await (const event of api.stream("GET /events", { retry: false })) {
@@ -30,11 +34,11 @@ for await (const event of api.stream("GET /events", { retry: false })) {
 
 Messages contain `data: string`, `event: string`, `id: string`, and optional numeric `retry`. Data lines join with newlines; the default event is `"message"`. Both named and default events are emitted. Comments and blocks without data emit nothing; incomplete events at EOF are discarded.
 
-With default settings, EOF reconnects rather than completing the subscription. Use `retry: false` for a single connection, or cancel when finished.
+By default, EOF completes the subscription. Set `retry: {}` to enable reconnection, or provide a retry budget.
 
 ### SSE reconnection
 
-The default interval is 1000 ms with unlimited retries. Use `retry: { delay: 500, maxRetries: 3 }` to bound retries. Values must be non-negative safe integers; `maxRetries` counts additional attempts over the entire subscription, without resetting after messages. `0` allows only the initial connection.
+When enabled, the default interval is 1000 ms with unlimited retries. Use `retry: { delay: 500, maxRetries: 3 }` to bound retries. Values must be non-negative safe integers; `maxRetries` counts additional attempts over the entire subscription, without resetting after messages. `0` allows only the initial connection.
 
 | Outcome                                                                           | Behavior                                                       |
 | --------------------------------------------------------------------------------- | -------------------------------------------------------------- |
@@ -60,11 +64,13 @@ JSONL and NDJSON emit parsed JSON values, including scalars. LF and CRLF separat
 
 JSON Text Sequences (`application/json-seq`) use an RS byte (`0x1E`) before each JSON value and can contain multiline values. Complete values followed by LF are delivered without waiting for the next RS. Malformed, BOM-prefixed, or truncated records and malformed UTF-8 are discarded; parsing resumes at the next RS. Consecutive RS bytes and bytes before the first RS are ignored. Top-level numbers, booleans, and `null` need trailing JSON whitespace. Complete objects, arrays, and strings may end at RS or EOF without LF; after delivery at LF, remaining bytes before the next RS are ignored.
 
-JSON record streams close at EOF, reject a `retry` option, and never reconnect automatically. Transport failures propagate and discard pending partial records. Reopening and deduplicating records belong to your application. Formats such as `application/example+json-seq` are not decoded by `stream()`; read them with `fetch()`.
+JSON record streams close at EOF, reject automatic retry settings, and never reconnect automatically. Transport failures propagate and discard pending partial records. Reopening and deduplicating records belong to your application. Formats such as `application/example+json-seq` are not decoded by `stream()`; read them with `fetch()`.
 
 ## Limit message size
 
 Set `maxMessageBytes` to bound a single message while it is being assembled:
+
+<!-- example: client -->
 
 ```ts
 const events = api.stream("GET /events", {
@@ -90,6 +96,8 @@ The stream follows consumer demand and does not maintain an application event qu
 
 Pass a call signal to stop a subscription, including a pending read or reconnection wait:
 
+<!-- example: client -->
+
 ```ts
 const stop = new AbortController()
 const events = api.stream("GET /events", { signal: stop.signal })
@@ -103,6 +111,8 @@ Abort errors consumption with `signal.reason`. Reader/stream cancellation closes
 Cancellation forwards the reason to the owned response reader, cleans up active work, and prevents reconnection. Explicit cancellation waits for that cleanup and rejects if it fails; an existing abort or parse error remains the consumer's error even if cleanup fails. Normal EOF releases resources without aborting a completed request.
 
 Native pipe cancellation and error propagation apply. Await the pipe so destination errors reach your caller:
+
+<!-- example: client -->
 
 ```ts
 await api.stream("GET /events", { retry: false }).pipeTo(

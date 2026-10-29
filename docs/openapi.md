@@ -8,7 +8,7 @@ The rules below define the projection. Some widen what TypeScript accepts, while
 
 JSON and YAML documents can be loaded from files, URLs, or parsed objects; see [generation](./generation.md). Each OpenAPI document uses its own declared version. Schema-only documents inherit the entry version. Missing/unsupported entry versions and Swagger 2.0 are rejected.
 
-The generator applies its documented JSON Schema 2020-12 keyword projections. `$schema` and `jsonSchemaDialect` do not select another rule set. It also accepts some later keywords in earlier OpenAPI versions; see [cross-version rules](#cross-version-rules).
+The generator applies its documented JSON Schema 2020-12 keyword projections. Explicit `$schema` and `jsonSchemaDialect` declarations must identify 2020-12 or a supported OpenAPI 3.1/3.2 base dialect; other dialects fail generation. It also accepts some later keywords in earlier OpenAPI versions; see [cross-version rules](#cross-version-rules).
 
 ## Schema projection
 
@@ -25,7 +25,7 @@ The generator applies its documented JSON Schema 2020-12 keyword projections. `$
 | `anyOf`, `oneOf`                              | Union; exclusivity is not enforced.                                                                              |
 | `if`/`then`/`else`                            | With `if` and `else`, the union of `if & then` and `else`; no negation of `if` is inferred.                      |
 | `$ref`                                        | Target intersected with sibling keywords.                                                                        |
-| `$dynamicRef`                                 | Static resolution as `$ref`.                                                                                     |
+| `$dynamicRef`                                 | Static resolution as `$ref`, with a precision warning.                                                           |
 | `nullable: true`                              | Adds `null`, including beside references and compositions.                                                       |
 | `format` and validation annotations           | JSDoc where applicable; generally no change to the type. Binary annotations have transport-specific projections. |
 
@@ -41,7 +41,7 @@ For `oneOf`/`anyOf`, referenced alternatives are intersected with mapped discrim
 
 Existing string literals constrain the narrowing. Disjoint mappings leave the schema unchanged and warn; non-object/non-string branches that cannot be narrowed warn too. Inline alternatives and the OpenAPI 3.2 `defaultMapping` target are not narrowed. Discriminator assumptions may exclude values the schemas alone permit.
 
-Required `readOnly`/`writeOnly` fields have directional requiredness; see [schemas and directional types](./generated.md#schemas-and-directional-types).
+Required `readOnly`/`writeOnly` fields have directional requiredness; see [schemas and directional types](./contract.md#schemas-and-directional-types).
 
 ## Media projections
 
@@ -71,9 +71,9 @@ A binary annotation is a non-literal `type: string` with `format: binary`, or a 
 
 For SSE, the item schema narrows standard `StreamMessage` fields only: text `data`, `event`, `id`, and optional numeric `retry`. Extra properties are not synthesized. `contentSchema` and `contentMediaType` do not JSON-decode `data`. Without an item schema, items use `StreamMessage`. See [streaming](./streaming.md) for media selection and parser behavior.
 
-## Operations
+## Endpoints
 
-- Fixed methods are `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, and `trace`, plus `query` and `additionalOperations`. The callable endpoint set excludes Fetch-forbidden `CONNECT`, `TRACE`, and `TRACK`; custom method keys retain their spelling.
+- Fixed methods are `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, and `trace`, plus `query` and `additionalOperations`. Generated descriptions retain all methods. The client excludes Fetch-forbidden `CONNECT`, `TRACE`, and `TRACK`; custom method keys retain their spelling.
 - Path Item and operation parameters merge by name and location; operation parameters win. Header names are case-insensitive. A parameter uses `schema` or its single `content` entry.
 - A `querystring` parameter replaces ordinary query parameters, with a warning. Only the first effective whole-query parameter is used; ignored schemas are not loaded or compiled.
 - Header parameters `Accept`, `Content-Type`, and `Authorization`, and response headers `Content-Type`, are ignored as specified by OpenAPI.
@@ -126,3 +126,5 @@ Large compositions can be widened to keep generated TypeScript usable:
 These losses produce `schema-precision-loss` with a reason and location. Widening retains annotations needed by outer read/write requirements. Exact simplifications do not warn, and omitted validation keywords do not all warn either.
 
 Each `patternProperties` match, including regex compilation, has a 100 ms limit. A timeout stops generation with `invalid-document` identifying the pattern and property. This is a per-match limit, not a total generation deadline. Document size, loading concurrency, timeouts, and cancellation are described under [generation limits](./generation.md#limits-and-cancellation).
+
+Semantic discovery and schema compilation share a budget of 1,000,000 work units. Input objects are checked iteratively and reject nesting beyond 512 levels before compilation. These limits are separate from document byte and retrieval limits.
