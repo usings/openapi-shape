@@ -188,5 +188,5 @@ function renderLiteral(value: Literal): string {
   if (typeof value === "boolean") return String(value)
   if (Array.isArray(value)) return `[${value.map((v) => renderLiteral(v)).join(", ")}]`
   const entries = Object.entries(value).map(([k, v]) => `${propertyKey(k)}: ${renderLiteral(v)}`)
-  return entries.length === 0 ? "{}" : `{ ${entries.join("; ")} }`
+  return entries.length === 0 ? "{ [key: string]: never }" : `{ ${entries.join("; ")} }`
 }

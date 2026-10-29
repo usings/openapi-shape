@@ -743,3 +743,26 @@ describe("declarations", () => {
     expect(declaration(code, "A")).toBe("{\n  b?: a_zz\n}")
   })
 })
+
+it("keeps empty object literals distinct from scalars and arrays", async () => {
+  const code = await gen(
+    withSchemas("3.1", {
+      Constant: { type: "object", const: {} },
+      Enumeration: { enum: [{}] },
+    }),
+  )
+  expect(
+    await typecheck({
+      "api.ts": code,
+      "use.ts": `
+    import type { Schemas } from "./api"
+    const valid: Schemas.Constant = {}
+    const validEnum: Schemas.Enumeration = {}
+    // @ts-expect-error an object constant cannot be a number
+    const scalar: Schemas.Constant = 42
+    // @ts-expect-error an object enum cannot be an array
+    const array: Schemas.Enumeration = []
+  `,
+    }),
+  ).toBe("")
+})
