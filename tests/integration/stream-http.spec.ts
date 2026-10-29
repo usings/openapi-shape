@@ -73,7 +73,7 @@ it("reconnects native Fetch after EOF with identical multipart bytes and a fresh
       })
       const items: StreamMessage[] = []
       for await (const item of api.stream("POST /events", {
-        headers: { "content-type": "multipart/form-data" },
+        headers: { "accept": "text/event-stream", "content-type": "multipart/form-data" },
         body: form,
         retry: { delay: 0 },
       }))
@@ -105,7 +105,7 @@ it("recovers from a socket reset without advancing an incomplete cursor", async 
         .stream("POST /events", {
           body: { topic: "orders" },
           retry: { delay: 0, maxRetries: 1 },
-          headers: { "content-type": "multipart/form-data" },
+          headers: { "accept": "text/event-stream", "content-type": "multipart/form-data" },
         })
         .getReader()
       expect(await reader.read()).toMatchObject({ value: { data: "first", id: "complete" } })

@@ -32,10 +32,6 @@ export type Callable<K> = K extends `${infer Method} ${string}`
     : K
   : K
 
-export type IsUnion<T, All = T> = T extends unknown ? ([All] extends [T] ? false : true) : never
-
-export type Only<M, All = M> = M extends unknown ? ([All] extends [M] ? M : never) : never
-
 export type Essence<M extends string> = Lowercase<
   M extends `${infer E};${string}` ? Trim<E> : Trim<M>
 >

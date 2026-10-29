@@ -659,7 +659,7 @@ void api.result("${name === "head" ? "HEAD" : "GET"} /${name}")
 void api.stream("${name === "head" ? "HEAD" : "GET"} /${name}")`,
   )
   .join("\n")}
-function wrap<K extends StreamEndpoint<Endpoints>>(key: K, ...args: StreamArgs<Endpoints, K>) { return api.stream<K, StreamMedia<Endpoints, K>, object>(key, ...args) }
+function wrap<K extends StreamEndpoint<Endpoints>>(key: K, ...args: StreamArgs<Endpoints, K>) { return api.stream(key, ...args) }
 void wrap("GET /mixed")
 type E = EndpointMessage<Endpoints, "GET /mixed">
 declare const message: E
@@ -700,7 +700,7 @@ message.data satisfies string
     await expect(
       api
         .stream("POST /events/{id}", {
-          headers: { "content-type": "application/json" },
+          headers: { "accept": "text/event-stream", "content-type": "application/json" },
           params: { id: 1 },
           body: new ReadableStream() as never,
           retry: {},

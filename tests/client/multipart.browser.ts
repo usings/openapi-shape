@@ -1,6 +1,6 @@
 import { expect, it } from "vitest"
 import type { Contract } from "../../src/client"
-import type { BodyLike } from "../../src/client/types"
+import type { BodyLike } from "../../src/client/types/request"
 import { recorder } from "../support/client"
 import type { ResultOperation } from "../support/contract"
 

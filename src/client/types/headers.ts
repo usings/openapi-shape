@@ -1,4 +1,5 @@
-import type { Empty, IsUnion, Only, Operation } from "./endpoint"
+import type { Empty, Operation } from "./endpoint"
+import type { IsStringLiteral, IsUnion, LowercaseKeys } from "./utils"
 
 /** Per-call input: the operation's parameters and body, and any other `RequestInit` field. */
 export type MediaHeader<L extends string, V, Required extends boolean> = Required extends true
@@ -6,7 +7,7 @@ export type MediaHeader<L extends string, V, Required extends boolean> = Require
   : Partial<Record<L, V>>
 
 export type TypedHeaders<Op extends Operation> = ("headers" extends keyof Op
-  ? Partial<LowercaseHeaders<Op["headers"]>>
+  ? Partial<LowercaseKeys<Op["headers"]>>
   : Empty) &
   Record<string, unknown> & { accept?: string }
 
@@ -18,11 +19,6 @@ export interface HeadersField<Op extends Operation> {
   headers?: Headers | Array<[string, string]> | TypedHeaders<Op>
 }
 
-/** HTTP field names are case-insensitive; retain literal values for media inference. */
-export type LowercaseHeaders<H> = {
-  [K in keyof H as K extends string ? Lowercase<K> : K]: H[K]
-}
-
 /** Restore the caller's spelling only after checking its normalized header record. */
 export type WithHeaders<Input, H> = object extends H
   ? Input
@@ -31,7 +27,7 @@ export type WithHeaders<Input, H> = object extends H
     : [Extract<H, Headers | readonly unknown[]>] extends [never]
       ? Input extends unknown
         ? Input extends { headers?: infer Allowed }
-          ? LowercaseHeaders<H> extends Exclude<Allowed, undefined>
+          ? LowercaseKeys<H> extends Exclude<Allowed, undefined>
             ? Omit<Input, "headers"> & { headers: H }
             : never
           : never
@@ -45,15 +41,24 @@ export type HeaderArgs<A, H> = object extends H
     : { [K in keyof A]: WithHeaders<A[K], NoInfer<H>> }
 
 /** Only a known, single default media can establish a structured body association. */
-export type SingleMedia<M> = string extends M ? never : Extract<Only<M>, string>
-export type DefaultMedia<H, Normalized = LowercaseHeaders<H>> = [H] extends [undefined]
-  ? "application/json"
-  : undefined extends H
-    ? never
+export type SingleMedia<M> =
+  IsStringLiteral<M> extends true ? (IsUnion<M> extends false ? Extract<M, string> : never) : never
+/** Read each union member before combining knowledge; string means opaque. */
+type HeaderValue<H, K extends string, Fallback> = H extends unknown
+  ? H extends undefined
+    ? Fallback
     : H extends Headers | readonly unknown[]
-      ? never
-      : "content-type" extends keyof Normalized
-        ? SingleMedia<Normalized["content-type"]>
+      ? string
+      : K extends keyof LowercaseKeys<H>
+        ? LowercaseKeys<H>[K]
         : string extends keyof H
-          ? never
-          : "application/json"
+          ? string
+          : Fallback
+  : never
+
+export type DefaultMedia<H> = SingleMedia<HeaderValue<H, "content-type", "application/json">>
+export type DefaultAccept<H, V = HeaderValue<H, "accept", undefined>> = [V] extends [undefined]
+  ? never
+  : [SingleMedia<V>] extends [never]
+    ? string
+    : SingleMedia<V>

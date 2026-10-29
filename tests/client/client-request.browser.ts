@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createClient } from "../../src/client"
-import type { BodyLike } from "../../src/client/types"
+import type { BodyLike } from "../../src/client/types/request"
 import { contract } from "../fixtures/output/client-api"
 import { recorder, url } from "../support/client"
 import type { ResultOperation } from "../support/contract"

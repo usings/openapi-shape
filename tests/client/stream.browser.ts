@@ -257,7 +257,11 @@ describe("subscription cancellation", () => {
     const fetch = vi.fn<Fetcher>().mockRejectedValue(failure)
     const signal = new AbortController()
     const reader = client({ fetch })
-      .stream("GET /events", { signal: signal.signal, retry: {} })
+      .stream("GET /events", {
+        headers: { accept: "text/event-stream" },
+        signal: signal.signal,
+        retry: {},
+      })
       .getReader()
     const read = reader.read()
     const rejected = read.catch((error: unknown) => error)
@@ -358,7 +362,7 @@ it("does not reconnect when reader cancellation wins the retry timer boundary", 
   vi.useFakeTimers()
   const fetch = vi.fn<Fetcher>().mockRejectedValue(new Error("offline"))
   const reader = client({ fetch })
-    .stream("GET /events", { retry: { delay: 10 } })
+    .stream("GET /events", { headers: { accept: "text/event-stream" }, retry: { delay: 10 } })
     .getReader()
   const pending = reader.read()
   await vi.advanceTimersByTimeAsync(9)

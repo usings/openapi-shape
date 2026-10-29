@@ -149,7 +149,7 @@ void async function fetchTypeChecks(client: Client<Endpoints>): Promise<void> {
   expectTypeOf(pet).toExtend<Response>()
   if (pet.status === 0) expectTypeOf(await pet.json()).toEqualTypeOf<never>()
 
-  // A declared 2xx is the only success; `default` covers every other status.
+  // The explicit 200 has pets; `default` covers other statuses, including successes.
   const pets = await client.fetch("GET /pets")
   if (pets.ok) expectTypeOf(await pets.json()).toEqualTypeOf<Schemas.Pet[] | Schemas.Error>()
   if (!pets.ok) expectTypeOf(await pets.json()).toEqualTypeOf<Schemas.Error>()
@@ -213,7 +213,7 @@ void async function forwardingChecks(client: Client<Endpoints>): Promise<void> {
     endpoint: K,
     ...args: EndpointArgs<Endpoints, K>
   ): Promise<EndpointData<Endpoints, K>> => {
-    const { data: succeeded, error: failed } = await client.result<K, object>(endpoint, ...args)
+    const { data: succeeded, error: failed } = await client.result(endpoint, ...args)
     if (failed !== undefined) throw new Error(`${endpoint} failed`)
     return succeeded
   }
@@ -249,4 +249,34 @@ void function middlewareChecks() {
   defineMiddleware((request: Request) => Promise.resolve(request))
   // @ts-expect-error the global fetch takes options, not next
   createClient(contract, { middleware: [fetch] })
+}
+
+// A default response also describes undeclared 2xx statuses: success alone
+// cannot establish the explicit 200 payload, including when destructured.
+interface DefaultResponseEndpoints {
+  "GET /default": {
+    responses: {
+      200: { content: { "application/json": Array<{ name: string }> } }
+      default: { content: { "application/json": { message?: string } } }
+    }
+  }
+}
+void async function defaultResponseChecks(client: Client<DefaultResponseEndpoints>) {
+  const { data, error, status } = await client.result("GET /default")
+  if (error === undefined) {
+    // @ts-expect-error default successes need not contain a list
+    data.map((pet: { name: string }) => pet.name)
+  }
+  if (status === 200) {
+    expectTypeOf(data).toEqualTypeOf<Array<{ name: string }>>()
+    expectTypeOf(error).toEqualTypeOf<undefined>()
+    data.map((pet) => pet.name)
+  }
+  if (status === 201) {
+    expectTypeOf(data).toEqualTypeOf<{ message?: string }>()
+    expectTypeOf(error).toEqualTypeOf<undefined>()
+  }
+  if (status === 204) {
+    expectTypeOf(data).toEqualTypeOf<undefined>()
+  }
 }

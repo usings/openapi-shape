@@ -1,5 +1,5 @@
 import { wait } from "../cancellation"
-import type { StreamRetryOptions } from "../types"
+import type { StreamRetryOptions } from "../types/stream"
 import type { EventState } from "./sse-parser"
 
 /** An internal connection failure carrying the original public error. */

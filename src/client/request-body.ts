@@ -1,7 +1,7 @@
 import type { Encoding } from "../shared/contract"
 import { isJsonEssence, isJsonWildcardEssence, mediaTypeEssence } from "../shared/media"
 import { encodeContent, formFields, formPairs, normalize } from "./serialization"
-import type { BodyLike } from "./types"
+import type { BodyLike } from "./types/request"
 import { isInstance, isPlainObject, isStream, scalar, toJson } from "./values"
 
 // Encode request values while preserving native body ownership.

@@ -278,7 +278,7 @@ function forwardDefault<K extends StreamEndpoint<Endpoints>>(
   key: K,
   ...args: StreamArgs<Endpoints, K>
 ): ReadableStream<EndpointStreamItem<Endpoints, K>> {
-  return api.stream<K, StreamMedia<Endpoints, K>, object>(key, ...args)
+  return api.stream(key, ...args)
 }
 forward("GET /mixed", { headers: { accept: "application/x-ndjson" } }) satisfies ReadableStream<{
   kind: "record"

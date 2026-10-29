@@ -197,7 +197,12 @@ describe("Web stream lifecycle", () => {
         },
       })
       const reader = client
-        .stream("POST /events/{id}", { params: { id: 1 }, body, retry })
+        .stream("POST /events/{id}", {
+          headers: { accept: "text/event-stream" },
+          params: { id: 1 },
+          body,
+          retry,
+        })
         .getReader()
       expect(await reader.read()).toMatchObject({ value: { data: "hello" } })
       expect(await reader.read()).toMatchObject({ done: true })

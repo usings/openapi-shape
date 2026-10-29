@@ -650,7 +650,7 @@ async function run() {
   async function checked_${style}<K extends ResultEndpoint<Endpoints>>(
     endpoint: K, ...args: EndpointArgs<Endpoints, K>
   ): Promise<EndpointData<Endpoints, K>> {
-    const ${binding} = await client.result<K, object>(endpoint, ...args)
+    const ${binding} = await client.result(endpoint, ...args)
     ${field}status satisfies number
     ${field}response satisfies Response
     // @ts-expect-error unchecked data still includes a failure's undefined

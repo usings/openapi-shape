@@ -1,18 +1,10 @@
 import type { StreamingEssence } from "../../shared/media"
 import type { StreamMessage } from "../streams/sse-parser"
-import type {
-  Empty,
-  Endpoint,
-  Essence,
-  IsUnion,
-  MethodOf,
-  Only,
-  Operation,
-  OperationOf,
-} from "./endpoint"
-import type { MediaHeader } from "./headers"
+import type { Empty, Endpoint, Essence, MethodOf, Operation, OperationOf } from "./endpoint"
+import type { MediaHeader, WithHeaders } from "./headers"
 import type { Args, Init } from "./request"
 import type { Outcomes, StatusIn } from "./response"
+import type { IsUnion } from "./utils"
 
 /**
  * Additional SSE connections allowed over the whole subscription, with a configurable initial
@@ -114,9 +106,10 @@ export type StreamInit<
   K extends StreamEndpoint<E>,
   M extends StreamMedia<E, K>,
   D extends string,
+  H = object,
 > = Pick<StreamOptions, "maxMessageBytes"> & {
   headers?: MediaHeader<"accept", M, false>
-} & StreamSelection<E, K, M, D>
+} & StreamSelection<E, K, M, D, Init<OperationOf<E, K>, MethodOf<K>, D, H>>
 
 export type StreamSelection<
   E,
@@ -125,7 +118,7 @@ export type StreamSelection<
   D extends string,
   Call = Init<OperationOf<E, K>, MethodOf<K>, D>,
 > = M extends unknown
-  ? ([Only<StreamMedia<E, K>>] extends [never]
+  ? (IsUnion<StreamMedia<E, K>> extends true
       ? { headers: MediaHeader<"accept", M, true> }
       : { headers?: MediaHeader<"accept", M, false> }) &
       (Essence<M> extends "text/event-stream"
@@ -145,12 +138,13 @@ export type StreamArgs<
   K extends StreamEndpoint<E>,
   M extends StreamMedia<E, K> = StreamMedia<E, K>,
   D extends string = "application/json",
+  H = object,
 > =
   | ([K] extends [never] ? [init?: never] : never)
-  | [init: StreamInit<E, K, M, D> & (IsUnion<K> extends true ? never : unknown)]
+  | [init: StreamInit<E, K, M, D, H> & (IsUnion<K> extends true ? never : unknown)]
   | (IsUnion<K> extends true
       ? never
-      : Empty extends StreamInit<E, K, M, D>
+      : Empty extends StreamInit<E, K, M, D, H>
         ? [init?: undefined]
         : never)
 
@@ -159,8 +153,34 @@ export type NegotiatedStreamArgs<
   E,
   K extends StreamEndpoint<E>,
   D extends string = "application/json",
+  H = object,
 > = Args<
   K,
-  Init<OperationOf<E, K>, MethodOf<K>, D> &
+  WithHeaders<Init<OperationOf<E, K>, MethodOf<K>, D, H>, NoInfer<H>> &
     Pick<StreamOptions, "maxMessageBytes"> & { retry?: false }
 >
+
+/** Defaults satisfy Accept only; the request keeps all of its own required fields. */
+export type DefaultStreamArgs<
+  E,
+  K extends StreamEndpoint<E>,
+  D extends string,
+  A extends string,
+  H = object,
+  M = Extract<A, StreamMedia<E, K>>,
+> = [M] extends [never]
+  ? [init: never]
+  : Args<
+      K,
+      M extends StreamMedia<E, K>
+        ? DefaultSelection<WithHeaders<Init<OperationOf<E, K>, MethodOf<K>, D, H>, NoInfer<H>>, M>
+        : never
+    >
+
+type DefaultSelection<Call, M extends string> = {
+  headers?: { accept?: never; [Symbol.iterator]?: never }
+} & (Essence<M> extends "text/event-stream"
+  ?
+      | (Replayable<Call> & { retry: StreamRetryOptions })
+      | (Call & { retry?: false | (StreamRetryOptions & { maxRetries: 0 }) })
+  : Call & { retry?: never })
