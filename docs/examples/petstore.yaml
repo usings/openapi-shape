@@ -20,10 +20,8 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/Pet" } }
-        default:
-          description: Unexpected error
-          content:
-            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
     post:
       requestBody:
         required: true
@@ -33,6 +31,8 @@ paths:
         "201":
           content:
             application/json: { schema: { $ref: "#/components/schemas/Pet" } }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
   /pets/{petId}:
     parameters:
       - { name: petId, in: path, required: true, schema: { type: integer } }
@@ -101,6 +101,11 @@ webhooks:
               schema:
                 { type: object, required: [received], properties: { received: { type: integer } } }
 components:
+  responses:
+    Error:
+      description: Request failed
+      content:
+        application/json: { schema: { $ref: "#/components/schemas/Error" } }
   schemas:
     Pet:
       type: object

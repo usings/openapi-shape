@@ -28,13 +28,15 @@ Import the generated contract and set `baseURL` to your API's address. Adjust th
 import { createClient } from "openapi-shape/client"
 import { contract } from "./api"
 
-const api = createClient(contract, { baseURL: "https://api.example.com/v1" })
+const api = createClient(contract, {
+  baseURL: "https://api.example.com/v1",
+})
 
 const { data, error, status } = await api.result("GET /pets", {
   query: { limit: 10 },
 })
-if (error !== undefined) throw new Error(`HTTP ${status}`, { cause: error })
 
+if (error !== undefined) throw new Error(`HTTP ${status}`, { cause: error })
 console.log(data.map((pet) => pet.name))
 ```
 
