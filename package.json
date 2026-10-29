@@ -8,12 +8,17 @@
     "fetch",
     "json-schema",
     "openapi",
+    "openapi-client",
+    "openapi-generator",
     "openapi-typescript",
     "openapi3",
     "openapi31",
     "openapi32",
+    "type-safe",
     "typed-api-client",
-    "typescript"
+    "typescript",
+    "web-standards",
+    "web-streams"
   ],
   "license": "MIT",
   "repository": {
