@@ -1,7 +1,8 @@
 /** Await user/transport work without requiring it to honor cancellation. */
-export function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+export function raceWithAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const abort = (): void => {
+      signal.removeEventListener("abort", abort)
       reject(signal.reason)
     }
     signal.addEventListener("abort", abort, { once: true })
@@ -36,7 +37,7 @@ export async function wait(delay: number, signal: AbortSignal): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       // oxlint-disable-next-line no-await-in-loop -- a long interval is a sequence of safe waits
-      await abortable(
+      await raceWithAbort(
         new Promise<void>((resolve) => {
           timer = setTimeout(resolve, interval)
         }),

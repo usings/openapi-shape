@@ -1,11 +1,12 @@
 import type { EndpointContract } from "../../shared/contract"
 import { streamFormat } from "../../shared/media"
 import type { BodyOwner } from "../cancellation"
-import { abortable, cancelBody } from "../cancellation"
+import { raceWithAbort, cancelBody } from "../cancellation"
 import { ClientError } from "../errors"
 import { mergeHeaders } from "../headers"
 import { matchDeclaredMedia, responseContentType } from "../media"
-import type { MiddlewareContext, Sender } from "../middleware"
+import type { MiddlewareContext } from "../middleware"
+import type { RequestDispatcher } from "../exchange"
 import type { CallInit, RequestDefaults } from "../request"
 import { buildRequest } from "../request"
 import { resolveResponseDeclaration } from "../response"
@@ -24,7 +25,7 @@ export function stream(
   endpoint: string,
   init: CallInit & StreamOptions,
   defaults: RequestDefaults,
-  send: Sender,
+  send: RequestDispatcher,
 ): ReadableStream<unknown> {
   const externalSignal = init.signal
   const abortController = new AbortController()
@@ -104,7 +105,7 @@ async function* subscription(
   endpoint: string,
   init: CallInit & StreamOptions,
   defaults: RequestDefaults,
-  send: Sender,
+  send: RequestDispatcher,
   signal: AbortSignal,
   owner: BodyOwner,
 ): AsyncGenerator<unknown, void> {
@@ -147,7 +148,7 @@ async function* subscription(
   }
   const template = buildRequest(endpoint, { ...call, signal }, defaults)
   const body =
-    !replay || template.body === null ? undefined : await abortable(template.arrayBuffer(), signal)
+    !replay || template.body === null ? undefined : await raceWithAbort(template.arrayBuffer(), signal)
   const headers = new Headers(template.headers)
   if (!accept) headers.set("accept", selected ?? media.join(", "))
   const initialId = headers.get("last-event-id") ?? ""
@@ -191,7 +192,7 @@ async function* connection(
   request: Request,
   selected: string | undefined,
   state: EventState,
-  send: Sender,
+  send: RequestDispatcher,
   context: MiddlewareContext,
   signal: AbortSignal,
   owner: BodyOwner,

@@ -1,10 +1,10 @@
 import type { Contract, EndpointContract } from "../shared/contract"
 import { CONTRACT_VERSION } from "../shared/contract"
+import { createRequestDispatcher } from "./exchange"
 import type { Fetcher, Middleware } from "./middleware"
-import { createSender } from "./middleware"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest, normalizeBaseURL } from "./request"
-import { readResult } from "./response"
+import { consumeResultResponse } from "./result"
 import { stream as subscribe } from "./streams/subscription"
 import type { Endpoint } from "./types/endpoint"
 import type { DefaultMedia, DefaultAccept, HeaderArgs } from "./types/headers"
@@ -149,7 +149,7 @@ export function createClient<Endpoints>(
     headers,
     init,
   }
-  const send = createSender(middleware, transport)
+  const send = createRequestDispatcher(middleware, transport)
 
   // Async, so that a request that cannot be built rejects.
   const fetch = async (endpoint: string, call: CallInit = {}): Promise<Response> =>
@@ -159,7 +159,7 @@ export function createClient<Endpoints>(
   const result = async (endpoint: string, call: CallInit = {}): Promise<unknown> => {
     const request = buildRequest(endpoint, call, defaults)
     const response = await send(request, { endpoint, kind: "result" })
-    return readResult(response, request, defaults.endpoints[endpoint])
+    return consumeResultResponse(response, request, defaults.endpoints[endpoint])
   }
 
   const stream = (endpoint: string, call: CallInit & StreamOptions = {}): ReadableStream<unknown> =>
