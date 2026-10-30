@@ -1,13 +1,4 @@
-/** A single parsed message exceeded the caller's byte budget. */
-export class StreamMessageTooLargeError extends RangeError {
-  constructor(
-    readonly maxMessageBytes: number,
-    readonly receivedBytes: number,
-  ) {
-    super(`Stream message exceeds maxMessageBytes (${maxMessageBytes} bytes)`)
-    this.name = "StreamMessageTooLargeError"
-  }
-}
+import { ClientError } from "../errors"
 
 /** An omitted limit leaves records unbounded; explicit limits must be positive safe integers. */
 export function messageLimit(value: number | undefined): number {
@@ -32,7 +23,11 @@ export class MessageBuffer {
   append(bytes: Uint8Array, precedingBytes = 0): void {
     if (bytes.byteLength === 0) return
     const receivedBytes = precedingBytes + this.size + bytes.byteLength
-    if (receivedBytes > this.limit) throw new StreamMessageTooLargeError(this.limit, receivedBytes)
+    if (receivedBytes > this.limit)
+      throw new ClientError(`Stream message exceeds maxMessageBytes (${this.limit} bytes)`, {
+        code: "MESSAGE_TOO_LARGE",
+        details: { maxMessageBytes: this.limit, receivedBytes },
+      })
     this.parts.push(bytes)
     this.size += bytes.byteLength
   }

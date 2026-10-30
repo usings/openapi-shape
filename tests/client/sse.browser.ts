@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Fetcher, MiddlewareContext, StreamMessage } from "../../src/client"
-import { StreamResponseError } from "../../src/client"
+import { ClientError } from "../../src/client"
 import { readEvents } from "../../src/client/streams/parser-sse"
 import { sseClient as client, sseResponse as response } from "../support/streams"
 
@@ -90,7 +90,7 @@ describe("SSE parser", () => {
     expect(state).toStrictEqual({ id: "first", retry: 1000 })
     expect(await iterator.next()).toMatchObject({ value: { data: "two", id: "second" } })
     expect(state).toStrictEqual({ id: "second", retry: 25 })
-    await iterator.return(undefined)
+    await iterator.return({ kind: "eof" })
   })
 })
 
@@ -283,6 +283,50 @@ describe("SSE connections", () => {
     expect(values).toStrictEqual([{ event: "message", data: "hello", id: "" }])
   })
 
+  it.each([
+    { source: "transport", failure: undefined },
+    { source: "transport", failure: null },
+    { source: "transport", failure: "disconnected" },
+    { source: "read", failure: undefined },
+    { source: "read", failure: null },
+    { source: "read", failure: "disconnected" },
+  ])(
+    "preserves a $source failure of $failure after the retry budget ends",
+    async ({ source, failure }) => {
+      vi.useFakeTimers()
+      const fetch = vi.fn<Fetcher>().mockImplementation(() => {
+        if (source === "transport") return Promise.reject(failure)
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(failure)
+              },
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          ),
+        )
+      })
+      const rejected = client({ fetch })
+        .stream("GET /events", {
+          headers: { accept: "text/event-stream" },
+          retry: { delay: 0, maxRetries: 1 },
+        })
+        .getReader()
+        .read()
+        .then(
+          () => {
+            throw new Error("Expected the connection failure")
+          },
+          (error: unknown) => ({ error }),
+        )
+      await vi.runAllTimersAsync()
+      expect(await rejected).toStrictEqual({ error: failure })
+      expect(fetch).toHaveBeenCalledTimes(2)
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
   it("reports the last actual failure when retries are exhausted", async () => {
     vi.useFakeTimers()
     const first = new Error("first")
@@ -338,9 +382,12 @@ describe("SSE connections", () => {
         .getReader()
         .read()
         .catch((error: unknown) => error)
-      expect(failure).toBeInstanceOf(StreamResponseError)
-      expect((failure as StreamResponseError).response.headers.get("x-error")).toBe("present")
-      expect((failure as StreamResponseError).response.status).toBe(status)
+      expect(failure).toBeInstanceOf(ClientError)
+      expect(failure).toMatchObject({ code: "HTTP_ERROR" })
+      if (!(failure instanceof ClientError) || failure.code !== "HTTP_ERROR")
+        throw new Error("Expected an HTTP client error")
+      expect(failure.details.response.headers.get("x-error")).toBe("present")
+      expect(failure.details.response.status).toBe(status)
       expect(fetch).toHaveBeenCalledOnce()
       expect(cancel).toHaveBeenCalledOnce()
     },
@@ -354,7 +401,7 @@ describe("SSE connections", () => {
         .mockResolvedValue(new Response("data", { headers: { "content-type": media } }))
       await expect(
         client({ fetch }).stream("GET /events").getReader().read(),
-      ).rejects.toBeInstanceOf(StreamResponseError)
+      ).rejects.toMatchObject({ code: "UNEXPECTED_MEDIA_TYPE" })
       expect(fetch).toHaveBeenCalledOnce()
     },
   )
@@ -370,7 +417,7 @@ describe("SSE connections", () => {
       // oxlint-disable-next-line no-await-in-loop -- each response is a distinct invalid body state
       await expect(
         client({ fetch }).stream("GET /events").getReader().read(),
-      ).rejects.toBeInstanceOf(StreamResponseError)
+      ).rejects.toMatchObject({ code: "INVALID_RESPONSE_BODY" })
       expect(fetch).toHaveBeenCalledOnce()
     }
   })

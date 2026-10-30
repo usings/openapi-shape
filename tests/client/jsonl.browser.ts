@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ClientOptions, Fetcher, StreamMessage } from "../../src/client"
-import { createClient, StreamParseError, StreamResponseError } from "../../src/client"
+import { createClient, ClientError } from "../../src/client"
 import { readJsonLines } from "../../src/client/streams/parser-jsonl"
 
 async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {
@@ -103,8 +103,12 @@ describe("JSON line parser", () => {
     const failure = await collect(
       readJsonLines(body([encoder.encode(text)]), new AbortController().signal),
     ).catch((error: unknown) => error)
-    expect(failure).toBeInstanceOf(StreamParseError)
-    expect(failure).toMatchObject({ line: 1, cause: expect.any(Error) })
+    expect(failure).toBeInstanceOf(ClientError)
+    expect(failure).toMatchObject({
+      code: "INVALID_STREAM_RECORD",
+      details: { line: 1 },
+      cause: expect.any(Error),
+    })
     const record = text.trim()
     expect(record !== "" && (failure as Error).message.includes(record)).toBe(false)
   })
@@ -125,7 +129,10 @@ describe("JSON line parser", () => {
     ])
     const iterator = readJsonLines(body([invalidUtf8]), new AbortController().signal)
     expect(await iterator.next()).toStrictEqual({ value: 1, done: false })
-    await expect(iterator.next()).rejects.toMatchObject({ name: "StreamParseError", line: 2 })
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: "INVALID_STREAM_RECORD",
+      details: { line: 2 },
+    })
   })
 
   it("reports later malformed JSON on its actual line without exposing the payload", async () => {
@@ -135,7 +142,7 @@ describe("JSON line parser", () => {
     )
     expect(await iterator.next()).toMatchObject({ value: 1 })
     const failure = await iterator.next().catch((error: unknown) => error)
-    expect(failure).toMatchObject({ line: 2 })
+    expect(failure).toMatchObject({ code: "INVALID_STREAM_RECORD", details: { line: 2 } })
     expect((failure as Error).message).not.toContain("secret")
   })
 
@@ -144,7 +151,10 @@ describe("JSON line parser", () => {
       body([new Uint8Array([0x22, 0xc3])]),
       new AbortController().signal,
     )
-    await expect(iterator.next()).rejects.toMatchObject({ name: "StreamParseError", line: 1 })
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: "INVALID_STREAM_RECORD",
+      details: { line: 1 },
+    })
   })
 
   it("never publishes a final partial record after a response read error", async () => {
@@ -206,14 +216,15 @@ describe("JSON line streams", () => {
       collect(
         api({ fetch }).stream("GET /records", { headers: { Accept: "application/x-ndjson" } }),
       ),
-    ).rejects.toBeInstanceOf(StreamResponseError)
+    ).rejects.toMatchObject({ code: "UNEXPECTED_MEDIA_TYPE" })
     expect(fetch.mock.calls[0][0].headers.get("accept")).toBe("application/x-ndjson")
   })
 
   it.each([408, 429, 503])("does not retry HTTP %s", async (status) => {
     const fetch = vi.fn<Fetcher>().mockResolvedValue(new Response(null, { status }))
     await expect(collect(api({ fetch }).stream("GET /records"))).rejects.toMatchObject({
-      response: { status },
+      code: "HTTP_ERROR",
+      details: { response: { status } },
     })
     expect(fetch).toHaveBeenCalledOnce()
   })
@@ -224,9 +235,9 @@ describe("JSON line streams", () => {
     await expect(collect(api({ fetch }).stream("GET /records"))).rejects.toBe(failure)
     expect(fetch).toHaveBeenCalledOnce()
     fetch.mockResolvedValue(jsonResponse("invalid\n"))
-    await expect(collect(api({ fetch }).stream("GET /records"))).rejects.toBeInstanceOf(
-      StreamParseError,
-    )
+    await expect(collect(api({ fetch }).stream("GET /records"))).rejects.toMatchObject({
+      code: "INVALID_STREAM_RECORD",
+    })
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 

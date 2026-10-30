@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest"
-import { ContractResponseError, createClient } from "../../src/client"
+import { createClient } from "../../src/client"
 import { contractOf } from "../support/contract"
 import { gen, oas } from "../support/generate"
 import { typecheck } from "../support/tsc"
@@ -101,7 +101,7 @@ it("validates required bodies and rejects undeclared response media without leak
       headers: { "content-type": "application/json" },
       body: { name: "x" },
     } as never),
-  ).rejects.toBeInstanceOf(ContractResponseError)
+  ).rejects.toMatchObject({ code: "UNEXPECTED_MEDIA_TYPE" })
   expect(cancel).toHaveBeenCalledOnce()
 })
 
@@ -188,7 +188,7 @@ it("rejects a different declared stream profile before delivering an item", asyn
       .stream("GET /s" as never, { headers: { accept: first } } as never)
       .getReader()
       .read(),
-  ).rejects.toThrow("unused")
+  ).rejects.toMatchObject({ code: "UNEXPECTED_MEDIA_TYPE" })
   expect(cancel).toHaveBeenCalledOnce()
 })
 

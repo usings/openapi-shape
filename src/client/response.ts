@@ -1,6 +1,7 @@
 import type { EndpointContract } from "../shared/contract"
 import { isJsonEssence, mediaTypeEssence, streamFormat } from "../shared/media"
 import { abortable, cancelBody } from "./cancellation"
+import { ClientError } from "./errors"
 import { matchDeclaredMedia, responseContentType } from "./media"
 
 /**
@@ -50,28 +51,38 @@ export async function readResult(
   const resolved = declared && resolveResponseDeclaration(declared, response.status)
   if (response.status === 0 || !resolved) {
     cancelBody(response, request.signal.reason)
-    throw new ContractResponseError("Response status is not declared by this operation", response)
+    throw new ClientError("Response status is not declared by this operation", {
+      code: "UNDECLARED_STATUS",
+      details: { response },
+    })
   }
   const actualMedia = responseContentType(response.headers)
   if (request.method !== "HEAD" && ![204, 205, 304].includes(response.status)) {
-    const shape = resolved
-    const actual = actualMedia
-    const media = actual ? mediaTypeEssence(actual) : undefined
+    const content = resolved.content
+    if (!content && response.body !== null) {
+      cancelBody(response, request.signal.reason)
+      throw new ClientError("Response body is not declared by this operation", {
+        code: "INVALID_RESPONSE_BODY",
+        details: { response },
+      })
+    }
     if (
-      (media && streamFormat(media)) ||
-      (shape && !shape.content && response.body !== null) ||
-      (shape?.content &&
-        (actual
-          ? !matchDeclaredMedia(shape.content, actual)
-          : !Object.hasOwn(shape.content, "*/*")))
+      (actualMedia && streamFormat(actualMedia)) ||
+      (content &&
+        (actualMedia ? !matchDeclaredMedia(content, actualMedia) : !Object.hasOwn(content, "*/*")))
     ) {
       cancelBody(response, request.signal.reason)
-      throw new ContractResponseError(
-        "Response media does not match a complete declared representation",
-        response,
-      )
+      throw new ClientError("Response media does not match a complete declared representation", {
+        code: "UNEXPECTED_MEDIA_TYPE",
+        details: {
+          response,
+          expected: Object.keys(content ?? {}).filter((media) => !streamFormat(media)),
+          actual: actualMedia,
+        },
+      })
     }
   }
+
   const body = await decodeBody(
     response,
     request.method,
@@ -91,15 +102,4 @@ export function resolveResponseDeclaration(endpoint: EndpointContract, status: n
   return (
     responses[String(status)] ?? responses[`${Math.floor(status / 100)}XX`] ?? responses.default
   )
-}
-
-/** A response that cannot be decoded according to the generated contract. */
-export class ContractResponseError extends Error {
-  constructor(
-    message: string,
-    readonly response: Response,
-  ) {
-    super(message)
-    this.name = "ContractResponseError"
-  }
 }

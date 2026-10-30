@@ -16,12 +16,8 @@ export interface EventState {
   retry: number
 }
 
-/** Only a failed body read is eligible for reconnect; parser errors keep their own identity. */
-export class StreamReadError extends Error {
-  constructor(override readonly cause: unknown) {
-    super("Failed to read the SSE response", { cause })
-  }
-}
+/** Read failures retain their source; parsing and cancellation still throw their original errors. */
+export type EventReadResult = { kind: "eof" } | { kind: "read-error"; error: unknown }
 
 /**
  * Parse incrementally, keeping at most the current chunk, line, and event in memory.
@@ -34,7 +30,7 @@ export async function* readEvents(
   signal: AbortSignal,
   owner?: BodyOwner,
   maxMessageBytes = Infinity,
-): AsyncGenerator<StreamMessage> {
+): AsyncGenerator<StreamMessage, EventReadResult> {
   const reader = bodyReader(body, signal, owner)
   let failed = false
   // Decode complete lines so limits are checked on raw bytes before allocating strings.
@@ -56,10 +52,12 @@ export async function* readEvents(
         // oxlint-disable-next-line no-await-in-loop -- stream reads are ordered
         chunk = await reader.read()
       } catch (error) {
-        throw new StreamReadError(error)
+        signal.throwIfAborted()
+        failed = true
+        return { kind: "read-error", error }
       }
       signal.throwIfAborted()
-      if (chunk.done) return // An unterminated event is never dispatched.
+      if (chunk.done) return { kind: "eof" } // An unterminated event is never dispatched.
       const bytes = chunk.value
       let start = 0
       for (let i = 0; i < bytes.length; i++) {
@@ -131,11 +129,6 @@ export async function* readEvents(
     failed = true
     throw error
   } finally {
-    const released = reader.release()
-    if (failed) {
-      void released.catch(() => {
-        /* Cleanup cannot delay or replace a parser failure. */
-      })
-    } else await released
+    await reader.release(failed)
   }
 }

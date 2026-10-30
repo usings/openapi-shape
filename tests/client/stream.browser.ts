@@ -423,7 +423,9 @@ it("rejects invalid endpoint/request input through the stream while fetch remain
       .getReader()
       .read(),
   ).rejects.toThrow()
-  await expect(api.result("GET /events" as never)).rejects.toThrow("Response media")
+  await expect(api.result("GET /events" as never)).rejects.toMatchObject({
+    code: "UNEXPECTED_MEDIA_TYPE",
+  })
   expect(fetch).toHaveBeenCalledOnce()
   const received = await api.fetch("GET /events")
   expect(await received.text()).toBe("data: hello\n\n")

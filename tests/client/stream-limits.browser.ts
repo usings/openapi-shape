@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { Fetcher, StreamMessage } from "../../src/client"
-import { createClient, StreamMessageTooLargeError } from "../../src/client"
+import { createClient } from "../../src/client"
 
 const encoder = new TextEncoder()
 const formats = [
@@ -120,10 +120,10 @@ describe("per-message stream byte limits", () => {
         failure = error
       })
       try {
-        await vi.waitFor(() => expect(failure).toBeInstanceOf(StreamMessageTooLargeError))
+        await vi.waitFor(() => expect(failure).toMatchObject({ code: "MESSAGE_TOO_LARGE" }))
         expect(failure).toMatchObject({
-          maxMessageBytes: format.limit,
-          receivedBytes: format.limit + 1,
+          code: "MESSAGE_TOO_LARGE",
+          details: { maxMessageBytes: format.limit, receivedBytes: format.limit + 1 },
         })
         expect((failure as Error).message).not.toContain("雪")
         await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
@@ -164,7 +164,7 @@ describe("per-message stream byte limits", () => {
     "bounds all SSE field lines in one message: %j",
     async (text) => {
       const { open } = fixture("text/event-stream", [encoder.encode(text)])
-      await expect(collect(open(11))).rejects.toBeInstanceOf(StreamMessageTooLargeError)
+      await expect(collect(open(11))).rejects.toMatchObject({ code: "MESSAGE_TOO_LARGE" })
     },
   )
 
@@ -172,7 +172,7 @@ describe("per-message stream byte limits", () => {
     "also bounds unfinished SSE metadata and comment lines: %j",
     async (text) => {
       const { open } = fixture("text/event-stream", [encoder.encode(text)])
-      await expect(collect(open(8))).rejects.toBeInstanceOf(StreamMessageTooLargeError)
+      await expect(collect(open(8))).rejects.toMatchObject({ code: "MESSAGE_TOO_LARGE" })
     },
   )
 
@@ -183,7 +183,7 @@ describe("per-message stream byte limits", () => {
       retry: { delay: 0, maxRetries: 2 },
       headers: { accept: "text/event-stream" },
     })
-    await expect(collect(stream)).rejects.toBeInstanceOf(StreamMessageTooLargeError)
+    await expect(collect(stream)).rejects.toMatchObject({ code: "MESSAGE_TOO_LARGE" })
     expect(fetch).toHaveBeenCalledOnce()
   })
 
@@ -204,7 +204,7 @@ describe("per-message stream byte limits", () => {
       failure = error
     })
     try {
-      await vi.waitFor(() => expect(failure).toBeInstanceOf(StreamMessageTooLargeError))
+      await vi.waitFor(() => expect(failure).toMatchObject({ code: "MESSAGE_TOO_LARGE" }))
     } finally {
       cleanup.resolve()
       await pending

@@ -2,6 +2,7 @@ import type { EndpointContract } from "../../shared/contract"
 import { streamFormat } from "../../shared/media"
 import type { BodyOwner } from "../cancellation"
 import { abortable, cancelBody } from "../cancellation"
+import { ClientError } from "../errors"
 import { mergeHeaders } from "../headers"
 import { matchDeclaredMedia, responseContentType } from "../media"
 import type { MiddlewareContext, Sender } from "../middleware"
@@ -14,19 +15,9 @@ import { messageLimit } from "./message-buffer"
 import { readJsonSequence } from "./parser-json-seq"
 import { readJsonLines } from "./parser-jsonl"
 import type { EventState } from "./parser-sse"
-import { StreamReadError, readEvents } from "./parser-sse"
-import { RetryableStreamError, retryAfterDelay, sseSession, validateRetry } from "./sse-retry"
-
-/** A refused response. Status and headers remain readable after its body is canceled. */
-export class StreamResponseError extends Error {
-  constructor(
-    message: string,
-    readonly response: Response,
-  ) {
-    super(message)
-    this.name = "StreamResponseError"
-  }
-}
+import { readEvents } from "./parser-sse"
+import type { ConnectionResult } from "./session"
+import { retryAfterDelay, streamSession, validateRetry } from "./session"
 
 /** Adapt one lazy subscription to standard Streams demand and cancellation. */
 export function stream(
@@ -158,7 +149,7 @@ async function* subscription(
   state.id = new TextDecoder().decode(Uint8Array.from(initialId, (char) => char.charCodeAt(0)))
   const context: MiddlewareContext = { endpoint, kind: "stream" }
   let first = true
-  const connect = (): AsyncGenerator<unknown, boolean> => {
+  const connect = (): AsyncGenerator<unknown, ConnectionResult> => {
     const own = new Headers(headers)
     if (format === "sse" && !first) {
       if (state.id) own.set("last-event-id", headerId(state.id))
@@ -178,8 +169,7 @@ async function* subscription(
       defaults.endpoints[endpoint],
     )
   }
-  if (format === "sse") yield* sseSession(connect, state, retry, signal)
-  else yield* connect()
+  yield* streamSession(connect, state, format === "sse" ? retry : false, signal)
 }
 
 /**
@@ -197,68 +187,68 @@ async function* connection(
   owner: BodyOwner,
   maxMessageBytes: number,
   declared?: EndpointContract,
-): AsyncGenerator<unknown, boolean> {
+): AsyncGenerator<unknown, ConnectionResult> {
   const transportFailures: unknown[] = []
   let response: Response | undefined
-  const sse = selected !== undefined && streamFormat(selected) === "sse"
   try {
     signal.throwIfAborted()
     try {
       response = await send(request, context, (error) => transportFailures.push(error))
     } catch (error) {
       signal.throwIfAborted()
-      if (sse && transportFailures.some((failure) => Object.is(failure, error)))
-        throw new RetryableStreamError(error)
+      if (transportFailures.some((failure) => Object.is(failure, error)))
+        return { kind: "interrupted", error, retryAfter: 0 }
       throw error
     }
     signal.throwIfAborted()
-    if (response.status === 204) return true
+    if (response.status === 204) return { kind: "stop" }
     if (!response.ok) {
-      const error = new StreamResponseError(
-        `Stream request failed with status ${response.status}`,
-        response,
-      )
+      const error = new ClientError(`Stream request failed with status ${response.status}`, {
+        code: "HTTP_ERROR",
+        details: { response },
+      })
       if (
-        sse &&
-        (response.status === 408 ||
-          response.status === 429 ||
-          (response.status >= 500 && response.status < 600))
+        response.status === 408 ||
+        response.status === 429 ||
+        (response.status >= 500 && response.status < 600)
       )
-        throw new RetryableStreamError(error, retryAfterDelay(response))
+        return { kind: "interrupted", error, retryAfter: retryAfterDelay(response) }
       throw error
     }
     const shape = declared && resolveResponseDeclaration(declared, response.status)
     if (!shape)
-      throw new StreamResponseError("Response status is not declared by this operation", response)
+      throw new ClientError("Response status is not declared by this operation", {
+        code: "UNDECLARED_STATUS",
+        details: { response },
+      })
     const actual = responseContentType(response.headers)
     const matched = actual && shape.content && matchDeclaredMedia(shape.content, actual)
     const format = matched ? streamFormat(matched) : undefined
-    if (
-      !format ||
-      (selected !== undefined && matched !== selected) ||
-      response.body === null ||
-      response.bodyUsed ||
-      response.body.locked
-    )
-      throw new StreamResponseError(
-        `Expected an unused ${selected ?? "declared streaming"} response body`,
-        response,
-      )
+    if (!format || (selected !== undefined && matched !== selected))
+      throw new ClientError("Response media does not match a declared streaming representation", {
+        code: "UNEXPECTED_MEDIA_TYPE",
+        details: {
+          response,
+          expected: selected
+            ? [selected]
+            : Object.keys(shape.content ?? {}).filter((media) => streamFormat(media)),
+          actual,
+        },
+      })
+    if (response.body === null || response.bodyUsed || response.body.locked)
+      throw new ClientError("Expected an unused streaming response body", {
+        code: "INVALID_RESPONSE_BODY",
+        details: { response },
+      })
     if (format === "sse") {
-      try {
-        yield* readEvents(response.body, state, signal, owner, maxMessageBytes)
-      } catch (error) {
-        signal.throwIfAborted()
-        if (error instanceof StreamReadError) {
-          if (sse) throw new RetryableStreamError(error.cause)
-          throw error.cause
-        }
-        throw error
-      }
+      const result = yield* readEvents(response.body, state, signal, owner, maxMessageBytes)
+      signal.throwIfAborted()
+      if (result.kind === "read-error")
+        return { kind: "interrupted", error: result.error, retryAfter: 0 }
     } else if (format === "json-seq")
       yield* readJsonSequence(response.body, signal, owner, maxMessageBytes)
     else yield* readJsonLines(response.body, signal, owner, maxMessageBytes)
-    return false
+    return { kind: "eof" }
   } finally {
     if (response && !response.body?.locked) cancelBody(response, signal.reason)
   }

@@ -88,11 +88,6 @@ export async function* readJsonSequence(
     failed = true
     throw error
   } finally {
-    const released = reader.release()
-    if (failed) {
-      void released.catch(() => {
-        /* Cleanup cannot delay or replace a transport failure. */
-      })
-    } else await released
+    await reader.release(failed)
   }
 }

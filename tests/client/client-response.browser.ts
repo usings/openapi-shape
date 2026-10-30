@@ -68,8 +68,12 @@ describe("responses", () => {
     expect(await decoded("abc", "image/png")).toBeInstanceOf(Blob)
     expect(await decoded(new Blob(["abc"]))).toBeInstanceOf(Blob)
     // Event streams and JSON sequences are not parsed: `fetch` streams them.
-    await expect(decoded("data: x\n\n", "text/event-stream")).rejects.toThrow("Response media")
-    await expect(decoded('{"a":1}\n', "application/jsonl")).rejects.toThrow("Response media")
+    await expect(decoded("data: x\n\n", "text/event-stream")).rejects.toMatchObject({
+      code: "UNEXPECTED_MEDIA_TYPE",
+    })
+    await expect(decoded('{"a":1}\n', "application/jsonl")).rejects.toMatchObject({
+      code: "UNEXPECTED_MEDIA_TYPE",
+    })
   })
 
   it("gives the data of a success and the error of a failure, with the status, its body read", async () => {

@@ -2,25 +2,20 @@ import { wait } from "../cancellation"
 import type { StreamRetryOptions } from "../types/stream"
 import type { EventState } from "./parser-sse"
 
-/** An internal connection failure carrying the original public error. */
-export class RetryableStreamError extends Error {
-  constructor(
-    override readonly cause: unknown,
-    readonly retryAfter = 0,
-  ) {
-    super("SSE connection interrupted", { cause })
-  }
-}
+/** A connection ends normally, stops explicitly, or is interrupted by a recoverable failure. */
+export type ConnectionResult =
+  | { kind: "eof" }
+  | { kind: "stop" }
+  | { kind: "interrupted"; error: unknown; retryAfter: number }
 
-/** A connection returns true only for an explicit server stop (HTTP 204). */
-type Connect = () => AsyncGenerator<unknown, boolean>
+type Connect = () => AsyncGenerator<unknown, ConnectionResult>
 
 /**
  * Reconnect sequentially within the same demand for an event; never run ahead of the consumer.
  *
  * @yields Events from sequential SSE connections.
  */
-export async function* sseSession(
+export async function* streamSession(
   connect: Connect,
   state: EventState,
   retry: boolean | StreamRetryOptions | undefined,
@@ -35,17 +30,14 @@ export async function* sseSession(
   let retries = 0
   while (true) {
     signal.throwIfAborted()
-    let delay = 0
-    try {
-      if (yield* connect()) return
-      // Normal EOF is not an error: once the reconnect budget ends, close normally.
-      if (retries >= maxRetries) return
-    } catch (error) {
-      signal.throwIfAborted()
-      if (!(error instanceof RetryableStreamError)) throw error
-      if (retries >= maxRetries) throw error.cause
-      delay = error.retryAfter
+    const result = yield* connect()
+    signal.throwIfAborted()
+    if (result.kind === "stop") return
+    if (retries >= maxRetries) {
+      if (result.kind === "interrupted") throw result.error
+      return
     }
+    const delay = result.kind === "interrupted" ? result.retryAfter : 0
     retries++
     // oxlint-disable-next-line no-await-in-loop -- one subscription owns one ordered retry wait
     await wait(Math.max(state.retry, delay), signal)

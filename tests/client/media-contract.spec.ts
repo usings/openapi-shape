@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { ContractResponseError, createClient } from "../../src/client"
+import { createClient } from "../../src/client"
 import { matchDeclaredMedia } from "../../src/client/media"
 import { resolveResponseDeclaration } from "../../src/client/response"
 import { CONTRACT_VERSION } from "../../src/shared/contract"
@@ -15,7 +15,10 @@ it("rejects content for a declared empty representation but honors bodyless HTTP
     },
     { baseURL: "https://example.test", fetch: () => Promise.resolve(response) },
   )
-  await expect(api.result("GET /empty")).rejects.toBeInstanceOf(ContractResponseError)
+  await expect(api.result("GET /empty")).rejects.toMatchObject({
+    code: "INVALID_RESPONSE_BODY",
+    details: { response },
+  })
   const empty = createClient<{ "HEAD /empty": { responses: { "200": Record<never, never> } } }>(
     {
       version: CONTRACT_VERSION,
@@ -111,5 +114,5 @@ it("rejects filtered status zero even with an empty default response", async () 
     { version: CONTRACT_VERSION, endpoints: { "GET /x": { responses: { default: {} } } } },
     { baseURL: "https://example.test", fetch: () => Promise.resolve(Response.error()) },
   )
-  await expect(api.result("GET /x")).rejects.toBeInstanceOf(ContractResponseError)
+  await expect(api.result("GET /x")).rejects.toMatchObject({ code: "UNDECLARED_STATUS" })
 })

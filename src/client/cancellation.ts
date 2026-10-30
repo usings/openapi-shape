@@ -78,20 +78,29 @@ export function bodyReader(
   }
   signal.addEventListener("abort", abort, { once: true })
   if (signal.aborted) abort()
+  const release = async (): Promise<void> => {
+    signal.removeEventListener("abort", abort)
+    if (owner?.cancel === cancel) owner.cancel = undefined
+    try {
+      if (!completed || cancellation) await cancel(signal.aborted ? signal.reason : undefined)
+    } finally {
+      reader.releaseLock()
+    }
+  }
   return {
     async read() {
       const result = await reader.read()
       completed = result.done
       return result
     },
-    async release() {
-      signal.removeEventListener("abort", abort)
-      if (owner?.cancel === cancel) owner.cancel = undefined
-      try {
-        if (!completed || cancellation) await cancel(signal.aborted ? signal.reason : undefined)
-      } finally {
-        reader.releaseLock()
-      }
+    /** Normal completion awaits cleanup; failure cleanup cannot delay or replace the original error. */
+    async release(failed = false) {
+      const pending = release()
+      if (failed) {
+        void pending.catch(() => {
+          /* Keep the original failure even when cleanup rejects. */
+        })
+      } else await pending
     },
   }
 }

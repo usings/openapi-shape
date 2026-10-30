@@ -1,17 +1,7 @@
 import type { BodyOwner } from "../cancellation"
 import { bodyReader } from "../cancellation"
+import { ClientError } from "../errors"
 import { MessageBuffer } from "./message-buffer"
-
-/** A malformed JSON line; line is one-based and input contents are never embedded in the message. */
-export class StreamParseError extends SyntaxError {
-  constructor(
-    readonly line: number,
-    cause: unknown,
-  ) {
-    super(`Invalid JSON stream record at line ${line}`, { cause })
-    this.name = "StreamParseError"
-  }
-}
 
 /**
  * Decode one record on demand, allowing a valid final record without a trailing newline.
@@ -34,7 +24,14 @@ export async function* readJsonLines(
     try {
       return JSON.parse(decoder.decode(buffer.take()))
     } catch (error) {
-      throw new StreamParseError(line, error)
+      throw new ClientError(
+        `Invalid JSON stream record at line ${line}`,
+        {
+          code: "INVALID_STREAM_RECORD",
+          details: { line },
+        },
+        { cause: error },
+      )
     }
   }
   try {
@@ -63,11 +60,6 @@ export async function* readJsonLines(
     failed = true
     throw error
   } finally {
-    const released = reader.release()
-    if (failed) {
-      void released.catch(() => {
-        /* Cleanup cannot delay or replace a parser failure. */
-      })
-    } else await released
+    await reader.release(failed)
   }
 }

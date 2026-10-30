@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { Fetcher } from "../../src/client"
-import { createClient, StreamResponseError } from "../../src/client"
+import { createClient } from "../../src/client"
 import { readJsonSequence } from "../../src/client/streams/parser-json-seq"
 
 const encoder = new TextEncoder()
@@ -145,9 +145,9 @@ describe("JSON text sequences", () => {
     const { client, fetch } = api(
       new Response("{}", { headers: { "content-type": "application/json" } }),
     )
-    await expect(client.stream("GET /records").getReader().read()).rejects.toBeInstanceOf(
-      StreamResponseError,
-    )
+    await expect(client.stream("GET /records").getReader().read()).rejects.toMatchObject({
+      code: "UNEXPECTED_MEDIA_TYPE",
+    })
     const unsafe = client.stream as (key: string, options: object) => ReadableStream<unknown>
     await expect(unsafe("GET /records", { retry: {} }).getReader().read()).rejects.toThrow(
       "requires a single SSE",

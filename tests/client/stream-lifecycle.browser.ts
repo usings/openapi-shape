@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ClientOptions, Fetcher, StreamMessage } from "../../src/client"
-import { createClient, StreamParseError } from "../../src/client"
+import { createClient } from "../../src/client"
 import { sseClient, sseResponse } from "../support/streams"
 
 const encoder = new TextEncoder()
@@ -93,7 +93,7 @@ describe("Web stream lifecycle", () => {
         failure = error
       })
     try {
-      await vi.waitFor(() => expect(failure).toBeInstanceOf(StreamParseError))
+      await vi.waitFor(() => expect(failure).toMatchObject({ code: "INVALID_STREAM_RECORD" }))
     } finally {
       gate.resolve()
       await pending
