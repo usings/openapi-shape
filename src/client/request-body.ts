@@ -119,16 +119,15 @@ function formData(
 
 /** Whether a value holds a Blob or bytes, at any depth of its arrays and plain objects. */
 function holdsBinary(value: unknown): boolean {
-  if (isInstance(value, "Blob") || bytes(value) !== undefined) return true
+  if (isInstance(value, "Blob") || isBytes(value)) return true
   if (Array.isArray(value)) return value.some((item) => holdsBinary(item))
   return isPlainObject(value) && Object.values(value).some((item) => holdsBinary(item))
 }
 
-/** A body `fetch` sends as it is, `undefined` for a value to encode. */
-/** Detect ready request bodies without acquiring an async iterator. */
+/** Detect ready bodies without copying bytes or acquiring an async iterator. */
 export function isReadyBody(value: unknown): boolean {
   return (
-    bytes(value) !== undefined ||
+    isBytes(value) ||
     isStream(value) ||
     (["Blob", "FormData", "URLSearchParams", "ReadableStream"] as const).some((name) =>
       isInstance(value, name),
@@ -136,7 +135,8 @@ export function isReadyBody(value: unknown): boolean {
   )
 }
 
-export function readyBody(value: unknown): BodyLike | undefined {
+/** Convert a ready body once, copying shared bytes and adapting async iterables only here. */
+function readyBody(value: unknown): BodyLike | undefined {
   const ready =
     isInstance(value, "Blob") ||
     isInstance(value, "FormData") ||
@@ -163,6 +163,15 @@ function iterableBody(value: AsyncIterable<Uint8Array>): ReadableStream<Uint8Arr
       },
     },
     { highWaterMark: 0 },
+  )
+}
+
+/** Recognize byte storage without allocating a converted view or copying shared memory. */
+function isBytes(value: unknown): boolean {
+  return (
+    ArrayBuffer.isView(value) ||
+    isInstance(value, "ArrayBuffer") ||
+    isInstance(value, "SharedArrayBuffer")
   )
 }
 

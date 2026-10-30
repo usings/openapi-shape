@@ -58,22 +58,16 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
     !["GET", "HEAD"].includes(method.toUpperCase())
   )
     throw new TypeError("This endpoint requires a request body")
+  const ready = value !== undefined && isReadyBody(value)
   const selected =
-    headers.get("content-type") ??
-    (value !== undefined && !isReadyBody(value) ? "application/json" : undefined)
+    headers.get("content-type") ?? (value !== undefined && !ready ? "application/json" : undefined)
   if (selected && !headers.has("content-type")) headers.set("content-type", selected)
   if (value !== undefined && selected?.split(";")[0]?.includes("*"))
     throw new TypeError("Content-Type must identify a concrete request media type")
   const content = declared.requestBody?.content
   const representation =
     content && selected ? content[matchDeclaredMedia(content, selected) ?? ""] : undefined
-  if (
-    value !== undefined &&
-    !isReadyBody(value) &&
-    selected &&
-    declared.requestBody &&
-    !representation
-  )
+  if (value !== undefined && !ready && selected && declared.requestBody && !representation)
     throw new TypeError(`Undeclared request Content-Type "${selected}"`)
   const encoded =
     value === undefined ? undefined : encodeBody(value, selected, representation?.encoding)
