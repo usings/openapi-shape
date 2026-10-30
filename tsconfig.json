@@ -15,6 +15,9 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "openapi-shape/client": ["./src/client/index.ts"]
+    }
   }
 }

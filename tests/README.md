@@ -14,7 +14,7 @@ Tests are grouped by the behavior they establish, independently of source filena
 
 `pnpm verify` runs runtime tests, source type checking, both static type configurations,
 lint and formatting. `pnpm test:node`, `pnpm test:browser` and `pnpm test:types`
-select independent evidence. Chromium is the browser target; Node-only tests do
+select independent evidence. Root and static type checks resolve `openapi-shape/client` directly to source; they do not require a build. Packed-consumer tests separately verify the built public declarations. Chromium is the browser target; Node-only tests do
 not establish CORS or opaque-response behavior.
 
 Keep static assertions in real TypeScript files. Use temporary compiler projects
