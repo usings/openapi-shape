@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { Fetcher } from "../../src/client"
 import { createClient, StreamResponseError } from "../../src/client"
-import { readJsonSequence } from "../../src/client/streams/json-seq-parser"
+import { readJsonSequence } from "../../src/client/streams/parser-json-seq"
 
 const encoder = new TextEncoder()
 const media = "application/json-seq"

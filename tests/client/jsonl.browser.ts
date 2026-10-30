@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ClientOptions, Fetcher, StreamMessage } from "../../src/client"
 import { createClient, StreamParseError, StreamResponseError } from "../../src/client"
-import { readJsonLines } from "../../src/client/streams/jsonl-parser"
+import { readJsonLines } from "../../src/client/streams/parser-jsonl"
 
 async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {
   const values: T[] = []

@@ -1,6 +1,6 @@
 import { wait } from "../cancellation"
 import type { StreamRetryOptions } from "../types/stream"
-import type { EventState } from "./sse-parser"
+import type { EventState } from "./parser-sse"
 
 /** An internal connection failure carrying the original public error. */
 export class RetryableStreamError extends Error {

@@ -1,5 +1,5 @@
 import type { StreamingEssence } from "../../shared/media"
-import type { StreamMessage } from "../streams/sse-parser"
+import type { StreamMessage } from "../streams/parser-sse"
 import type { Empty, Endpoint, Essence, MethodOf, Operation, OperationOf } from "./endpoint"
 import type { MediaHeader, WithHeaders } from "./headers"
 import type { Args, Init } from "./request"

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Fetcher, MiddlewareContext, StreamMessage } from "../../src/client"
 import { StreamResponseError } from "../../src/client"
-import { readEvents } from "../../src/client/streams/sse-parser"
+import { readEvents } from "../../src/client/streams/parser-sse"
 import { sseClient as client, sseResponse as response } from "../support/streams"
 
 function bytes(chunks: Uint8Array[], failure?: Error): ReadableStream<Uint8Array> {
