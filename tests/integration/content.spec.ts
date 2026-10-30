@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createClient } from "../../src/client"
-import { collectStreamMedia } from "../../src/client/streams/subscription"
+import { collectStreamMedia } from "../../src/client/streams/session"
 import { generate } from "../../src/core/index"
 import { contentTypeErrors } from "../support/content"
 import { contractOf } from "../support/contract"

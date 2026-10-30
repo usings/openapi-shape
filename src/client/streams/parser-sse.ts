@@ -4,13 +4,13 @@ import type { StreamMessage } from "../types/stream"
 import { MessageBuffer } from "./message-buffer"
 
 /** Only the resume cursor and reconnection time survive a connection. */
-export interface EventState {
-  id: string
-  retry: number
+export interface SseSessionState {
+  lastEventId: string
+  reconnectDelayMs: number
 }
 
 /** Read failures retain their source; parsing and cancellation still throw their original errors. */
-export type EventReadResult = { kind: "eof" } | { kind: "read-error"; error: unknown }
+type EventReadResult = { kind: "eof" } | { kind: "read-error"; error: unknown }
 
 /**
  * Parse incrementally, keeping at most the current chunk, line, and event in memory.
@@ -19,7 +19,7 @@ export type EventReadResult = { kind: "eof" } | { kind: "read-error"; error: unk
  */
 export async function* readEvents(
   body: ReadableStream<Uint8Array>,
-  state: EventState,
+  state: SseSessionState,
   signal: AbortSignal,
   owner?: BodyOwner,
   maxMessageBytes = Infinity,
@@ -34,8 +34,8 @@ export async function* readEvents(
   let messageBytes = 0
   let data: string[] = []
   let event = ""
-  let id = state.id
-  let retry: number | undefined
+  let lastEventId = state.lastEventId
+  let reconnectDelayMs: number | undefined
   let skipLF = false
   try {
     while (true) {
@@ -74,19 +74,19 @@ export async function* readEvents(
         start = i + 1
         if (line === "") {
           messageBytes = 0
-          state.id = id
+          state.lastEventId = lastEventId
           if (data.length > 0) {
             yield {
               data: data.join("\n"),
               event: event || "message",
-              id,
-              ...(retry === undefined ? {} : { retry }),
+              id: lastEventId,
+              ...(reconnectDelayMs === undefined ? {} : { retry: reconnectDelayMs }),
             }
             signal.throwIfAborted()
           }
           data = []
           event = ""
-          retry = undefined
+          reconnectDelayMs = undefined
           continue
         }
         // Heartbeats are discarded once their line is complete, even without a blank block.
@@ -104,12 +104,12 @@ export async function* readEvents(
             event = value
             break
           case "id":
-            if (!value.includes("\0")) id = value
+            if (!value.includes("\0")) lastEventId = value
             break
           case "retry":
             if (/^[0-9]+$/.test(value) && Number.isSafeInteger(Number(value))) {
-              retry = Number(value)
-              state.retry = retry
+              reconnectDelayMs = Number(value)
+              state.reconnectDelayMs = reconnectDelayMs
             }
             break
           default:

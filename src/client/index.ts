@@ -5,7 +5,7 @@ import type { Fetcher, Middleware } from "./middleware"
 import type { CallInit, RequestDefaults } from "./request"
 import { buildRequest, normalizeBaseURL } from "./request"
 import { consumeResultResponse } from "./result"
-import { stream as subscribe } from "./streams/subscription"
+import { createSubscriptionStream } from "./streams/subscription"
 import type { Endpoint } from "./types/endpoint"
 import type { DefaultMedia, DefaultAccept, HeaderArgs } from "./types/headers"
 import type { EndpointArgs } from "./types/request"
@@ -163,7 +163,7 @@ export function createClient<Endpoints>(
   }
 
   const stream = (endpoint: string, call: CallInit & StreamOptions = {}): ReadableStream<unknown> =>
-    subscribe(endpoint, call, defaults, send)
+    createSubscriptionStream(endpoint, call, defaults, send)
 
   return { fetch, result, stream }
 }

@@ -13,7 +13,7 @@ export class MessageBuffer {
   private parts: Uint8Array[] = []
   private size = 0
 
-  constructor(private readonly limit: number) {}
+  constructor(private readonly maxMessageBytes: number) {}
 
   get byteLength(): number {
     return this.size
@@ -23,11 +23,14 @@ export class MessageBuffer {
   append(bytes: Uint8Array, precedingBytes = 0): void {
     if (bytes.byteLength === 0) return
     const receivedBytes = precedingBytes + this.size + bytes.byteLength
-    if (receivedBytes > this.limit)
-      throw new ClientError(`Stream message exceeds maxMessageBytes (${this.limit} bytes)`, {
-        code: "MESSAGE_TOO_LARGE",
-        details: { maxMessageBytes: this.limit, receivedBytes },
-      })
+    if (receivedBytes > this.maxMessageBytes)
+      throw new ClientError(
+        `Stream message exceeds maxMessageBytes (${this.maxMessageBytes} bytes)`,
+        {
+          code: "MESSAGE_TOO_LARGE",
+          details: { maxMessageBytes: this.maxMessageBytes, receivedBytes },
+        },
+      )
     this.parts.push(bytes)
     this.size += bytes.byteLength
   }

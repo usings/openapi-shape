@@ -18,8 +18,9 @@ export function mergeHeaders(
     for (const name of own.keys()) headers.delete(name)
     for (const [name, header] of own) headers.append(name, header)
   } else {
+    const entries = Object.entries(given ?? {})
     const mediaHeaders = new Map<string, unknown>()
-    for (const [name, headerValue] of Object.entries(given ?? {})) {
+    for (const [name, headerValue] of entries) {
       const key = name.toLowerCase()
       if ((key === "content-type" || key === "accept") && headerValue != null) {
         if (mediaHeaders.has(key) && mediaHeaders.get(key) !== headerValue)
@@ -27,7 +28,7 @@ export function mergeHeaders(
         mediaHeaders.set(key, headerValue)
       }
     }
-    for (const [name, header] of Object.entries(given ?? {})) {
+    for (const [name, header] of entries) {
       if (header == null) continue
       const encoding = normalize(byLowercase(encodings, name), "simple")
       headers.set(

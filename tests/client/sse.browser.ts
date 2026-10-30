@@ -30,13 +30,13 @@ describe("SSE parser", () => {
     ])
     partitions.push([...encoded].map((byte) => new Uint8Array([byte])))
     for (const chunks of partitions) {
-      const state = { id: "", retry: 1000 }
+      const state = { lastEventId: "", reconnectDelayMs: 1000 }
       const events: StreamMessage[] = []
       // oxlint-disable-next-line no-await-in-loop -- exercise each partition independently
       for await (const event of readEvents(bytes(chunks), state, new AbortController().signal))
         events.push(event)
       expect(events).toStrictEqual(expected)
-      expect(state).toStrictEqual({ id: "", retry: 7 })
+      expect(state).toStrictEqual({ lastEventId: "", reconnectDelayMs: 7 })
     }
   })
 
@@ -54,7 +54,7 @@ describe("SSE parser", () => {
       // oxlint-disable-next-line no-await-in-loop -- every split must preserve the same wire text
       for await (const event of readEvents(
         bytes([encoded.slice(0, i), encoded.slice(i)]),
-        { id: "", retry: 1000 },
+        { lastEventId: "", reconnectDelayMs: 1000 },
         new AbortController().signal,
       ))
         events.push(event)
@@ -66,7 +66,7 @@ describe("SSE parser", () => {
   })
 
   it("ignores invalid retry and id fields, unknown fields, comments and incomplete cursors", async () => {
-    const state = { id: "old", retry: 1000 }
+    const state = { lastEventId: "old", reconnectDelayMs: 1000 }
     const body = new TextEncoder().encode(
       "retry: 5x\nretry: -1\nretry: 1.2\nretry: 9007199254740992\nid: bad\0id\nunknown: x\n: ping\n\ndata\n\nid: partial\ndata: lost",
     )
@@ -74,11 +74,11 @@ describe("SSE parser", () => {
     for await (const event of readEvents(bytes([body]), state, new AbortController().signal))
       events.push(event)
     expect(events).toStrictEqual([{ data: "", event: "message", id: "old" }])
-    expect(state).toStrictEqual({ id: "old", retry: 1000 })
+    expect(state).toStrictEqual({ lastEventId: "old", reconnectDelayMs: 1000 })
   })
 
   it("does not parse later fields in the same chunk until the next read", async () => {
-    const state = { id: "", retry: 1000 }
+    const state = { lastEventId: "", reconnectDelayMs: 1000 }
     const iterator = readEvents(
       bytes([
         new TextEncoder().encode("id: first\ndata: one\n\nretry: 25\nid: second\ndata: two\n\n"),
@@ -87,9 +87,9 @@ describe("SSE parser", () => {
       new AbortController().signal,
     )
     expect(await iterator.next()).toMatchObject({ value: { data: "one", id: "first" } })
-    expect(state).toStrictEqual({ id: "first", retry: 1000 })
+    expect(state).toStrictEqual({ lastEventId: "first", reconnectDelayMs: 1000 })
     expect(await iterator.next()).toMatchObject({ value: { data: "two", id: "second" } })
-    expect(state).toStrictEqual({ id: "second", retry: 25 })
+    expect(state).toStrictEqual({ lastEventId: "second", reconnectDelayMs: 25 })
     await iterator.return({ kind: "eof" })
   })
 })
@@ -599,4 +599,36 @@ it.each([true, {}])("reconnects with default options for reconnect %j", async (r
     await reader.cancel()
     vi.useRealTimers()
   }
+})
+
+it("selects and sends media from one lazy header normalization", async () => {
+  let reads = 0
+  let serializations = 0
+  class Token {
+    toJSON() {
+      return { token: ++serializations }
+    }
+  }
+  const fetch = vi.fn<Fetcher>((request) => {
+    expect(request.headers.get("accept")).toBe("text/event-stream")
+    expect(request.headers.get("x-token")).toBe('{"token":1}')
+    return Promise.resolve(response())
+  })
+  const reader = client({ fetch })
+    .stream("GET /events", {
+      headers: {
+        get "accept"() {
+          return ++reads === 1 ? "text/event-stream" : "application/x-ndjson"
+        },
+        "x-token": new Token(),
+      },
+    })
+    .getReader()
+  expect(reads).toBe(0)
+  expect(serializations).toBe(0)
+  expect(await reader.read()).toMatchObject({ value: { data: "hello" } })
+  expect(await reader.read()).toMatchObject({ done: true })
+  expect(reads).toBe(1)
+  expect(serializations).toBe(1)
+  expect(fetch).toHaveBeenCalledOnce()
 })

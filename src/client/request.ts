@@ -25,7 +25,12 @@ export interface RequestDefaults {
 }
 
 /** The standard `Request` for a call: its URL, headers, and body, as the contract declares them. */
-export function buildRequest(endpoint: string, init: CallInit, defaults: RequestDefaults): Request {
+export function buildRequest(
+  endpoint: string,
+  init: CallInit,
+  defaults: RequestDefaults,
+  preparedHeaders?: Headers,
+): Request {
   const declared = Object.hasOwn(defaults.endpoints, endpoint)
     ? defaults.endpoints[endpoint]
     : undefined
@@ -51,7 +56,9 @@ export function buildRequest(endpoint: string, init: CallInit, defaults: Request
   }
   if (query !== undefined) url = appendQuery(url, serializeQuery(query, declared))
 
-  const headers = mergeHeaders(defaults.headers, given, declared.parameters?.header)
+  // A stream session has already normalized headers to select its response media.
+  const headers =
+    preparedHeaders ?? mergeHeaders(defaults.headers, given, declared.parameters?.header)
   if (
     value === undefined &&
     declared.requestBody?.required &&
