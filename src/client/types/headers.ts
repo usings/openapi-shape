@@ -62,3 +62,12 @@ export type DefaultAccept<H, V = HeaderValue<H, "accept", undefined>> = [V] exte
   : [SingleMedia<V>] extends [never]
     ? string
     : SingleMedia<V>
+
+/**
+ * Native response headers with declared names suggested; values remain unparsed and nullable. The
+ * string intersection preserves literal suggestions while accepting any header name.
+ */
+export interface ResponseHeaders<Name extends string = never> extends Headers {
+  get(name: Name | (string & Empty)): string | null
+  has(name: Name | (string & Empty)): boolean
+}

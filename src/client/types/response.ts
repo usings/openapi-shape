@@ -1,8 +1,15 @@
 import type { StreamingEssence } from "../../shared/media"
 import type { Empty, Endpoint, Essence, IsJson, MethodOf, Operation, OperationOf } from "./endpoint"
+import type { ResponseHeaders } from "./headers"
 
 /** A `Response` for one declared status or range: `json()` resolves to its JSON content. */
-export interface TypedResponse<Status extends number, Ok extends boolean, Json> extends Response {
+export interface TypedResponse<
+  Status extends number,
+  Ok extends boolean,
+  Json,
+  HeaderName extends string = never,
+> extends Response {
+  readonly headers: ResponseHeaders<HeaderName>
   readonly status: Status
   readonly ok: Ok
   json(): Promise<Json>
@@ -56,11 +63,11 @@ export type DataAt<E, S extends number> = {
   [P in Endpoint<E> as P]: Extract<AtStatus<Successes<E>[P], S>, { data: unknown }>["data"]
 }
 
-export type JsonAt<E, S extends number> = {
+export type ResponseAt<E, S extends number> = {
   [P in Endpoint<E> as P]: AtStatus<Successes<E>[P], S> extends {
-    response: TypedResponse<number, boolean, infer J>
+    response: infer R
   }
-    ? J
+    ? R
     : never
 }
 
@@ -73,7 +80,7 @@ export type FiniteResult<E, K extends Endpoint<E>> =
               data: DataAt<E, S>[P]
               error?: undefined
               status: S
-              response: TypedResponse<S, true, JsonAt<E, S>[P]>
+              response: ResponseAt<E, S>[P]
             }
       }[K]
     }[SuccessStatus<E>]
@@ -110,17 +117,18 @@ export type OkOf<Status> = Status extends StatusIn<"2"> ? true : false
 
 /** What a response to `Method` carries: nothing for `HEAD`, whatever the description declares. */
 export type ShapeFor<Method extends string, Shape> =
-  Uppercase<Method> extends "HEAD" ? Empty : Shape
+  Uppercase<Method> extends "HEAD" ? Omit<Shape, "content"> : Shape
 
 /** Responses that have no content, whatever the description declares. */
 export type NoContent = 204 | 205 | 304
 
 /** Statuses and what they carry, those that have no content apart. */
-export type StatusOutcome<Status, Shape> = [Status] extends [never] ? never : [Status, Shape]
+// Expand ranges here so every projection starts with an exact status and its complete shape.
+export type StatusOutcome<Status, Shape> = Status extends number ? [Status, Shape] : never
 
 export type SplitNoContent<Status, Shape> =
   | StatusOutcome<Exclude<Status, NoContent>, Shape>
-  | StatusOutcome<Extract<Status, NoContent>, Empty>
+  | StatusOutcome<Extract<Status, NoContent>, Omit<Shape, "content">>
 
 /** A status the description does not declare: any content. */
 export interface Undeclared {
@@ -165,7 +173,7 @@ export type ResponseOf<E, K extends Endpoint<E>> =
     ? O extends [infer Status extends number, infer Shape]
       ? [Status] extends [never]
         ? never
-        : TypedResponse<Status, OkOf<Status>, JsonOf<Shape>>
+        : ResponseFor<Status, Shape>
       : never
     : never
 
@@ -185,13 +193,13 @@ export type ResultOf<Op extends Operation, Method extends string> =
               data: Decoded<Shape>
               error?: undefined
               status: Status
-              response: TypedResponse<Status, true, JsonOf<Shape>>
+              response: ResponseFor<Status, Shape>
             }
           : {
               data?: undefined
               error: ErrorBody<Decoded<Shape>>
               status: Status
-              response: TypedResponse<Status, false, JsonOf<Shape>>
+              response: ResponseFor<Status, Shape>
             }
       : never
     : never
@@ -247,3 +255,16 @@ export type DecodedAs<M extends string, T> =
             : Blob
 
 export type TextOf<T> = T extends string ? T : string
+
+/** Response header schemas provide names only; native Headers does not deserialize their values. */
+export type HeaderNamesOf<Shape> = Shape extends { headers: infer H }
+  ? Lowercase<keyof H & string>
+  : never
+
+/** The single projection of an exact status and response declaration into a native response. */
+export type ResponseFor<Status extends number, Shape> = TypedResponse<
+  Status,
+  OkOf<Status>,
+  JsonOf<Shape>,
+  HeaderNamesOf<Shape>
+>

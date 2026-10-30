@@ -29,7 +29,13 @@ export type { ClientDiagnostic } from "./errors"
 export type { StreamMessage } from "./streams/parser-sse"
 export type { Endpoint } from "./types/endpoint"
 export type { EndpointArgs } from "./types/request"
-export type { EndpointData, ResultEndpoint, TypedResponse } from "./types/response"
+export type {
+  EndpointData,
+  EndpointResult,
+  ResponseOf,
+  ResultEndpoint,
+  TypedResponse,
+} from "./types/response"
 export type {
   EndpointMessage,
   EndpointStreamItem,
@@ -41,7 +47,7 @@ export type {
   DefaultStreamArgs,
   StreamRetryOptions,
 } from "./types/stream"
-export type { TypedHeaders } from "./types/headers"
+export type { TypedHeaders, ResponseHeaders } from "./types/headers"
 
 /**
  * Defaults for every request: any `RequestInit` field but `signal`, which every request would share

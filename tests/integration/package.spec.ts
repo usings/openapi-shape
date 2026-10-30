@@ -43,7 +43,7 @@ if((await api.result('GET /ping')).data!=='pong')throw new Error('Invalid packed
     await exec(process.execPath, ["--experimental-strip-types", "smoke.mjs"], { cwd: consumer })
     await writeFile(
       join(consumer, "use.ts"),
-      `import {contract} from './api'; import {createClient} from 'openapi-shape/client'; const api=createClient(contract); const response=await api.fetch('GET /ping'); if(response.status===200) response.json() satisfies Promise<string>;`,
+      `import {contract, type Endpoints} from './api'; import {createClient, type ResponseOf, type EndpointResult} from 'openapi-shape/client'; const api=createClient(contract); const response: ResponseOf<Endpoints, 'GET /ping'>=await api.fetch('GET /ping'); if(response.status===200) response.json() satisfies Promise<string>; const result: EndpointResult<Endpoints, 'GET /ping'>=await api.result('GET /ping'); result.data satisfies string;`,
     )
     await exec(
       join(root, "node_modules/.bin/tsc"),
