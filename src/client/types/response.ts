@@ -1,6 +1,7 @@
 import type { StreamingEssence } from "../../shared/media"
 import type { Empty, Endpoint, Essence, IsJson, MethodOf, Operation, OperationOf } from "./endpoint"
 import type { ResponseHeaders } from "./headers"
+import type { TextOf } from "./utils"
 
 /** A `Response` for one declared status or range: `json()` resolves to its JSON content. */
 export interface TypedResponse<
@@ -26,7 +27,7 @@ export type ResultEndpoint<E> = {
         : K
 }[Endpoint<E>]
 
-export type CompleteContent<Op extends Operation, Method extends string> =
+type CompleteContent<Op extends Operation, Method extends string> =
   Outcomes<Op, Method> extends infer O
     ? O extends [number, infer Shape]
       ? Shape extends { content: infer C }
@@ -51,19 +52,19 @@ export type EndpointResult<E, K extends ResultEndpoint<E>> = FiniteResult<E, K>
 // same data table, so generic returns need no comparison or intersection of
 // response bodies. Filter absent statuses inside each endpoint entry: intersecting
 // two large endpoint-key unions makes TypeScript expand their cross product.
-export type SuccessStatus<E> = Successes<E>[Endpoint<E>]["status"]
+type SuccessStatus<E> = Successes<E>[Endpoint<E>]["status"]
 
-export type AtStatus<R, S extends number> = R extends { status: infer Status extends number }
+type AtStatus<R, S extends number> = R extends { status: infer Status extends number }
   ? S extends Status
     ? R
     : never
   : never
 
-export type DataAt<E, S extends number> = {
+type DataAt<E, S extends number> = {
   [P in Endpoint<E> as P]: Extract<AtStatus<Successes<E>[P], S>, { data: unknown }>["data"]
 }
 
-export type ResponseAt<E, S extends number> = {
+type ResponseAt<E, S extends number> = {
   [P in Endpoint<E> as P]: AtStatus<Successes<E>[P], S> extends {
     response: infer R
   }
@@ -71,7 +72,7 @@ export type ResponseAt<E, S extends number> = {
     : never
 }
 
-export type FiniteResult<E, K extends Endpoint<E>> =
+type FiniteResult<E, K extends Endpoint<E>> =
   | {
       [S in SuccessStatus<E>]: {
         [P in K]: [AtStatus<Successes<E>[P], S>] extends [never]
@@ -88,45 +89,45 @@ export type FiniteResult<E, K extends Endpoint<E>> =
 
 // Remapped endpoint keys prevent TypeScript from substituting a generic call key
 // into the conditional response calculation before error/status narrowing.
-export type Successes<E> = {
+type Successes<E> = {
   [P in Endpoint<E> as P]: Extract<
     ResultOf<OperationOf<E, P>, MethodOf<P>>,
     { data: unknown; error?: undefined }
   >
 }
 
-export type Failures<E> = {
+type Failures<E> = {
   [P in Endpoint<E> as P]: Exclude<ResultOf<OperationOf<E, P>, MethodOf<P>>, { error?: undefined }>
 }
 
-export type Digit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+type Digit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 
-export type ToNumber<S> = S extends number ? S : S extends `${infer N extends number}` ? N : never
+type ToNumber<S> = S extends number ? S : S extends `${infer N extends number}` ? N : never
 
 /** Every status of a class, such as `"4"`: `400 | 401 | … | 499`. */
 export type StatusIn<Class extends string> = ToNumber<`${Class}${Digit}${Digit}`>
 
 /** The statuses a response key stands for: a code, or a range less the codes declared on their own. */
-export type StatusesOf<K, R> = K extends `${infer Class}XX`
+type StatusesOf<K, R> = K extends `${infer Class}XX`
   ? Exclude<StatusIn<Class>, ToNumber<keyof R>>
   : ToNumber<K>
 
 export type Declared<R> = StatusesOf<Exclude<keyof R, "default">, R>
 
-export type OkOf<Status> = Status extends StatusIn<"2"> ? true : false
+type OkOf<Status> = Status extends StatusIn<"2"> ? true : false
 
 /** What a response to `Method` carries: nothing for `HEAD`, whatever the description declares. */
-export type ShapeFor<Method extends string, Shape> =
+type ShapeFor<Method extends string, Shape> =
   Uppercase<Method> extends "HEAD" ? Omit<Shape, "content"> : Shape
 
 /** Responses that have no content, whatever the description declares. */
-export type NoContent = 204 | 205 | 304
+type NoContent = 204 | 205 | 304
 
 /** Statuses and what they carry, those that have no content apart. */
 // Expand ranges here so every projection starts with an exact status and its complete shape.
-export type StatusOutcome<Status, Shape> = Status extends number ? [Status, Shape] : never
+type StatusOutcome<Status, Shape> = Status extends number ? [Status, Shape] : never
 
-export type SplitNoContent<Status, Shape> =
+type SplitNoContent<Status, Shape> =
   | StatusOutcome<Exclude<Status, NoContent>, Shape>
   | StatusOutcome<Extract<Status, NoContent>, Omit<Shape, "content">>
 
@@ -149,13 +150,13 @@ export type Outcomes<Op extends Operation, Method extends string, R = Op["respon
             >
       : never)
 
-export type DefaultShape<Method extends string, R> = ShapeFor<
+type DefaultShape<Method extends string, R> = ShapeFor<
   Method,
   "default" extends keyof R ? R["default"] : Undeclared
 >
 
 /** Fetch delivers undeclared successes too; their JSON cannot be asserted from the contract. */
-export type FetchOutcomes<Op extends Operation, Method extends string> =
+type FetchOutcomes<Op extends Operation, Method extends string> =
   | [0, Empty]
   | Outcomes<Op, Method>
   | SplitNoContent<
@@ -183,7 +184,7 @@ export type ResponseOf<E, K extends Endpoint<E>> =
  * undefined` tells a success, also once destructured. `status` is the response's, at the top so
  * that it narrows them too: TypeScript does not narrow a union through `response.status`.
  */
-export type ResultOf<Op extends Operation, Method extends string> =
+type ResultOf<Op extends Operation, Method extends string> =
   Outcomes<Op, Method> extends infer O
     ? O extends [infer Status extends number, infer Shape]
       ? [Status] extends [never]
@@ -205,7 +206,7 @@ export type ResultOf<Op extends Operation, Method extends string> =
     : never
 
 /** A failure's body: `null` where there is none. */
-export type ErrorBody<T> = unknown extends T
+type ErrorBody<T> = unknown extends T
   ? NonNullable<unknown> | null
   : undefined extends T
     ? Exclude<T, undefined> | null
@@ -215,13 +216,13 @@ export type ErrorBody<T> = unknown extends T
  * What `json()` resolves to: the response's JSON content, `unknown` where it declares other
  * content, and nothing where it has none, since `json()` rejects.
  */
-export type JsonOf<Shape> = Shape extends { content: infer Content }
+type JsonOf<Shape> = Shape extends { content: infer Content }
   ? [Exclude<keyof Content & string, JsonMedia<Content>>] extends [never]
     ? Content[JsonMedia<Content>]
     : unknown
   : never
 
-export type JsonMedia<Content> = {
+type JsonMedia<Content> = {
   [M in keyof Content & string]: Essence<M> extends `${string}*${string}`
     ? never
     : IsJson<M> extends true
@@ -233,7 +234,7 @@ export type JsonMedia<Content> = {
  * Each media type's content as decoded: JSON as declared, other text as a string, others as a Blob;
  * a range as any media type in it.
  */
-export type Decoded<Shape> = Shape extends { content: infer Content }
+type Decoded<Shape> = Shape extends { content: infer Content }
   ? {
       [M in keyof Content & string]: Essence<M> extends StreamingEssence
         ? never
@@ -241,7 +242,7 @@ export type Decoded<Shape> = Shape extends { content: infer Content }
     }[keyof Content & string]
   : undefined
 
-export type DecodedAs<M extends string, T> =
+type DecodedAs<M extends string, T> =
   Essence<M> extends "*/*"
     ? T | string | Blob
     : Essence<M> extends "application/*"
@@ -254,15 +255,11 @@ export type DecodedAs<M extends string, T> =
             ? TextOf<T>
             : Blob
 
-export type TextOf<T> = T extends string ? T : string
-
 /** Response header schemas provide names only; native Headers does not deserialize their values. */
-export type HeaderNamesOf<Shape> = Shape extends { headers: infer H }
-  ? Lowercase<keyof H & string>
-  : never
+type HeaderNamesOf<Shape> = Shape extends { headers: infer H } ? Lowercase<keyof H & string> : never
 
 /** The single projection of an exact status and response declaration into a native response. */
-export type ResponseFor<Status extends number, Shape> = TypedResponse<
+type ResponseFor<Status extends number, Shape> = TypedResponse<
   Status,
   OkOf<Status>,
   JsonOf<Shape>,

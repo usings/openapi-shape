@@ -1,10 +1,17 @@
 import type { StreamingEssence } from "../../shared/media"
-import type { StreamMessage } from "../streams/parser-sse"
 import type { Empty, Endpoint, Essence, MethodOf, Operation, OperationOf } from "./endpoint"
 import type { MediaHeader, WithHeaders } from "./headers"
 import type { Args, Init } from "./request"
 import type { Outcomes, StatusIn } from "./response"
 import type { IsUnion } from "./utils"
+
+/** One dispatched SSE event. Data is text, even when it contains JSON. */
+export interface StreamMessage {
+  data: string
+  event: string
+  id: string
+  retry?: number
+}
 
 /** SSE connection attempts over the whole subscription, including the initial connection. */
 export interface ReconnectOptions {
@@ -27,7 +34,7 @@ export type StreamEndpoint<E> = {
   [K in Endpoint<E>]: [StreamContent<OperationOf<E, K>, MethodOf<K>>] extends [never] ? never : K
 }[Endpoint<E>]
 
-export type StreamsIn<Shape> = Shape extends { content: infer Content }
+type StreamsIn<Shape> = Shape extends { content: infer Content }
   ? {
       // Keep media presence even when its schema allows no values (content is never).
       [M in keyof Content & string]: Essence<M> extends StreamingEssence
@@ -37,7 +44,7 @@ export type StreamsIn<Shape> = Shape extends { content: infer Content }
   : never
 
 // Avoid expanding status ranges for operations that have no streaming media at all.
-export type StreamContent<Op extends Operation, Method extends string> = [
+type StreamContent<Op extends Operation, Method extends string> = [
   StreamsIn<Op["responses"][keyof Op["responses"]]>,
 ] extends [never]
   ? never
@@ -62,7 +69,7 @@ export type EndpointStreamItem<
   M extends StreamMedia<E, K> = StreamMedia<E, K>,
 > = StreamItem<Extract<StreamContent<OperationOf<E, K>, MethodOf<K>>, { media: M }>>
 
-export type StreamItem<Media> = Media extends {
+type StreamItem<Media> = Media extends {
   media: infer M extends string
   content: infer Content
 }
@@ -80,20 +87,20 @@ export type EndpointMessage<E, K extends StreamEndpoint<E>> = EndpointStreamItem
   EventMedia<StreamMedia<E, K>>
 >
 
-export type EventMedia<M extends string> = M extends unknown
+type EventMedia<M extends string> = M extends unknown
   ? Essence<M> extends "text/event-stream"
     ? M
     : never
   : never
 
-export type MessageOf<Content> =
+type MessageOf<Content> =
   Content extends ReadonlyArray<infer Item> ? EventItem<Item> : StreamMessage
 
-export type EventItem<Item> = Item extends object
+type EventItem<Item> = Item extends object
   ? StreamMessage & Pick<Item, Extract<keyof Item, keyof StreamMessage>>
   : StreamMessage
 
-export type Replayable<Call> = Call extends unknown
+type Replayable<Call> = Call extends unknown
   ? {
       [P in keyof Call]: P extends "body"
         ? Exclude<Call[P], ReadableStream | AsyncIterable<Uint8Array>>
@@ -101,7 +108,7 @@ export type Replayable<Call> = Call extends unknown
     }
   : never
 
-export type StreamInit<
+type StreamInit<
   E,
   K extends StreamEndpoint<E>,
   M extends StreamMedia<E, K>,
@@ -111,7 +118,7 @@ export type StreamInit<
   headers?: MediaHeader<"accept", M, false>
 } & StreamSelection<E, K, M, D, Init<OperationOf<E, K>, MethodOf<K>, D, H>>
 
-export type StreamSelection<
+type StreamSelection<
   E,
   K extends StreamEndpoint<E>,
   M extends StreamMedia<E, K>,
@@ -121,11 +128,7 @@ export type StreamSelection<
   ? (IsUnion<StreamMedia<E, K>> extends true
       ? { headers: MediaHeader<"accept", M, true> }
       : { headers?: MediaHeader<"accept", M, false> }) &
-      (Essence<M> extends "text/event-stream"
-        ?
-            | (Replayable<Call> & { reconnect: boolean | ReconnectOptions })
-            | (Call & { reconnect?: false | (ReconnectOptions & { maxAttempts: 1 }) })
-        : Call & { reconnect?: false })
+      ReconnectSelection<Call, M>
   : never
 
 /**
@@ -179,8 +182,11 @@ export type DefaultStreamArgs<
 
 type DefaultSelection<Call, M extends string> = {
   headers?: { accept?: never; [Symbol.iterator]?: never }
-} & (Essence<M> extends "text/event-stream"
-  ?
-      | (Replayable<Call> & { reconnect: boolean | ReconnectOptions })
-      | (Call & { reconnect?: false | (ReconnectOptions & { maxAttempts: 1 }) })
-  : Call & { reconnect?: false })
+} & ReconnectSelection<Call, M>
+
+type ReconnectSelection<Call, M extends string> =
+  Essence<M> extends "text/event-stream"
+    ?
+        | (Replayable<Call> & { reconnect: boolean | ReconnectOptions })
+        | (Call & { reconnect?: false | (ReconnectOptions & { maxAttempts: 1 }) })
+    : Call & { reconnect?: false }

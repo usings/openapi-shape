@@ -1,7 +1,6 @@
 import type { Empty, Endpoint, Essence, IsJson, MethodOf, Operation, OperationOf } from "./endpoint"
 import type { HeadersField, MediaHeader, WithHeaders, SingleMedia } from "./headers"
-import type { TextOf } from "./response"
-import type { IsUnion, LowercaseKeys } from "./utils"
+import type { IsUnion, LowercaseKeys, TextOf } from "./utils"
 
 /** Ready-made request bodies, including async byte iterables adapted to Web streams. */
 export type BodyLike =
@@ -52,7 +51,7 @@ export type Field<Name extends "params" | "query", Op extends Operation> = Name 
   ? Pick<Op, Name>
   : Partial<Record<Name, never>>
 
-export type BodyField<Op extends Operation, D extends string, H = object> = "body" extends keyof Op
+type BodyField<Op extends Operation, D extends string, H = object> = "body" extends keyof Op
   ?
       | (Empty extends Pick<Op, "body"> ? { body?: undefined } : never)
       | BodyVariant<NonNullable<Op["body"]>>
@@ -70,7 +69,7 @@ type Unparameterized<C, M extends string, K = MatchingKeys<C, M>> =
   Extract<K, `${string};${string}`> extends never ? K : never
 
 /** Parameterized declarations are selected exactly; ambiguous parameter matches stay conservative. */
-export type DefaultMediaKey<C, D extends string> = D extends keyof C
+type DefaultMediaKey<C, D extends string> = D extends keyof C
   ? D
   : MatchingKeys<C, Essence<D>> extends never
     ? MatchingKeys<
@@ -95,7 +94,7 @@ type ExplicitBody<C, H, N = LowercaseKeys<H>> = "content-type" extends keyof N
     : never
   : never
 
-export type DefaultBody<
+type DefaultBody<
   C,
   D extends string,
   H = object,
@@ -112,7 +111,7 @@ export type DefaultBody<
       : never
 
 /** Structured inputs require an explicit media header associated with their body shape. */
-export type ConcreteMedia<M extends string> = M extends "*/*"
+type ConcreteMedia<M extends string> = M extends "*/*"
   ? `${string}/${string}`
   : M extends `${infer T}/*`
     ? `${T}/${string}`
@@ -139,7 +138,7 @@ type IntersectFunctionParameters<F> = [F] extends [(value: infer V) => void] ? V
  * What the client encodes for a media type; others take ready-made bodies. Text is sent as given, a
  * string, though `text/*` content may also be JSON.
  */
-export type BodyValue<Content, M extends keyof Content & string, A extends string = M> =
+type BodyValue<Content, M extends keyof Content & string, A extends string = M> =
   IsEncodable<A> extends true
     ?
         | (IsJson<A> extends true
@@ -152,7 +151,7 @@ export type BodyValue<Content, M extends keyof Content & string, A extends strin
     : BodyLike | string
 
 /** Structured forms encode named fields; arrays and scalar schemas need a ready-made body. */
-export type FormValue<T> = unknown extends T
+type FormValue<T> = unknown extends T
   ? Record<string, unknown>
   : T extends readonly unknown[]
     ? never
@@ -161,7 +160,7 @@ export type FormValue<T> = unknown extends T
       : never
 
 /** Media types the client encodes from a value: JSON, form, multipart, and text but event streams. */
-export type IsEncodable<M extends string> =
+type IsEncodable<M extends string> =
   IsJson<M> extends true
     ? true
     : Essence<M> extends "application/x-www-form-urlencoded" | "multipart/form-data"

@@ -34,12 +34,6 @@ export function responseContentType(headers: Headers): string | undefined {
   return selected
 }
 
-/** The essence of the same MIME value used for contract matching. */
-export function responseMediaType(headers: Headers): string | undefined {
-  const value = responseContentType(headers)
-  return value?.split(";", 1)[0]?.trim().toLowerCase()
-}
-
 /** Resolve a concrete media type against exact declarations, then media ranges. */
 export function matchDeclaredMedia<T>(
   content: Readonly<Record<string, T>>,

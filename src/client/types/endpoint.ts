@@ -37,7 +37,7 @@ export type Essence<M extends string> = Lowercase<
 >
 
 /** Without the spaces and tabs around it (RFC 9110, OWS), as the client's run time trims them. */
-export type Trim<S extends string> = S extends ` ${infer T}` | `\t${infer T}`
+type Trim<S extends string> = S extends ` ${infer T}` | `\t${infer T}`
   ? Trim<T>
   : S extends `${infer T} ` | `${infer T}\t`
     ? Trim<T>

@@ -1,14 +1,7 @@
 import type { BodyOwner } from "../cancellation"
 import { bodyReader } from "../cancellation"
+import type { StreamMessage } from "../types/stream"
 import { MessageBuffer } from "./message-buffer"
-
-/** One dispatched SSE event. Data is text, even when it contains JSON. */
-export interface StreamMessage {
-  data: string
-  event: string
-  id: string
-  retry?: number
-}
 
 /** Only the resume cursor and reconnection time survive a connection. */
 export interface EventState {

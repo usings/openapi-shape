@@ -24,12 +24,6 @@ export type IsUnion<T, U = T> = (
     : Result
   : never
 
-export type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (
-  value: infer I,
-) => void
-  ? I & T
-  : never
-
 type Primitive = null | undefined | string | number | boolean | symbol | bigint
 type KeysOfUnion<T> = T extends unknown ? keyof T : never
 type UnwrapBrand<T> = T extends Primitive
@@ -58,3 +52,6 @@ export type IsStringLiteral<S> =
 export type LowercaseKeys<T> = {
   [K in keyof T as K extends string ? Lowercase<K> : K]: T[K]
 }
+
+/** Preserve string literals; other text schemas decode or encode as strings. */
+export type TextOf<T> = T extends string ? T : string

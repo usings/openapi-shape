@@ -26,7 +26,7 @@ export { defineMiddleware } from "./middleware"
 export type { Fetcher, Middleware, MiddlewareContext } from "./middleware"
 export { ClientError } from "./errors"
 export type { ClientDiagnostic } from "./errors"
-export type { StreamMessage } from "./streams/parser-sse"
+export type { StreamMessage } from "./types/stream"
 export type { Endpoint } from "./types/endpoint"
 export type { EndpointArgs } from "./types/request"
 export type {
