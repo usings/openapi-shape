@@ -663,7 +663,7 @@ describe("platform types", () => {
           "createClient(contract, { baseURL: undefined })",
           'void api.fetch("GET /pets", { baseURL: undefined })',
           'void api.result("GET /pets", { baseURL: new URL("https://other.test") })',
-          'void api.stream("GET /events", { baseURL: undefined, retry: false })',
+          'void api.stream("GET /events", { baseURL: undefined, reconnect: false })',
           'void api.fetch("PATCH /pets/{id}", { params: { id: 1 } })',
           'void api.fetch("PATCH /pets/{id}", { params: { id: 1 }, body: undefined })',
           "export async function use(): Promise<{ id: number }[] | undefined> {",

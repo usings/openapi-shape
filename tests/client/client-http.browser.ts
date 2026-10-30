@@ -97,7 +97,7 @@ it("sends native form bytes and preserves multipart boundary generation", async 
 
 it("closes its live HTTP response when the consumer cancels", async () => {
   const id = crypto.randomUUID()
-  const reader = client().stream("GET /events", { query: { id }, retry: false }).getReader()
+  const reader = client().stream("GET /events", { query: { id }, reconnect: false }).getReader()
   try {
     expect(await reader.read()).toMatchObject({ value: { data: "live" } })
   } finally {

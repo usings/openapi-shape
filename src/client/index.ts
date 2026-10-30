@@ -45,7 +45,7 @@ export type {
   StreamMedia,
   StreamOptions,
   DefaultStreamArgs,
-  StreamRetryOptions,
+  ReconnectOptions,
 } from "./types/stream"
 export type { TypedHeaders, ResponseHeaders } from "./types/headers"
 

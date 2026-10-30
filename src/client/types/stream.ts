@@ -6,13 +6,12 @@ import type { Args, Init } from "./request"
 import type { Outcomes, StatusIn } from "./response"
 import type { IsUnion } from "./utils"
 
-/**
- * Additional SSE connections allowed over the whole subscription, with a configurable initial
- * delay.
- */
-export interface StreamRetryOptions {
+/** SSE connection attempts over the whole subscription, including the initial connection. */
+export interface ReconnectOptions {
+  /** Initial interval in milliseconds; a non-negative safe integer. Default: 1000. */
   delay?: number
-  maxRetries?: number
+  /** Total connections including the first; a positive safe integer. Omitted means unlimited. */
+  maxAttempts?: number
 }
 
 /** The response representation, per-message byte limit, and SSE reconnection settings. */
@@ -20,7 +19,7 @@ export interface StreamOptions {
   /** Maximum UTF-8 bytes per message; a positive safe integer. Omitted means no limit. */
   maxMessageBytes?: number | undefined
   /** True enables SSE reconnection with defaults; false or omission disables it. */
-  retry?: boolean | StreamRetryOptions
+  reconnect?: boolean | ReconnectOptions
 }
 
 /** Callable operations with a supported streaming success response. */
@@ -124,9 +123,9 @@ export type StreamSelection<
       : { headers?: MediaHeader<"accept", M, false> }) &
       (Essence<M> extends "text/event-stream"
         ?
-            | (Replayable<Call> & { retry: boolean | StreamRetryOptions })
-            | (Call & { retry?: false | (StreamRetryOptions & { maxRetries: 0 }) })
-        : Call & { retry?: never })
+            | (Replayable<Call> & { reconnect: boolean | ReconnectOptions })
+            | (Call & { reconnect?: false | (ReconnectOptions & { maxAttempts: 1 }) })
+        : Call & { reconnect?: false })
   : never
 
 /**
@@ -158,7 +157,7 @@ export type NegotiatedStreamArgs<
 > = Args<
   K,
   WithHeaders<Init<OperationOf<E, K>, MethodOf<K>, D, H>, NoInfer<H>> &
-    Pick<StreamOptions, "maxMessageBytes"> & { retry?: false }
+    Pick<StreamOptions, "maxMessageBytes"> & { reconnect?: false }
 >
 
 /** Defaults satisfy Accept only; the request keeps all of its own required fields. */
@@ -182,6 +181,6 @@ type DefaultSelection<Call, M extends string> = {
   headers?: { accept?: never; [Symbol.iterator]?: never }
 } & (Essence<M> extends "text/event-stream"
   ?
-      | (Replayable<Call> & { retry: boolean | StreamRetryOptions })
-      | (Call & { retry?: false | (StreamRetryOptions & { maxRetries: 0 }) })
-  : Call & { retry?: never })
+      | (Replayable<Call> & { reconnect: boolean | ReconnectOptions })
+      | (Call & { reconnect?: false | (ReconnectOptions & { maxAttempts: 1 }) })
+  : Call & { reconnect?: false })

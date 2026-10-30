@@ -641,7 +641,7 @@ void api.stream("POST /events/{id}")
 // @ts-expect-error wrong path parameter
 void api.stream("POST /events/{id}", { params: { id: "wrong" }, body: { topic: "orders" }, headers: { "content-type": "application/json" } })
 // @ts-expect-error a stream request body cannot be replayed
-void api.stream("POST /events/{id}", { params: { id: 1 }, body: new ReadableStream(), retry: {}, headers: { "content-type": "application/json" } })
+void api.stream("POST /events/{id}", { params: { id: 1 }, body: new ReadableStream(), reconnect: {}, headers: { "content-type": "application/json" } })
 void api.result("GET /mixed")
 type MixedData = EndpointData<Endpoints, "GET /mixed">
 void api.stream("GET /ordinary")
@@ -681,7 +681,7 @@ message.data satisfies string
         params: { id: 3 },
         headers: { "content-type": "application/json" },
         body: { topic: "orders" },
-        retry: false,
+        reconnect: false,
       } as never,
     ))
       messages.push(event as StreamMessage)

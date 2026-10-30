@@ -201,7 +201,7 @@ describe("media types", () => {
         // oxlint-disable-next-line no-await-in-loop -- consume each independent finite stream
         for await (const item of api.stream(
           `GET /m${i}` as never,
-          (stream === "sse" ? { retry: false } : {}) as never,
+          (stream === "sse" ? { reconnect: false } : {}) as never,
         )) {
           data = stream === "sse" ? (item as { data: string }).data : item
         }

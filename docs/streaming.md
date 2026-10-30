@@ -18,11 +18,11 @@ for await (const pet of api.stream("GET /records", { headers: { accept: "applica
 
 An endpoint qualifies when an effective successful response declares a supported stream. Wildcards, `HEAD`, bodyless statuses, and error-only declarations do not qualify. An endpoint offering both JSON and a supported stream can use `result()` to decode its complete representation, `stream()` for streaming items, or `fetch()` for direct response access.
 
-The effective Accept comes from call headers, then client defaults. With no Accept, the client selects the sole streaming declaration or advertises all supported declarations when there are several.
+The effective Accept comes from call headers, then client defaults. With no Accept, the client selects the sole streaming declaration or advertises all supported declarations when there are several. A sole SSE declaration allows `reconnect` without an Accept header, even when complete JSON responses are also declared. When several streaming declarations exist, select SSE explicitly to enable reconnection. JSON record formats and dynamic negotiation allow only an omitted `reconnect` or `false`.
 
 A single exact declared value, including a known client default, narrows the item type and requires the response to match that declaration. Lists, ranges, and opaque or dynamic headers retain the union of possible items and use the actual response to choose a parser. These negotiated subscriptions make one connection. Automatic SSE reconnection requires a statically selected SSE representation; override uncertain defaults with an explicit call Accept to enable it.
 
-A wrong status, media type, or missing/consumed/locked body errors consumption. HTTP 204 closes normally. The shared [client error model](./client.md#handle-rejected-calls) defines error codes and diagnostics; the [SSE retry policy](#sse-reconnection) determines which failures reconnect.
+A wrong status, media type, or missing/consumed/locked body errors consumption. HTTP 204 closes normally. The shared [client error model](./client.md#handle-rejected-calls) defines error codes and diagnostics; the [SSE reconnection policy](#sse-reconnection) determines which failures reconnect.
 
 Use `itemSchema` to describe one item, or an array `schema` to describe complete sequence content. An item schema takes precedence. SSE only narrows its standard message fields; it does not decode JSON in `data`. See [sequence projections](./openapi.md#sequence-projections) for the type rules.
 
@@ -31,36 +31,36 @@ Use `itemSchema` to describe one item, or an array `schema` to describe complete
 <!-- example: client -->
 
 ```ts
-for await (const event of api.stream("GET /events", { retry: false })) {
+for await (const event of api.stream("GET /events", { reconnect: false })) {
   console.log(event.event, event.id, event.data)
 }
 ```
 
 Messages contain `data: string`, `event: string`, `id: string`, and optional numeric `retry`. Data lines join with newlines; the default event is `"message"`. Both named and default events are emitted. Comments and blocks without data emit nothing; incomplete events at EOF are discarded.
 
-By default, EOF completes the subscription. Set `retry: true` (or `retry: {}`) to enable reconnection, or provide a retry budget.
+By default, EOF completes the subscription. Set `reconnect: true` (or `reconnect: {}`) to enable reconnection, or limit the total connection attempts.
 
 ### SSE reconnection
 
-When enabled, the default interval is 1000 ms with unlimited retries. Use `retry: { delay: 500, maxRetries: 3 }` to bound retries. Values must be non-negative safe integers; `maxRetries` counts additional attempts over the entire subscription, without resetting after messages. `0` allows only the initial connection.
+When enabled, the default interval is 1000 ms with unlimited connection attempts. Use `reconnect: { delay: 500, maxAttempts: 3 }` for at most three connections, including the first. `delay` must be a non-negative safe integer; `maxAttempts` must be a positive safe integer. The attempt count spans the whole subscription and does not reset after messages. `maxAttempts: 1` allows only the initial connection; `0` is invalid.
 
 | Outcome                                                                           | Behavior                                                       |
 | --------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Normal EOF                                                                        | Reconnect; close normally when the retry budget ends.          |
+| Normal EOF                                                                        | Reconnect; close normally when the attempt budget ends.        |
 | HTTP 204                                                                          | Close normally.                                                |
 | Transport/read failure, HTTP 408, 429, or 500–599                                 | Retry; propagate the original failure when the budget ends.    |
 | Other HTTP error, invalid response, construction error, or middleware's own error | Error immediately.                                             |
 | Aborted call signal                                                               | Error with `signal.reason`, including while waiting or paused. |
 
-A valid SSE `retry:` field replaces the interval. A valid HTTP `Retry-After` can increase an attempt's wait. With retries disabled, EOF closes and failures propagate.
+A valid SSE `retry:` field replaces the interval. A valid HTTP `Retry-After` can increase an attempt's wait. With reconnection disabled, EOF closes and failures propagate.
 
-Only completed SSE blocks update the resume cursor, including blocks with no data. Every reconnection reruns middleware and sends the latest cursor as UTF-8 bytes in `Last-Event-ID`; an empty ID clears the header. Reconnection does not deduplicate events or guarantee exactly-once delivery. Attempts made inside retry middleware are outside this retry budget. This API does not implement `EventSource`.
+Only completed SSE blocks update the resume cursor, including blocks with no data. Every reconnection reruns middleware and sends the latest cursor as UTF-8 bytes in `Last-Event-ID`; an empty ID clears the header. Reconnection does not deduplicate events or guarantee exactly-once delivery. Attempts made inside retry middleware are outside this attempt budget. This API does not implement `EventSource`.
 
 ### Replay request bodies
 
 The first demand builds the request; mutations before that point affect it. SSE reconnects reuse its URL and encoded inputs. With reconnection enabled, the body is buffered once and replayed with the same bytes, including multipart boundaries. One-shot Web streams and async iterables are rejected before transport in this mode.
 
-JSON streams, SSE with `retry: false`, and SSE with `maxRetries: 0` send without pre-buffering and accept streaming upload bodies. Retrying a POST can repeat an operation; use reconnection only when replay is appropriate for the API.
+JSON streams, SSE with `reconnect: false`, and SSE with `maxAttempts: 1` send without pre-buffering and accept streaming upload bodies. Retrying a POST can repeat an operation; use reconnection only when replay is appropriate for the API.
 
 ## JSON records
 
@@ -68,7 +68,7 @@ JSONL and NDJSON emit parsed JSON values, including scalars. LF and CRLF separat
 
 JSON Text Sequences (`application/json-seq`) use an RS byte (`0x1E`) before each JSON value and can contain multiline values. Complete values followed by LF are delivered without waiting for the next RS. Malformed, BOM-prefixed, or truncated records and malformed UTF-8 are discarded; parsing resumes at the next RS. Consecutive RS bytes and bytes before the first RS are ignored. Top-level numbers, booleans, and `null` need trailing JSON whitespace. Complete objects, arrays, and strings may end at RS or EOF without LF; after delivery at LF, remaining bytes before the next RS are ignored.
 
-JSON record streams close at EOF, reject automatic retry settings, and never reconnect automatically. Transport failures propagate and discard pending partial records. Reopening and deduplicating records belong to your application. Formats such as `application/example+json-seq` are not decoded by `stream()`; read them with `fetch()`.
+JSON record streams close at EOF, reject enabled reconnection settings, and never reconnect automatically. Transport failures propagate and discard pending partial records. Reopening and deduplicating records belong to your application. Formats such as `application/example+json-seq` are not decoded by `stream()`; read them with `fetch()`.
 
 ## Limit message size
 
@@ -119,7 +119,7 @@ Native pipe cancellation and error propagation apply. Await the pipe so destinat
 <!-- example: client -->
 
 ```ts
-await api.stream("GET /events", { retry: false }).pipeTo(
+await api.stream("GET /events", { reconnect: false }).pipeTo(
   new WritableStream({
     write(event) {
       console.log(event.data)

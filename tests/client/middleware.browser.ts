@@ -33,7 +33,7 @@ describe("middleware", () => {
     middleware[0] = () => Promise.reject(new Error("changed configuration"))
     const fetched = api.fetch("GET /pets/{id}", { params: { id: 1 } })
     const result = api.result("GET /pets/{id}", { params: { id: 2 } })
-    const reader = api.stream("GET /events", { retry: false }).getReader()
+    const reader = api.stream("GET /events", { reconnect: false }).getReader()
     const reading = reader.read()
     ready.resolve()
     await Promise.all([fetched, result, reading])
@@ -240,7 +240,7 @@ describe("middleware", () => {
       contract,
       {
         middleware: [
-          // A retry: the second try sends the request the first one did not use up.
+          // A reconnect: the second try sends the request the first one did not use up.
           async (request, next) => {
             const first = await next(request.clone())
             if (first.status !== 503) return first

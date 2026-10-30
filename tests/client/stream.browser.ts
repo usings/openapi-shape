@@ -18,7 +18,7 @@ describe("native stream consumption", () => {
       headers: { "content-type": "application/json" },
       params: { id: 42 },
       body: input,
-      retry: false,
+      reconnect: false,
     })
     expect(stream).toBeInstanceOf(ReadableStream)
     const reader = stream.getReader()
@@ -251,7 +251,7 @@ describe("subscription cancellation", () => {
     expect(cancel).toHaveBeenCalledOnce()
   })
 
-  it("clears a retry wait and never starts another request", async () => {
+  it("clears a reconnect wait and never starts another request", async () => {
     vi.useFakeTimers()
     const failure = new Error("offline")
     const fetch = vi.fn<Fetcher>().mockRejectedValue(failure)
@@ -260,7 +260,7 @@ describe("subscription cancellation", () => {
       .stream("GET /events", {
         headers: { accept: "text/event-stream" },
         signal: signal.signal,
-        retry: {},
+        reconnect: {},
       })
       .getReader()
     const read = reader.read()
@@ -382,11 +382,11 @@ it.each(["transport", "middleware", "reader"] as const)(
   },
 )
 
-it("does not reconnect when reader cancellation wins the retry timer boundary", async () => {
+it("does not reconnect when reader cancellation wins the reconnect timer boundary", async () => {
   vi.useFakeTimers()
   const fetch = vi.fn<Fetcher>().mockRejectedValue(new Error("offline"))
   const reader = client({ fetch })
-    .stream("GET /events", { headers: { accept: "text/event-stream" }, retry: { delay: 10 } })
+    .stream("GET /events", { headers: { accept: "text/event-stream" }, reconnect: { delay: 10 } })
     .getReader()
   const pending = reader.read()
   await vi.advanceTimersByTimeAsync(9)
@@ -412,7 +412,7 @@ it("rejects invalid endpoint/request input through the stream while fetch remain
         headers: { "accept": "text/event-stream", "content-type": "application/json" },
         params: { id: 1 },
         body: new ReadableStream() as never,
-        retry: {},
+        reconnect: {},
       })
       .getReader()
       .read(),

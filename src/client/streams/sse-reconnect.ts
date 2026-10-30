@@ -1,5 +1,5 @@
 import { wait } from "../cancellation"
-import type { StreamRetryOptions } from "../types/stream"
+import type { ReconnectOptions } from "../types/stream"
 import type { EventState } from "./parser-sse"
 
 /** A connection ends normally, stops explicitly, or is interrupted by a recoverable failure. */
@@ -15,49 +15,49 @@ type Connect = () => AsyncGenerator<unknown, ConnectionResult>
  *
  * @yields Events from sequential SSE connections.
  */
-export async function* streamSession(
+export async function* reconnectSSE(
   connect: Connect,
   state: EventState,
-  retry: boolean | StreamRetryOptions | undefined,
+  reconnect: boolean | ReconnectOptions | undefined,
   signal: AbortSignal,
 ): AsyncGenerator<unknown> {
-  const maxRetries =
-    retry === undefined || retry === false
-      ? 0
-      : retry === true
+  const maxAttempts =
+    reconnect === undefined || reconnect === false
+      ? 1
+      : reconnect === true
         ? Infinity
-        : (retry.maxRetries ?? Infinity)
-  let retries = 0
+        : (reconnect.maxAttempts ?? Infinity)
+  let attempts = 0
   while (true) {
     signal.throwIfAborted()
+    attempts++
     const result = yield* connect()
     signal.throwIfAborted()
     if (result.kind === "stop") return
-    if (retries >= maxRetries) {
+    if (attempts >= maxAttempts) {
       if (result.kind === "interrupted") throw result.error
       return
     }
     const delay = result.kind === "interrupted" ? result.retryAfter : 0
-    retries++
-    // oxlint-disable-next-line no-await-in-loop -- one subscription owns one ordered retry wait
+    // oxlint-disable-next-line no-await-in-loop -- one subscription owns one ordered reconnect wait
     await wait(Math.max(state.retry, delay), signal)
   }
 }
 
 /** Only a safe integer interval can be represented exactly by the parser and timer. */
-export function validateRetry(retry: boolean | StreamRetryOptions | undefined): number {
+export function validateReconnect(reconnect: boolean | ReconnectOptions | undefined): number {
   if (
-    retry !== undefined &&
-    typeof retry !== "boolean" &&
-    (retry === null || typeof retry !== "object")
+    reconnect !== undefined &&
+    typeof reconnect !== "boolean" &&
+    (reconnect === null || typeof reconnect !== "object")
   )
-    throw new TypeError("SSE retry must be a boolean or an options object")
-  const delay = typeof retry === "boolean" ? 1000 : (retry?.delay ?? 1000)
-  const maxRetries = typeof retry === "boolean" ? undefined : retry?.maxRetries
+    throw new TypeError("SSE reconnect must be a boolean or an options object")
+  const delay = typeof reconnect === "boolean" ? 1000 : (reconnect?.delay ?? 1000)
+  const maxAttempts = typeof reconnect === "boolean" ? undefined : reconnect?.maxAttempts
   if (!Number.isSafeInteger(delay) || delay < 0)
-    throw new TypeError("SSE retry delay must be a non-negative safe integer")
-  if (maxRetries !== undefined && (!Number.isSafeInteger(maxRetries) || maxRetries < 0))
-    throw new TypeError("SSE maxRetries must be a non-negative safe integer")
+    throw new TypeError("SSE reconnect delay must be a non-negative safe integer")
+  if (maxAttempts !== undefined && (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1))
+    throw new TypeError("SSE maxAttempts must be a positive safe integer")
   return delay
 }
 

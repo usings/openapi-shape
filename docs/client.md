@@ -176,11 +176,11 @@ Header values remain `string | null`, even for required or numeric schemas: no p
 
 HTTP responses and failures to complete a call are handled differently:
 
-| API        | Non-successful HTTP status                                                                    | Other failures                                                                            |
-| ---------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `fetch()`  | Resolves to the native response, declared or not.                                             | Request construction, transport and middleware failures reject.                           |
-| `result()` | Declared statuses resolve with an `error` body or `null`.                                     | Contract checks, body reading and decoding failures reject.                               |
-| `stream()` | Errors consumption unless the selected SSE retry policy retries it. HTTP 204 closes normally. | Construction, validation, transport and parsing failures are observed during consumption. |
+| API        | Non-successful HTTP status                                                                           | Other failures                                                                            |
+| ---------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `fetch()`  | Resolves to the native response, declared or not.                                                    | Request construction, transport and middleware failures reject.                           |
+| `result()` | Declared statuses resolve with an `error` body or `null`.                                            | Contract checks, body reading and decoding failures reject.                               |
+| `stream()` | Errors consumption unless the selected SSE reconnection policy retries it. HTTP 204 closes normally. | Construction, validation, transport and parsing failures are observed during consumption. |
 
 `stream()` is lazy: creating it does not send a request. See [SSE reconnection](./streaming.md#sse-reconnection) for retryable outcomes. Empty or malformed JSON decoded by `result()` rejects with the native parsing error.
 

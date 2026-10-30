@@ -104,17 +104,17 @@ export const message: EndpointMessage<Endpoints, "GET /events"> = {
   data: "hello",
   id: "1",
 }
-api.stream("GET /events", { retry: false, signal: AbortSignal.abort() })
+api.stream("GET /events", { reconnect: false, signal: AbortSignal.abort() })
 const limited: Pick<StreamOptions, "maxMessageBytes"> = { maxMessageBytes: 8 * 1024 * 1024 }
 api.stream("GET /events", limited) satisfies ReadableStream<
   EndpointMessage<Endpoints, "GET /events">
 >
-api.stream("GET /events", { ...limited, retry: false })
+api.stream("GET /events", { ...limited, reconnect: false })
 export function limitedEvents(maxMessageBytes?: number) {
   return api.stream("GET /events", { maxMessageBytes })
 }
 api.stream("GET /events", {
-  retry: { delay: 12, maxRetries: 2 },
+  reconnect: { delay: 12, maxAttempts: 3 },
   headers: { accept: "text/event-stream" },
 })
 // @ts-expect-error Web Streams return synchronously
@@ -142,7 +142,7 @@ api.result("GET /plain", limited)
 api.stream("POST /events/{id}", limited)
 // @ts-expect-error sequence operations must use stream or fetch
 api.result("GET /sequence")
-api.stream("GET /sequence", { retry: false })
+api.stream("GET /sequence", { reconnect: false })
 api.stream("GET /records") satisfies ReadableStream<
   { kind: "record" } | null | string | number | boolean | number[]
 >
@@ -151,8 +151,8 @@ api.stream("GET /jsonl", {
 }) satisfies ReadableStream<null | "one" | [1, 2]>
 api.stream("GET /jsonl", { headers: { accept: "application/jsonl" } })
 // @ts-expect-error JSON line streams cannot reconnect
-api.stream("GET /records", { retry: { delay: 10 } })
-api.stream("GET /jsonl", { retry: false })
+api.stream("GET /records", { reconnect: { delay: 10 } })
+api.stream("GET /jsonl", { reconnect: false })
 api.stream("POST /events/{id}", {
   params: { id: 1 },
   query: { topic: "orders" },
@@ -191,14 +191,14 @@ api.stream("POST /events/{id}", {
   params: { id: 1 },
   query: { topic: "orders" },
   body: new ReadableStream<Uint8Array>(),
-  retry: false,
+  reconnect: false,
 })
 api.stream("POST /events/{id}", {
   headers: { "content-type": "application/json" },
   params: { id: 1 },
   query: { topic: "orders" },
   body: new ReadableStream<Uint8Array>(),
-  retry: { maxRetries: 0 },
+  reconnect: { maxAttempts: 1 },
   maxMessageBytes: 1024,
 })
 // @ts-expect-error a reconnecting subscription still requires replayable bytes
@@ -207,7 +207,7 @@ api.stream("POST /events/{id}", {
   params: { id: 1 },
   query: { topic: "orders" },
   body: new ReadableStream<Uint8Array>(),
-  retry: { maxRetries: 1 },
+  reconnect: { maxAttempts: 2 },
 })
 declare const body: AsyncIterable<Uint8Array>
 api.stream("POST /events/{id}", { params: { id: 1 }, query: { topic: "orders" }, body })
@@ -217,7 +217,7 @@ api.stream("GET /events", { body: "hello" })
 api.stream("GET /mixed")
 api.stream("GET /mixed", {})
 api.stream("GET /mixed", {
-  retry: { maxRetries: 3 },
+  reconnect: { maxAttempts: 4 },
   headers: { accept: "text/event-stream" },
 }) satisfies ReadableStream<StreamMessage & { event: "update"; data: "wire" }>
 api.stream("GET /mixed", { headers: { accept: "application/x-ndjson" } }) satisfies ReadableStream<{
@@ -234,8 +234,8 @@ api.stream("GET /mixed", {
   headers: { accept: "application/jsonl" },
 }) satisfies ReadableStream<number[]>
 api.stream("GET /mixed", { headers: { accept: "application/json" } })
-// @ts-expect-error the selected JSON line media forbids retry
-api.stream("GET /mixed", { retry: { delay: 1 }, headers: { accept: "application/x-ndjson" } })
+// @ts-expect-error the selected JSON line media forbids reconnect
+api.stream("GET /mixed", { reconnect: { delay: 1 }, headers: { accept: "application/x-ndjson" } })
 
 api.stream("GET /mixed", {
   headers: { accept: "application/jsonl" },
@@ -243,16 +243,16 @@ api.stream("GET /mixed", {
 }) satisfies ReadableStream<StreamMessage>
 api.stream("GET /two-events")
 api.stream("GET /two-events", {
-  retry: false,
+  reconnect: false,
   headers: { accept: "Text/Event-Stream; charset=utf-8" },
 }) satisfies ReadableStream<StreamMessage & { event: "two" }>
 const selected: StreamArgs<Endpoints, "GET /mixed"> = [
-  { retry: false, headers: { accept: "text/event-stream" } },
+  { reconnect: false, headers: { accept: "text/event-stream" } },
 ]
 api.stream<"GET /mixed", StreamMedia<Endpoints, "GET /mixed">, object>("GET /mixed", ...selected)
 export const invalid: StreamArgs<Endpoints, "GET /mixed"> = [
-  // @ts-expect-error a default StreamArgs union must preserve the media/retry association
-  { retry: false, headers: { accept: "application/jsonl" } },
+  // @ts-expect-error JSON media cannot enable reconnection in a StreamArgs union
+  { reconnect: true, headers: { accept: "application/jsonl" } },
 ]
 function forward<K extends StreamEndpoint<Endpoints>, const M extends StreamMedia<Endpoints, K>>(
   key: K,
@@ -301,7 +301,7 @@ api.stream("GET /mixed", { headers: { accept: "application/*" } }) satisfies Rea
   EndpointStreamItem<Endpoints, "GET /mixed">
 >
 declare const media: "text/event-stream" | "application/jsonl"
-api.stream("GET /mixed", { retry: false, headers: { accept: media } })
+api.stream("GET /mixed", { reconnect: false, headers: { accept: media } })
 export type Media = Check<
   Equal<
     StreamMedia<Endpoints, "GET /mixed">,
@@ -339,16 +339,35 @@ api.stream("TRACE /records")
 // @ts-expect-error unknown operations remain unavailable
 api.stream("GET /missing")
 
-void function retryBooleanChecks(client: Client<Endpoints>, retry: boolean) {
-  client.stream("GET /events", { retry: true })
-  client.stream("GET /events", { retry })
-  // @ts-expect-error retry true cannot replay a streaming request body
+void function reconnectBooleanChecks(client: Client<Endpoints>, reconnect: boolean) {
+  client.stream("GET /events", { reconnect: true })
+  client.stream("GET /events", { reconnect })
+  // @ts-expect-error reconnect true cannot replay a streaming request body
   client.stream("POST /events/{id}", {
     params: { id: 1 },
     query: { topic: "orders" },
     body: new ReadableStream<Uint8Array>(),
-    retry: true,
+    reconnect: true,
   })
   // @ts-expect-error JSON records cannot automatically reconnect
-  client.stream("GET /records", { retry: true })
+  client.stream("GET /records", { reconnect: true })
 }
+
+// A unique streaming media can be inferred even alongside complete JSON responses.
+declare const inferred: Client<{
+  "GET /inferred": {
+    responses: {
+      200: {
+        content: {
+          "application/json": { ready: true }
+          "text/event-stream": StreamMessage[]
+        }
+      }
+    }
+  }
+}>
+inferred.stream("GET /inferred", { reconnect: { maxAttempts: 2 } })
+// @ts-expect-error the previous option name is not part of the public API
+inferred.stream("GET /inferred", { retry: true })
+// @ts-expect-error multiple streaming representations require an explicit selection for reconnection
+api.stream("GET /mixed", { reconnect: true })

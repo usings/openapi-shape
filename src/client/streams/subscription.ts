@@ -16,8 +16,8 @@ import { readJsonSequence } from "./parser-json-seq"
 import { readJsonLines } from "./parser-jsonl"
 import type { EventState } from "./parser-sse"
 import { readEvents } from "./parser-sse"
-import type { ConnectionResult } from "./session"
-import { retryAfterDelay, streamSession, validateRetry } from "./session"
+import type { ConnectionResult } from "./sse-reconnect"
+import { retryAfterDelay, reconnectSSE, validateReconnect } from "./sse-reconnect"
 
 /** Adapt one lazy subscription to standard Streams demand and cancellation. */
 export function stream(
@@ -115,7 +115,7 @@ async function* subscription(
     : undefined
   if (!media?.length)
     throw new TypeError(`Endpoint "${endpoint}" does not declare a successful streaming response`)
-  const { retry, maxMessageBytes, ...call } = init
+  const { reconnect, maxMessageBytes, ...call } = init
   const selectionHeaders = mergeHeaders(
     defaults.headers,
     init.headers,
@@ -130,16 +130,21 @@ async function* subscription(
         ? media[0]
         : undefined
   const format = selected ? streamFormat(selected) : undefined
-  if (format !== "sse" && retry !== undefined && retry !== false)
-    throw new TypeError("Automatic retry requires a single SSE media selection")
+  if (format !== "sse" && reconnect !== undefined && reconnect !== false)
+    throw new TypeError("Automatic reconnect requires a single SSE media selection")
   const replay =
     format === "sse" &&
-    retry !== undefined &&
-    retry !== false &&
-    (retry === true || retry.maxRetries !== 0)
+    reconnect !== undefined &&
+    reconnect !== false &&
+    (reconnect === true || reconnect.maxAttempts !== 1)
   if (replay && isStream(call.body))
-    throw new TypeError("SSE reconnection cannot replay a streaming request body; set retry: false")
-  const state: EventState = { id: "", retry: format === "sse" ? validateRetry(retry) : 1000 }
+    throw new TypeError(
+      "SSE reconnection cannot replay a streaming request body; set reconnect: false",
+    )
+  const state: EventState = {
+    id: "",
+    retry: format === "sse" ? validateReconnect(reconnect) : 1000,
+  }
   const template = buildRequest(endpoint, { ...call, signal }, defaults)
   const body =
     !replay || template.body === null ? undefined : await abortable(template.arrayBuffer(), signal)
@@ -169,7 +174,12 @@ async function* subscription(
       defaults.endpoints[endpoint],
     )
   }
-  yield* streamSession(connect, state, format === "sse" ? retry : false, signal)
+  if (format === "sse") yield* reconnectSSE(connect, state, reconnect, signal)
+  else {
+    const result = yield* connect()
+    signal.throwIfAborted()
+    if (result.kind === "interrupted") throw result.error
+  }
 }
 
 /**

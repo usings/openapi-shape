@@ -183,7 +183,7 @@ describe("JSON line streams", () => {
     },
   )
 
-  it("negotiates lists and defaults while rejecting automatic JSON retry before transport", async () => {
+  it("negotiates lists and defaults while rejecting automatic JSON reconnect before transport", async () => {
     const fetch = vi.fn<Fetcher>().mockImplementation(() => Promise.resolve(jsonResponse("1\n2\n")))
     const client = api({ fetch })
     expect(
@@ -198,12 +198,12 @@ describe("JSON line streams", () => {
         }),
       ),
     ).toStrictEqual([1, 2])
-    expect(await collect(client.stream("GET /records", { retry: false }))).toStrictEqual([1, 2])
+    expect(await collect(client.stream("GET /records", { reconnect: false }))).toStrictEqual([1, 2])
     await expect(
       collect(
         (client.stream as (key: string, options: object) => ReadableStream<unknown>)(
           "GET /records",
-          { retry: {} },
+          { reconnect: {} },
         ),
       ),
     ).rejects.toThrow("requires a single SSE")
@@ -220,7 +220,7 @@ describe("JSON line streams", () => {
     expect(fetch.mock.calls[0][0].headers.get("accept")).toBe("application/x-ndjson")
   })
 
-  it.each([408, 429, 503])("does not retry HTTP %s", async (status) => {
+  it.each([408, 429, 503])("does not reconnect HTTP %s", async (status) => {
     const fetch = vi.fn<Fetcher>().mockResolvedValue(new Response(null, { status }))
     await expect(collect(api({ fetch }).stream("GET /records"))).rejects.toMatchObject({
       code: "HTTP_ERROR",
@@ -229,7 +229,7 @@ describe("JSON line streams", () => {
     expect(fetch).toHaveBeenCalledOnce()
   })
 
-  it("does not retry a network or parser failure", async () => {
+  it("does not reconnect a network or parser failure", async () => {
     const failure = new Error("offline")
     const fetch = vi.fn<Fetcher>().mockRejectedValue(failure)
     await expect(collect(api({ fetch }).stream("GET /records"))).rejects.toBe(failure)

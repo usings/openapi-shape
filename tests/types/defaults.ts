@@ -15,8 +15,8 @@ interface StreamingEndpoints {
 }
 void function defaultStreamChecks(contract: Contract<StreamingEndpoints>) {
   const client = createClient(contract, { headers: { Accept: "text/event-stream" } })
-  client.stream("GET /events", { retry: true })
-  const stream = client.stream("GET /events", { retry: { maxRetries: 2 } })
+  client.stream("GET /events", { reconnect: true })
+  const stream = client.stream("GET /events", { reconnect: { maxAttempts: 3 } })
   expectTypeOf(stream).toEqualTypeOf<ReadableStream<StreamMessage & { data: string }>>()
   const reader = stream.getReader()
   void reader.read().then(({ value }) => {
@@ -24,10 +24,10 @@ void function defaultStreamChecks(contract: Contract<StreamingEndpoints>) {
   })
   const records = client.stream("GET /events", { headers: { ACCEPT: "application/x-ndjson" } })
   expectTypeOf(records).toEqualTypeOf<ReadableStream<{ id: number }>>()
-  // @ts-expect-error overriding Accept must preserve non-SSE retry restrictions
+  // @ts-expect-error overriding Accept must preserve non-SSE reconnect restrictions
   client.stream("GET /events", {
     headers: { ACCEPT: "application/x-ndjson" },
-    retry: { maxRetries: 2 },
+    reconnect: { maxAttempts: 3 },
   })
 }
 
@@ -56,11 +56,11 @@ void function mixedMediaChecks(
     body: { j: "wrong" },
     headers: { "CONTENT-TYPE": "application/x-www-form-urlencoded", "accept": "text/event-stream" },
   })
-  // @ts-expect-error opaque Accept overrides cannot enable automatic SSE retry
+  // @ts-expect-error opaque Accept overrides cannot enable automatic SSE reconnect
   client.stream("POST /mixed", {
     body: new Blob(),
     headers: new Headers({ Accept: "application/x-ndjson" }),
-    retry: { maxRetries: 1 },
+    reconnect: { maxAttempts: 2 },
   })
   const dynamic = createClient(contract, { headers: defaults })
   // @ts-expect-error defaults may select form instead of JSON
@@ -90,6 +90,9 @@ void function opaqueDefaultChecks(
 ) {
   const client = createClient(contract, { headers: { accept } })
   // @ts-expect-error an opaque default may negotiate something other than SSE
-  client.stream("GET /sse", { retry: { maxRetries: 1 } })
-  client.stream("GET /sse", { headers: { ACCEPT: "text/event-stream" }, retry: { maxRetries: 1 } })
+  client.stream("GET /sse", { reconnect: { maxAttempts: 2 } })
+  client.stream("GET /sse", {
+    headers: { ACCEPT: "text/event-stream" },
+    reconnect: { maxAttempts: 2 },
+  })
 }

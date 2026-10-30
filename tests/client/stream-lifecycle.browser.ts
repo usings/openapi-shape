@@ -123,7 +123,7 @@ describe("Web stream lifecycle", () => {
             ),
           ),
       })
-      const reader = client.stream("GET /events", { retry: false }).getReader()
+      const reader = client.stream("GET /events", { reconnect: false }).getReader()
       await reader.read()
       const pending = state === "reading" ? reader.read() : undefined
       let finished = false
@@ -162,7 +162,7 @@ describe("Web stream lifecycle", () => {
           ),
         ),
     })
-      .stream("GET /events", { retry: false })
+      .stream("GET /events", { reconnect: false })
       .getReader()
     await reader.read()
     await expect(reader.cancel("stop")).rejects.toBe(failure)
@@ -177,14 +177,14 @@ describe("Web stream lifecycle", () => {
       },
     })
     const values: StreamMessage[] = []
-    for await (const value of client.stream("GET /events", { retry: false })) values.push(value)
+    for await (const value of client.stream("GET /events", { reconnect: false })) values.push(value)
     expect(values).toHaveLength(1)
     expect(request?.signal.aborted).toBe(false)
   })
 
-  it.each([false, { maxRetries: 0 }] as const)(
-    "sends one-shot SSE uploads when retry is %j",
-    async (retry) => {
+  it.each([false, { maxAttempts: 1 }] as const)(
+    "sends one-shot SSE uploads when reconnect is %j",
+    async (reconnect) => {
       const sent = vi.fn<Fetcher>(async (request: Request) => {
         expect(await request.text()).toBe("upload")
         return sseResponse()
@@ -201,7 +201,7 @@ describe("Web stream lifecycle", () => {
           headers: { accept: "text/event-stream" },
           params: { id: 1 },
           body,
-          retry,
+          reconnect,
         })
         .getReader()
       expect(await reader.read()).toMatchObject({ value: { data: "hello" } })

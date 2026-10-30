@@ -85,7 +85,7 @@ A call names one endpoint, not a union of keys. `Middleware`, `MiddlewareContext
 
 ### Forward stream calls
 
-Stream wrappers should preserve `M extends StreamMedia<Endpoints, K>` so `headers.accept` narrows the item. Use `NegotiatedStreamArgs<Endpoints, K, D>` for dynamic Accept lists or opaque headers; its result keeps all declared stream item alternatives and automatic reconnection is disabled. `EndpointMessage` is SSE-specific; `StreamOptions` and `StreamRetryOptions` describe stream settings.
+Stream wrappers should preserve `M extends StreamMedia<Endpoints, K>` so `headers.accept` narrows the item. Use `NegotiatedStreamArgs<Endpoints, K, D>` for dynamic Accept lists or opaque headers; its result keeps all declared stream item alternatives and automatic reconnection is disabled. `EndpointMessage` is SSE-specific; `StreamOptions` and `ReconnectOptions` describe stream settings.
 
 Stream wrappers preserving generic `K` and `M` use `client.stream<K, M, object>(endpoint, ...args)` so the helper's canonical header constraints are retained.
 

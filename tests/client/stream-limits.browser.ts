@@ -77,7 +77,11 @@ function fixture(
   )
   const open = (maxMessageBytes?: number): ReadableStream<unknown> =>
     media === "text/event-stream"
-      ? client.stream("GET /data", { retry: false, maxMessageBytes, headers: { accept: media } })
+      ? client.stream("GET /data", {
+          reconnect: false,
+          maxMessageBytes,
+          headers: { accept: media },
+        })
       : media === "application/jsonl"
         ? client.stream("GET /data", { maxMessageBytes, headers: { accept: media } })
         : client.stream("GET /data", { maxMessageBytes, headers: { accept: media } })
@@ -176,11 +180,11 @@ describe("per-message stream byte limits", () => {
     },
   )
 
-  it("does not retry SSE messages that exceed the limit", async () => {
+  it("does not reconnect SSE messages that exceed the limit", async () => {
     const { client, fetch } = fixture("text/event-stream", [encoder.encode("data:too large")])
     const stream = client.stream("GET /data", {
       maxMessageBytes: 8,
-      retry: { delay: 0, maxRetries: 2 },
+      reconnect: { delay: 0, maxAttempts: 3 },
       headers: { accept: "text/event-stream" },
     })
     await expect(collect(stream)).rejects.toMatchObject({ code: "MESSAGE_TOO_LARGE" })

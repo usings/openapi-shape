@@ -111,7 +111,7 @@ describe("SSE connections", () => {
     const events = api.stream("GET /events", {
       headers: { accept: "text/event-stream" },
       baseURL,
-      retry: { delay: 0, maxRetries: 1 },
+      reconnect: { delay: 0, maxAttempts: 2 },
     })
     const reader = events.getReader()
     expect(requests).toHaveLength(0)
@@ -176,7 +176,7 @@ describe("SSE connections", () => {
         headers: { "accept": "text/event-stream", "content-type": "application/json" },
         params: { id: 1 },
         body: input,
-        retry: { maxRetries: 1 },
+        reconnect: { maxAttempts: 2 },
       })
       .getReader()
     expect(await reader.read()).toMatchObject({ value: { data: "first" } })
@@ -213,7 +213,7 @@ describe("SSE connections", () => {
     const reader = api
       .stream("GET /events", {
         headers: { "accept": "text/event-stream", "Last-Event-ID": "initial" },
-        retry: { delay: 5 },
+        reconnect: { delay: 5 },
       })
       .getReader()
     await reader.read()
@@ -233,7 +233,10 @@ describe("SSE connections", () => {
         .mockResolvedValueOnce(new Response(new ReadableStream({ cancel }), { status }))
         .mockResolvedValueOnce(new Response(null, { status: 204 }))
       const reader = client({ fetch })
-        .stream("GET /events", { headers: { accept: "text/event-stream" }, retry: { delay: 10 } })
+        .stream("GET /events", {
+          headers: { accept: "text/event-stream" },
+          reconnect: { delay: 10 },
+        })
         .getReader()
       const end = reader.read()
       await vi.advanceTimersByTimeAsync(10)
@@ -243,7 +246,7 @@ describe("SSE connections", () => {
     },
   )
 
-  it("retries transport failure, without resetting a lifetime retry budget on successful connections", async () => {
+  it("retries transport failure, without resetting a lifetime reconnect budget on successful connections", async () => {
     vi.useFakeTimers()
     const failure = new Error("network")
     const fetch = vi
@@ -254,7 +257,7 @@ describe("SSE connections", () => {
     const reader = client({ fetch })
       .stream("GET /events", {
         headers: { accept: "text/event-stream" },
-        retry: { delay: 10, maxRetries: 1 },
+        reconnect: { delay: 10, maxAttempts: 2 },
       })
       .getReader()
     const first = reader.read()
@@ -264,19 +267,19 @@ describe("SSE connections", () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
-  it.each([false, { maxRetries: 0 }] as const)("does not retry with %j", async (retry) => {
+  it.each([false, { maxAttempts: 1 }] as const)("does not reconnect with %j", async (reconnect) => {
     const failure = new Error("network")
     const fetch = vi.fn<Fetcher>().mockRejectedValue(failure)
     await expect(
       client({ fetch })
-        .stream("GET /events", { headers: { accept: "text/event-stream" }, retry })
+        .stream("GET /events", { headers: { accept: "text/event-stream" }, reconnect })
         .getReader()
         .read(),
     ).rejects.toBe(failure)
     expect(fetch).toHaveBeenCalledOnce()
     const finite = client({ fetch: () => Promise.resolve(response()) }).stream("GET /events", {
       headers: { accept: "text/event-stream" },
-      retry,
+      reconnect,
     })
     const values: StreamMessage[] = []
     for await (const value of finite) values.push(value)
@@ -291,7 +294,7 @@ describe("SSE connections", () => {
     { source: "read", failure: null },
     { source: "read", failure: "disconnected" },
   ])(
-    "preserves a $source failure of $failure after the retry budget ends",
+    "preserves a $source failure of $failure after the reconnect budget ends",
     async ({ source, failure }) => {
       vi.useFakeTimers()
       const fetch = vi.fn<Fetcher>().mockImplementation(() => {
@@ -310,7 +313,7 @@ describe("SSE connections", () => {
       const rejected = client({ fetch })
         .stream("GET /events", {
           headers: { accept: "text/event-stream" },
-          retry: { delay: 0, maxRetries: 1 },
+          reconnect: { delay: 0, maxAttempts: 2 },
         })
         .getReader()
         .read()
@@ -335,7 +338,7 @@ describe("SSE connections", () => {
     const end = client({ fetch })
       .stream("GET /events", {
         headers: { accept: "text/event-stream" },
-        retry: { delay: 10, maxRetries: 1 },
+        reconnect: { delay: 10, maxAttempts: 2 },
       })
       .getReader()
       .read()
@@ -354,7 +357,7 @@ describe("SSE connections", () => {
       .mockResolvedValueOnce(response("retry: 7\ndata: one\n\n"))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
     const reader = client({ fetch })
-      .stream("GET /events", { headers: { accept: "text/event-stream" }, retry: {} })
+      .stream("GET /events", { headers: { accept: "text/event-stream" }, reconnect: {} })
       .getReader()
     const first = reader.read()
     await vi.advanceTimersByTimeAsync(1999)
@@ -406,7 +409,7 @@ describe("SSE connections", () => {
     },
   )
 
-  it("rejects missing or middleware-consumed bodies without retry", async () => {
+  it("rejects missing or middleware-consumed bodies without reconnect", async () => {
     for (const received of [
       new Response(null, { headers: { "content-type": "text/event-stream" } }),
       response(),
@@ -422,7 +425,7 @@ describe("SSE connections", () => {
     }
   })
 
-  it("does not retry a middleware error after middleware disposes its response", async () => {
+  it("does not reconnect a middleware error after middleware disposes its response", async () => {
     const failure = new TypeError("middleware bug")
     const cancel = vi.fn<() => void>()
     const fetch = vi.fn<Fetcher>().mockResolvedValue(
@@ -455,7 +458,7 @@ describe("SSE connections", () => {
     expect(fetch).toHaveBeenCalledOnce()
   })
 
-  it("does not retry an SSE decoder error caused by middleware response chunks", async () => {
+  it("does not reconnect an SSE decoder error caused by middleware response chunks", async () => {
     const fetch = vi.fn<Fetcher>().mockImplementation(() => Promise.resolve(new Response("unused")))
     const api = client({
       fetch,
@@ -478,7 +481,7 @@ describe("SSE connections", () => {
       api
         .stream("GET /events", {
           headers: { accept: "text/event-stream" },
-          retry: { delay: 0, maxRetries: 1 },
+          reconnect: { delay: 0, maxAttempts: 2 },
         })
         .getReader()
         .read(),
@@ -491,14 +494,16 @@ describe("SSE connections", () => {
     { delay: Number.NaN },
     { delay: Infinity },
     { delay: 0.5 },
-    { maxRetries: -1 },
-    { maxRetries: Infinity },
-    { maxRetries: 0.5 },
-  ])("reports invalid retry options %j through the stream", async (retry) => {
+    { maxAttempts: 0 },
+    { maxAttempts: -1 },
+    { maxAttempts: Number.MAX_SAFE_INTEGER + 1 },
+    { maxAttempts: Infinity },
+    { maxAttempts: 1.5 },
+  ])("reports invalid reconnect options %j through the stream", async (reconnect) => {
     const fetch = vi.fn<Fetcher>()
     const stream = client({ fetch }).stream("GET /events", {
       headers: { accept: "text/event-stream" },
-      retry,
+      reconnect,
     })
     await expect(stream.getReader().read()).rejects.toBeInstanceOf(TypeError)
     expect(fetch).not.toHaveBeenCalled()
@@ -522,7 +527,7 @@ describe("SSE connections", () => {
       )
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
     const pending = client({ fetch })
-      .stream("GET /events", { headers: { accept: "text/event-stream" }, retry: {} })
+      .stream("GET /events", { headers: { accept: "text/event-stream" }, reconnect: {} })
       .getReader()
       .read()
     await vi.advanceTimersByTimeAsync(delay - 1)
@@ -531,7 +536,7 @@ describe("SSE connections", () => {
     expect(await pending).toMatchObject({ done: true })
   })
 
-  it("splits a server retry interval above the JavaScript timer limit", async () => {
+  it("splits a server reconnect interval above the JavaScript timer limit", async () => {
     vi.useFakeTimers()
     const fetch = vi
       .fn<Fetcher>()
@@ -572,7 +577,7 @@ it("preserves the original read failure for dynamically negotiated SSE", async (
   expect(fetch).toHaveBeenCalledOnce()
 })
 
-it.each([true, {}])("reconnects with default options for retry %j", async (retry) => {
+it.each([true, {}])("reconnects with default options for reconnect %j", async (reconnect) => {
   vi.useFakeTimers()
   let calls = 0
   const api = client({
@@ -582,7 +587,7 @@ it.each([true, {}])("reconnects with default options for retry %j", async (retry
       ),
   })
   const reader = api
-    .stream("GET /events", { retry, headers: { accept: "text/event-stream" } })
+    .stream("GET /events", { reconnect, headers: { accept: "text/event-stream" } })
     .getReader()
   try {
     expect(await reader.read()).toMatchObject({ value: { data: "first" } })

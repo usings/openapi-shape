@@ -84,7 +84,9 @@ it("uses the same header merge for stream selection and requests", async () => {
           fetch: () => Promise.resolve(new Response(null, { status: 204 })),
         },
       )
-      const reader = api.stream("GET /events", { headers, retry: { maxRetries: 0 } }).getReader()
+      const reader = api
+        .stream("GET /events", { headers, reconnect: { maxAttempts: 1 } })
+        .getReader()
       expect(await reader.read()).toStrictEqual({ done: true, value: undefined })
       reader.releaseLock()
     }),

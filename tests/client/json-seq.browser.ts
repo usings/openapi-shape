@@ -141,7 +141,7 @@ describe("JSON text sequences", () => {
     expect(other.fetch).toHaveBeenCalledOnce()
   })
 
-  it("validates response media and rejects retry before transport", async () => {
+  it("validates response media and rejects reconnect before transport", async () => {
     const { client, fetch } = api(
       new Response("{}", { headers: { "content-type": "application/json" } }),
     )
@@ -149,7 +149,7 @@ describe("JSON text sequences", () => {
       code: "UNEXPECTED_MEDIA_TYPE",
     })
     const unsafe = client.stream as (key: string, options: object) => ReadableStream<unknown>
-    await expect(unsafe("GET /records", { retry: {} }).getReader().read()).rejects.toThrow(
+    await expect(unsafe("GET /records", { reconnect: {} }).getReader().read()).rejects.toThrow(
       "requires a single SSE",
     )
     expect(fetch).toHaveBeenCalledOnce()
