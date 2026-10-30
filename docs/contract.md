@@ -75,8 +75,8 @@ Every declared operation has an own registry entry, including methods unavailabl
 
 The generated header includes API metadata and root servers as comments. Formatting and diagnostic suppressions apply to the generated file; consuming code still checks its exported types.
 
-## Contract compatibility
+## Keep the generated module current
 
-Generate with the package installed alongside the client. The client checks the contract format version and endpoints object; a mismatch requires regeneration. Editing the version number does not migrate a contract, and individual registry entries are not revalidated at client creation.
+Generate with the package installed alongside the client. The client checks the contract format version and endpoints object; a mismatch requires regeneration. Regenerate the whole module instead of editing its version number. Individual registry entries are not revalidated at client creation.
 
 Keep the types and runtime registry together. After package upgrades, [regenerate and check](./generation.md#keep-generated-code-current) the whole module so call typing and serialization continue to describe the same API.

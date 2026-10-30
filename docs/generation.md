@@ -36,11 +36,7 @@ Commit the generated module and add paired scripts:
 }
 ```
 
-Run `pnpm api:generate` after changing the description or upgrading the package; run `pnpm api:check` in CI. Check mode compares complete UTF-8 bytes, including formatting. A missing or stale output exits `1`; regenerate with the same installed package rather than editing the output. See [contract compatibility](./contract.md#contract-compatibility).
-
-### Output file replacement
-
-Writing uses a temporary file beside the resolved destination and renames it over the complete output. It follows existing symlinks and preserves ordinary permission bits; the destination directory must be writable. Hard links keep the old file, and ownership, ACLs, and special permission bits are not copied. This avoids partial replacement, not power-loss corruption; abrupt termination can leave a temporary file.
+Run `pnpm api:generate` after changing the description or upgrading the package; run `pnpm api:check` in CI. Check mode compares complete UTF-8 bytes, including formatting. A missing or stale output exits `1`; regenerate with the same installed package rather than editing the output. See [keeping the generated module current](./contract.md#keep-the-generated-module-current).
 
 ## Programmatic API
 
@@ -62,7 +58,7 @@ try {
 }
 ```
 
-Generation failures reject with `GenerateError`, whose `diagnostics` includes errors and any warnings found. Invalid numeric options reject with `TypeError`; cancellation rejects with `signal.reason`. A failed or canceled run returns no partial module. Unlike the CLI, `writeFile` above is a direct write without atomic replacement.
+Generation failures reject with `GenerateError`, whose `diagnostics` includes errors and any warnings found. Invalid numeric options reject with `TypeError`; cancellation rejects with `signal.reason`. A failed or canceled run returns no partial module. The `writeFile` call above is a direct write; the CLI uses [atomic output replacement](#output-file-replacement).
 
 | Option                    | Default         | Meaning                                                                                    |
 | ------------------------- | --------------- | ------------------------------------------------------------------------------------------ |
@@ -133,10 +129,6 @@ Each load has a 30-second deadline covering its hook and body reading. The suppl
 
 The response media type selects JSON or YAML parsing. If unknown, the final URL's extension is used; otherwise parsing tries JSON, then YAML. YAML merge keys are supported; cyclic object graphs, including recursive aliases, are rejected. Recursive schemas expressed with `$ref` are supported.
 
-## Migrate document loading
-
-The `base` option has been removed: replace `generate(document, { base: uri, … })` with `generate(uri, { loader, … })`, returning the document for that entry URI as above. See [in-memory documents with external references](#load-an-in-memory-document-with-external-references) for the current loader pattern.
-
 ## Diagnostics
 
 Each diagnostic has `severity` (`error` or `warning`), a stable `code`, a human-readable `message`, and a `location`. Locations are JSON Pointers such as `#/components/schemas/Pet`, prefixed with the document URI for external sources. The CLI prefixes entry locations with the source path too.
@@ -160,3 +152,7 @@ Errors prevent output. Warnings identify invalid input, unsupported fields, or r
 | `invalid-status-code`     | warning  | Invalid response status key.                                                                                         |
 | `path-item-conflict`      | warning  | A nearer Path Item field overrides an inherited field.                                                               |
 | `renamed-schema`          | warning  | A generated declaration name was changed to avoid a collision.                                                       |
+
+## Output file replacement
+
+Writing uses a temporary file beside the resolved destination and renames it over the complete output. It follows existing symlinks and preserves ordinary permission bits; the destination directory must be writable. Hard links keep the old file, and ownership, ACLs, and special permission bits are not copied. This avoids partial replacement, not power-loss corruption; abrupt termination can leave a temporary file.

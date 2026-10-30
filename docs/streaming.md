@@ -22,7 +22,7 @@ The effective Accept comes from call headers, then client defaults. With no Acce
 
 A single exact declared value, including a known client default, narrows the item type and requires the response to match that declaration. Lists, ranges, and opaque or dynamic headers retain the union of possible items and use the actual response to choose a parser. These negotiated subscriptions make one connection. Automatic SSE reconnection requires a statically selected SSE representation; override uncertain defaults with an explicit call Accept to enable it.
 
-A wrong status, media type, or missing/consumed/locked body raises `StreamResponseError`; its `response` retains status and headers after cleanup. HTTP 204 closes normally.
+A wrong status, media type, or missing/consumed/locked body errors consumption. HTTP 204 closes normally. The shared [client error model](./client.md#handle-rejected-calls) defines error codes and diagnostics; the [SSE retry policy](#sse-reconnection) determines which failures reconnect.
 
 Use `itemSchema` to describe one item, or an array `schema` to describe complete sequence content. An item schema takes precedence. SSE only narrows its standard message fields; it does not decode JSON in `data`. See [sequence projections](./openapi.md#sequence-projections) for the type rules.
 
@@ -64,7 +64,7 @@ JSON streams, SSE with `retry: false`, and SSE with `maxRetries: 0` send without
 
 ## JSON records
 
-JSONL and NDJSON emit parsed JSON values, including scalars. LF and CRLF separators are accepted, as is a valid final record without a trailing newline. Blank/whitespace-only records, a BOM, invalid JSON, and malformed UTF-8 raise `StreamParseError` with a one-based `line` and original `cause`. Error messages omit record contents.
+JSONL and NDJSON emit parsed JSON values, including scalars. LF and CRLF separators are accepted, as is a valid final record without a trailing newline. Blank/whitespace-only records, a BOM, invalid JSON, and malformed UTF-8 raise `ClientError` with code `INVALID_STREAM_RECORD`, a one-based `details.line` and original `cause`. Error messages omit record contents.
 
 JSON Text Sequences (`application/json-seq`) use an RS byte (`0x1E`) before each JSON value and can contain multiline values. Complete values followed by LF are delivered without waiting for the next RS. Malformed, BOM-prefixed, or truncated records and malformed UTF-8 are discarded; parsing resumes at the next RS. Consecutive RS bytes and bytes before the first RS are ignored. Top-level numbers, booleans, and `null` need trailing JSON whitespace. Complete objects, arrays, and strings may end at RS or EOF without LF; after delivery at LF, remaining bytes before the next RS are ignored.
 
@@ -90,7 +90,7 @@ The limit is a positive safe integer in UTF-8 bytes; omitted means no limit. Eac
 | JSONL / NDJSON      | JSON text before LF, including whitespace and a preceding CR, if present.                                                                                                                                     |
 | JSON Text Sequences | JSON text after RS, excluding RS and the terminating top-level LF; whitespace inside the record counts.                                                                                                       |
 
-The parser checks before buffering more bytes or decoding a record. Exceeding the limit errors the stream with `StreamMessageTooLargeError`, which exposes `maxMessageBytes` and `receivedBytes`, and cancels the response body. This error terminates SSE without reconnecting, and JSON sequences do not discard it as a malformed record. Pending cleanup cannot delay the error.
+The parser checks before buffering more bytes or decoding a record. Exceeding the limit errors the stream with [`MESSAGE_TOO_LARGE`](./client.md#handle-rejected-calls) and cancels the response body. This error terminates SSE without reconnecting, and JSON sequences do not discard it as a malformed record. Pending cleanup cannot delay the error.
 
 The limit bounds per-message accumulation, not total process memory. Received chunks, decoded values, replay bodies, and transport buffers have their own memory costs.
 

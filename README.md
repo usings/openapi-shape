@@ -9,6 +9,9 @@
 
 Generate types and a runtime `contract` from OpenAPI 3.0, 3.1, or 3.2. Make typed requests with native Fetch and consume streams through Web Streams. The generated module and optional `openapi-shape/client` have no runtime dependencies.
 
+> [!WARNING]
+> This project is in 0.x development. Public APIs and generated output may change incompatibly between minor versions. Pin your dependency version and review changes before upgrading.
+
 ## Get started
 
 You need Node.js 22 or later to generate a module. The client needs an ES module environment with Fetch and Web Streams.
@@ -51,6 +54,8 @@ Endpoint keys such as `GET /pets` select the request and response types. When us
 | `api.fetch()`  | Work with a typed native `Response` from any callable endpoint | You read or cancel it.                                                        |
 
 All three share typed inputs, request defaults, and middleware. You can also use the [generated types](./docs/contract.md) with your own client.
+
+Library-owned client failures use `ClientError` with a stable `code` and code-specific `details`. See [error handling](./docs/client.md#handle-rejected-calls).
 
 ## Documentation
 
