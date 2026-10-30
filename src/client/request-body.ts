@@ -128,23 +128,23 @@ function holdsBinary(value: unknown): boolean {
 export function isReadyBody(value: unknown): boolean {
   return (
     isBytes(value) ||
-    isStream(value) ||
-    (["Blob", "FormData", "URLSearchParams", "ReadableStream"] as const).some((name) =>
-      isInstance(value, name),
-    )
+    isNativeBody(value) ||
+    (typeof value === "object" && value !== null && Symbol.asyncIterator in value)
   )
 }
 
 /** Convert a ready body once, copying shared bytes and adapting async iterables only here. */
 function readyBody(value: unknown): BodyLike | undefined {
-  const ready =
-    isInstance(value, "Blob") ||
-    isInstance(value, "FormData") ||
-    isInstance(value, "URLSearchParams") ||
-    isInstance(value, "ReadableStream")
-  if (ready) return value as BodyLike
+  if (isNativeBody(value)) return value as BodyLike
   return (
     bytes(value) ?? (isStream(value) ? iterableBody(value as AsyncIterable<Uint8Array>) : undefined)
+  )
+}
+
+/** Native body values pass through without conversion or reader acquisition. */
+function isNativeBody(value: unknown): boolean {
+  return (["Blob", "FormData", "URLSearchParams", "ReadableStream"] as const).some((name) =>
+    isInstance(value, name),
   )
 }
 
