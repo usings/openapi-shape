@@ -1,4 +1,4 @@
-import type { BodyOwner } from "../cancellation"
+import type { ReaderCancellationSlot } from "../cancellation"
 import type { RequestDispatcher } from "../exchange"
 import type { CallInit, RequestDefaults } from "../request"
 import type { StreamOptions } from "../types/stream"
@@ -16,7 +16,7 @@ export function createSubscriptionStream(
   let iterator: AsyncGenerator<unknown, void> | undefined
   let terminal = false
   let cleanup: Promise<void> | undefined
-  const owner: BodyOwner = {}
+  const owner: ReaderCancellationSlot = {}
   let controller: ReadableStreamDefaultController<unknown>
   const dispose = (reason?: unknown): Promise<void> => {
     if (cleanup) return cleanup

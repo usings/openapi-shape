@@ -1,6 +1,6 @@
 import type { EndpointContract } from "../../shared/contract"
 import { streamFormat } from "../../shared/media"
-import type { BodyOwner } from "../cancellation"
+import type { ReaderCancellationSlot } from "../cancellation"
 import { cancelBody } from "../cancellation"
 import { ClientError } from "../errors"
 import type { RequestDispatcher } from "../exchange"
@@ -32,7 +32,7 @@ export async function* runStreamSession(
   defaults: RequestDefaults,
   send: RequestDispatcher,
   signal: AbortSignal,
-  owner: BodyOwner,
+  owner: ReaderCancellationSlot,
 ): AsyncGenerator<unknown, void> {
   signal.throwIfAborted()
   const media = Object.hasOwn(defaults.endpoints, endpoint)
@@ -94,7 +94,7 @@ export async function* runStreamSession(
           ...(replayBodyBytes === undefined ? {} : { body: replayBodyBytes }),
         })
       : template
-    return consumeStreamConnection(
+    return runStreamConnection(
       request,
       selected,
       state,
@@ -119,14 +119,14 @@ export async function* runStreamSession(
  *
  * @yields Parsed items from this connection only.
  */
-async function* consumeStreamConnection(
+async function* runStreamConnection(
   request: Request,
   selected: string | undefined,
   state: SseSessionState,
   send: RequestDispatcher,
   context: MiddlewareContext,
   signal: AbortSignal,
-  owner: BodyOwner,
+  owner: ReaderCancellationSlot,
   maxMessageBytes: number,
   endpointDeclaration?: EndpointContract,
 ): AsyncGenerator<unknown, StreamConnectionOutcome> {

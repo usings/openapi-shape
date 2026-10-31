@@ -1,4 +1,4 @@
-import type { BodyOwner } from "../cancellation"
+import type { ReaderCancellationSlot } from "../cancellation"
 import { bodyReader } from "../cancellation"
 import type { StreamMessage } from "../types/stream"
 import { MessageBuffer } from "./message-buffer"
@@ -21,7 +21,7 @@ export async function* readEvents(
   body: ReadableStream<Uint8Array>,
   state: SseSessionState,
   signal: AbortSignal,
-  owner?: BodyOwner,
+  owner?: ReaderCancellationSlot,
   maxMessageBytes = Infinity,
 ): AsyncGenerator<StreamMessage, EventReadResult> {
   const reader = bodyReader(body, signal, owner)

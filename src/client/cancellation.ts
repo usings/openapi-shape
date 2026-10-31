@@ -50,16 +50,16 @@ export async function wait(delay: number, signal: AbortSignal): Promise<void> {
   } while (remaining > 0)
 }
 
-/** The subscription can cancel its currently owned reader before aborting the transport. */
-export interface BodyOwner {
+/** A slot for canceling the active reader before aborting the transport. */
+export interface ReaderCancellationSlot {
   cancel?: ((reason?: unknown) => Promise<void>) | undefined
 }
 
-/** A parser owns one reader and propagates its cancellation and cleanup to the subscription. */
+/** A parser owns one reader and registers its cancellation callback with the subscription. */
 export function bodyReader(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
-  owner?: BodyOwner,
+  owner?: ReaderCancellationSlot,
 ) {
   const reader = body.getReader()
   let completed = false

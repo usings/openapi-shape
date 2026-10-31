@@ -1,4 +1,4 @@
-import type { BodyOwner } from "../cancellation"
+import type { ReaderCancellationSlot } from "../cancellation"
 import { bodyReader } from "../cancellation"
 import { MessageBuffer } from "./message-buffer"
 
@@ -10,7 +10,7 @@ import { MessageBuffer } from "./message-buffer"
 export async function* readJsonSequence(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
-  owner?: BodyOwner,
+  owner?: ReaderCancellationSlot,
   maxMessageBytes = Infinity,
 ): AsyncGenerator<unknown> {
   const reader = bodyReader(body, signal, owner)

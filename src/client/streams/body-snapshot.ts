@@ -1,11 +1,11 @@
-import type { BodyOwner } from "../cancellation"
+import type { ReaderCancellationSlot } from "../cancellation"
 import { bodyReader, raceWithAbort } from "../cancellation"
 
 /** Own the encoded body only while capturing bytes for subsequent SSE attempts. */
 export async function snapshotRequestBody(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
-  owner: BodyOwner,
+  owner: ReaderCancellationSlot,
 ): Promise<Uint8Array<ArrayBuffer>> {
   const reader = bodyReader(body, signal, owner)
   let failed = false
