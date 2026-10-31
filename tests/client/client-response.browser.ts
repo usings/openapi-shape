@@ -256,3 +256,25 @@ it.each(["resolve", "reject"])(
     await vi.waitFor(() => expect(body.locked).toBe(false))
   },
 )
+
+it("decodes JSON matched by a non-application media range", async () => {
+  const api = createClient<{
+    "GET /model": { responses: { 200: { content: { "model/*": Blob } } } }
+  }>(
+    {
+      version: 7,
+      endpoints: { "GET /model": { responses: { 200: { content: { "model/*": {} } } } } },
+    },
+    {
+      baseURL: "https://example.test",
+      fetch: () =>
+        Promise.resolve(
+          new Response('{"asset":{"version":"2.0"}}', {
+            headers: { "content-type": "model/gltf+json" },
+          }),
+        ),
+    },
+  )
+  const result = await api.result("GET /model")
+  expect(result.data).toStrictEqual({ asset: { version: "2.0" } })
+})

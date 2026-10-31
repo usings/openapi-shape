@@ -253,7 +253,9 @@ type DecodedAs<M extends string, T> =
           ? T | TextOf<T>
           : Essence<M> extends `text/${string}`
             ? TextOf<T>
-            : Blob
+            : Essence<M> extends `${string}/*`
+              ? unknown
+              : Blob
 
 /** Response header schemas provide names only; native Headers does not deserialize their values. */
 type HeaderNamesOf<Shape> = Shape extends { headers: infer H } ? Lowercase<keyof H & string> : never

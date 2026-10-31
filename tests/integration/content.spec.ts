@@ -369,6 +369,8 @@ async function check() {
       ["*/*", {}, "unknown"],
       ["text/plain", {}, "string"],
       ["text/*", {}, "unknown"],
+      ["model/*", {}, "unknown"],
+      ["image/*", {}, "unknown"],
       ["image/png", {}, "Blob"],
       ["application/octet-stream", { schema: { description: "annotation only" } }, "Blob"],
       ["application/xml", {}, "Blob"],

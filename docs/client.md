@@ -125,7 +125,7 @@ Declared 2xx responses have `error: undefined`; other declared statuses have `da
 | No Content-Type with declared wildcard content | `Blob`, including zero bytes               |
 | Other media                                    | `Blob`                                     |
 
-A declaration without `content` does not allow an unexpected body on other statuses; that is a [contract failure](#handle-rejected-calls). Content-Type selection follows Fetch MIME extraction, including multi-value headers. Multiple complete media at one status retain a union of decoded types.
+A declaration without `content` does not allow an unexpected body on other statuses; that is a [contract failure](#handle-rejected-calls). Content-Type selection follows Fetch MIME extraction, including multi-value headers. Multiple complete media at one status retain a union of decoded types. Media ranges such as `model/*` can match both JSON and binary responses, so their decoded result is typed as `unknown`.
 
 ## Own the response with Fetch
 
