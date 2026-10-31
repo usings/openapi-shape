@@ -150,16 +150,17 @@ function isNativeBody(value: unknown): boolean {
 
 /** Browsers need a Web stream; passing an async iterable directly would send its string tag. */
 function iterableBody(value: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
-  const iterator = value[Symbol.asyncIterator]()
+  let iterator: AsyncIterator<Uint8Array> | undefined
   return new ReadableStream<Uint8Array>(
     {
       async pull(controller) {
+        iterator ??= value[Symbol.asyncIterator]()
         const result = await iterator.next()
         if (result.done) controller.close()
         else controller.enqueue(result.value)
       },
       async cancel(reason) {
-        await iterator.return?.(reason)
+        await iterator?.return?.(reason)
       },
     },
     { highWaterMark: 0 },

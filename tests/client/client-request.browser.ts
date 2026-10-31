@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createClient } from "../../src/client"
 import type { BodyLike } from "../../src/client/types/request"
 import { contract } from "../fixtures/output/client-api"
@@ -832,3 +832,34 @@ it("uses form encoding for a whole form query and URL encoding for ordinary para
     "/form?foo=a+b",
   ])
 })
+
+it.each([false, true])(
+  "acquires an upload iterator only on demand (read first: %s)",
+  async (readFirst) => {
+    const next = vi.fn<() => Promise<IteratorResult<Uint8Array>>>(() =>
+      Promise.resolve({ done: false, value: new Uint8Array([65]) }),
+    )
+    const close = vi.fn<(reason?: unknown) => Promise<IteratorResult<Uint8Array>>>(() =>
+      Promise.resolve({ done: true, value: undefined }),
+    )
+    const acquire = vi.fn<() => AsyncIterator<Uint8Array>>(() => ({ next, return: close }))
+    const { client, sent } = recorder(contract)
+    await client.fetch("POST /upload", {
+      body: { [Symbol.asyncIterator]: acquire },
+      headers: { "content-type": "application/octet-stream" },
+    })
+    const reader = sent().body?.getReader()
+    expect(acquire).not.toHaveBeenCalled()
+    const reason = { stopped: true }
+    try {
+      if (readFirst) await reader?.read()
+      await reader?.cancel(reason)
+      expect(acquire).toHaveBeenCalledTimes(readFirst ? 1 : 0)
+      expect(next).toHaveBeenCalledTimes(readFirst ? 1 : 0)
+      expect(close).toHaveBeenCalledTimes(readFirst ? 1 : 0)
+      expect(close.mock.calls[0]?.[0]).toBe(readFirst ? reason : undefined)
+    } finally {
+      reader?.releaseLock()
+    }
+  },
+)

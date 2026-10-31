@@ -19,3 +19,28 @@ it("recognizes shared byte bodies without allocating a conversion, then snapshot
   bytes.fill(9)
   expect([...(encoded as Uint8Array)]).toStrictEqual([2, 3])
 })
+
+it.each(["GET", "HEAD", "invalid URL"])(
+  "does not acquire an iterator when Request construction fails for %s",
+  async (failure) => {
+    const { buildRequest } = await import("../../src/client/request")
+    const acquire = vi.fn<() => AsyncIterator<Uint8Array>>(() => ({
+      next: () => Promise.resolve({ done: true, value: undefined }),
+    }))
+    const method = failure === "invalid URL" ? "POST" : failure
+    const endpoint = `${method} /upload`
+    expect(() =>
+      buildRequest(
+        endpoint,
+        { body: { [Symbol.asyncIterator]: acquire } },
+        {
+          endpoints: { [endpoint]: { responses: {} } },
+          prefix: failure === "invalid URL" ? "invalid" : "https://example.test",
+          headers: undefined,
+          init: {},
+        },
+      ),
+    ).toThrow(TypeError)
+    expect(acquire).not.toHaveBeenCalled()
+  },
+)
