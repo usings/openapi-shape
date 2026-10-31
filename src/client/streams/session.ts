@@ -143,7 +143,8 @@ async function* runStreamConnection(
       throw error
     }
     signal.throwIfAborted()
-    if (response.status === 204) return { kind: "stop" }
+    if (response.status === 204 && selected && streamFormat(selected) === "sse")
+      return { kind: "stop" }
     if (!response.ok) {
       const error = new ClientError(`Stream request failed with status ${response.status}`, {
         code: "HTTP_ERROR",
@@ -164,6 +165,7 @@ async function* runStreamConnection(
         code: "UNDECLARED_STATUS",
         details: { response },
       })
+    if (response.status === 204) return { kind: "stop" }
     const actual = responseContentType(response.headers)
     const matched =
       actual &&

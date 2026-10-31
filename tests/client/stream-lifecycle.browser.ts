@@ -305,3 +305,46 @@ it.each(["paused", "reading"])(
     }
   },
 )
+
+it.each(
+  ["application/x-ndjson", "application/json-seq"].flatMap((media) =>
+    [undefined, "204", "2XX", "default"].map((declaration) => ({ media, declaration })),
+  ),
+)("validates 204 with $media and declaration $declaration", async ({ media, declaration }) => {
+  const client = createClient<{
+    "GET /records": {
+      responses: {
+        200: { content: { "application/x-ndjson": number[]; "application/json-seq": number[] } }
+      }
+    }
+  }>(
+    {
+      version: 7,
+      endpoints: {
+        "GET /records": {
+          responses: {
+            "200": { content: { [media]: {} } },
+            ...(declaration ? { [declaration]: {} } : {}),
+          },
+        },
+      },
+    },
+    {
+      baseURL: "https://example.test",
+      fetch: () => Promise.resolve(new Response(null, { status: 204 })),
+    },
+  )
+  const outcome = await client
+    .stream("GET /records", { headers: new Headers({ accept: media }) })
+    .getReader()
+    .read()
+    .then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    )
+  expect(outcome).toMatchObject(
+    declaration
+      ? { value: { done: true, value: undefined } }
+      : { error: { code: "UNDECLARED_STATUS" } },
+  )
+})

@@ -22,7 +22,7 @@ The effective Accept comes from call headers, then client defaults. With no Acce
 
 A single exact declared value, including a known client default, narrows the item type and requires the response to match that declaration. Lists, ranges, and opaque or dynamic headers retain the union of possible items and use the actual response to choose a parser. These negotiated subscriptions make one connection. Automatic SSE reconnection requires a statically selected SSE representation; override uncertain defaults with an explicit call Accept to enable it.
 
-A wrong status, media type, or missing/consumed/locked body errors consumption. HTTP 204 closes normally. The shared [client error model](./client.md#handle-rejected-calls) defines error codes and diagnostics; the [SSE reconnection policy](#sse-reconnection) determines which failures reconnect.
+A wrong status, media type, or missing/consumed/locked body errors consumption. For a selected SSE representation, HTTP 204 closes normally even if undeclared. Other selections, including dynamic negotiation, require 204 to match a declared status before closing normally. The shared [client error model](./client.md#handle-rejected-calls) defines error codes and diagnostics; the [SSE reconnection policy](#sse-reconnection) determines which failures reconnect.
 
 Use `itemSchema` to describe one item, or an array `schema` to describe complete sequence content. An item schema takes precedence. SSE only narrows its standard message fields; it does not decode JSON in `data`. See [sequence projections](./openapi.md#sequence-projections) for the type rules.
 

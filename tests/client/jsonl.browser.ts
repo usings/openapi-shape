@@ -241,14 +241,14 @@ describe("JSON line streams", () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
-  it("accepts 204 without a response body", async () => {
-    expect(
-      await collect(
+  it("rejects undeclared 204 for a 200-only NDJSON operation", async () => {
+    await expect(
+      collect(
         api({ fetch: () => Promise.resolve(new Response(null, { status: 204 })) }).stream(
           "GET /records",
         ),
       ),
-    ).toStrictEqual([])
+    ).rejects.toMatchObject({ code: "UNDECLARED_STATUS", details: { response: { status: 204 } } })
   })
 
   it("cancels the underlying reader on early iteration exit", async () => {
@@ -275,4 +275,14 @@ describe("JSON line streams", () => {
     expect(values).toStrictEqual([1])
     expect(cancel).toHaveBeenCalledOnce()
   })
+})
+
+it("does not infer an SSE stop from an undeclared 204 during mixed negotiation", async () => {
+  await expect(
+    collect(
+      api({ fetch: () => Promise.resolve(new Response(null, { status: 204 })) }).stream(
+        "GET /mixed",
+      ),
+    ),
+  ).rejects.toMatchObject({ code: "UNDECLARED_STATUS" })
 })
