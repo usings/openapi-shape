@@ -223,3 +223,36 @@ describe("native response decoding", () => {
     expect(await (value as Blob).text()).toBe("payload")
   })
 })
+
+it.each(["resolve", "reject"])(
+  "cancels malformed response chunks without waiting for %s cleanup",
+  async (cleanupOutcome) => {
+    const cleanup = Promise.withResolvers<void>()
+    const cancel = vi.fn<(reason?: unknown) => Promise<void>>(() => cleanup.promise)
+    let pulls = 0
+    const body = new ReadableStream(
+      {
+        pull(controller) {
+          if (pulls++ === 0) controller.enqueue("not bytes")
+        },
+        cancel,
+      },
+      { highWaterMark: 0 },
+    )
+    const { client } = recorder(
+      contract,
+      {},
+      () => new Response(body, { headers: { "content-type": "application/json" } }),
+    )
+    try {
+      const failure = await client.result("GET /pets").catch((error: unknown) => error)
+      expect(failure).toBeInstanceOf(TypeError)
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+      expect(cancel.mock.calls[0]?.[0]).toBe(failure)
+    } finally {
+      if (cleanupOutcome === "reject") cleanup.reject(new Error("cleanup failed"))
+      else cleanup.resolve()
+    }
+    await vi.waitFor(() => expect(body.locked).toBe(false))
+  },
+)

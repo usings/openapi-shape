@@ -21,14 +21,22 @@ async function decodeResponseBody(
   }
   // Own cancellation even when middleware supplied a body unrelated to native Fetch's signal.
   // The pipeline cancels its source; raceWithAbort keeps a slow cleanup from delaying rejection.
+  const cleanup = new AbortController()
   const readable =
     response.body && !response.bodyUsed
       ? new Response(
-          response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal }),
+          response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), {
+            signal: AbortSignal.any([signal, cleanup.signal]),
+          }),
           { headers: response.headers },
         )
       : response
-  return await raceWithAbort(readBody(readable, media), signal)
+  try {
+    return await raceWithAbort(readBody(readable, media), signal)
+  } catch (error) {
+    cleanup.abort(error)
+    throw error
+  }
 }
 
 /** Decode through native Response methods without changing the original response's metadata. */
