@@ -18,6 +18,13 @@ void function defaultStreamChecks(contract: Contract<StreamingEndpoints>) {
   client.stream("GET /events", { reconnect: true })
   const stream = client.stream("GET /events", { reconnect: { maxAttempts: 3 } })
   expectTypeOf(stream).toEqualTypeOf<ReadableStream<StreamMessage & { data: string }>>()
+  const limited = client.stream("GET /events", { maxMessageBytes: 1024 })
+  expectTypeOf(limited).toEqualTypeOf<ReadableStream<StreamMessage & { data: string }>>()
+  const reconnecting = client.stream("GET /events", { reconnect: true, maxMessageBytes: 1024 })
+  expectTypeOf(reconnecting).toEqualTypeOf<ReadableStream<StreamMessage & { data: string }>>()
+  client.stream("GET /events", { reconnect: { maxAttempts: 3 }, maxMessageBytes: 1024 })
+  // @ts-expect-error the default selection must validate the message limit too
+  client.stream("GET /events", { reconnect: true, maxMessageBytes: "1024" })
   const reader = stream.getReader()
   void reader.read().then(({ value }) => {
     if (value) value.data satisfies string

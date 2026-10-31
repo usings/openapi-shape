@@ -180,7 +180,7 @@ export type DefaultStreamArgs<
         : never
     >
 
-type DefaultSelection<Call, M extends string> = {
+type DefaultSelection<Call, M extends string> = Pick<StreamOptions, "maxMessageBytes"> & {
   headers?: { accept?: never; [Symbol.iterator]?: never }
 } & ReconnectSelection<Call, M>
 
