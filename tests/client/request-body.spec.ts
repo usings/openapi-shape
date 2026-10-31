@@ -44,3 +44,38 @@ it.each(["GET", "HEAD", "invalid URL"])(
     expect(acquire).not.toHaveBeenCalled()
   },
 )
+
+it.each(["resolve", "reject", "throw", "pending"])(
+  "releases a failing upload iterator without replacing or delaying the read error when cleanup is %s",
+  async (cleanup) => {
+    const failure = new Error("read failed")
+    const close = vi.fn<() => Promise<IteratorResult<Uint8Array>>>(() => {
+      if (cleanup === "throw") throw new Error("synchronous cleanup failure")
+      if (cleanup === "reject") return Promise.reject(new Error("cleanup failed"))
+      if (cleanup === "pending")
+        return new Promise(() => {
+          /* Cleanup never settles. */
+        })
+      return Promise.resolve({ done: true, value: undefined })
+    })
+    const iterator: AsyncIterator<Uint8Array> = {
+      next() {
+        if (cleanup === "throw") throw failure
+        return Promise.reject(failure)
+      },
+      return: close,
+    }
+    const encoded = encodeBody(
+      { [Symbol.asyncIterator]: () => iterator },
+      "application/octet-stream",
+    ).body
+    if (!(encoded instanceof ReadableStream)) throw new Error("Expected an adapted Web stream")
+    const reader = encoded.getReader()
+    try {
+      await expect(reader.read()).rejects.toBe(failure)
+      expect(close).toHaveBeenCalledOnce()
+    } finally {
+      reader.releaseLock()
+    }
+  },
+)

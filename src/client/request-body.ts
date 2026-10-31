@@ -151,16 +151,30 @@ function isNativeBody(value: unknown): boolean {
 /** Browsers need a Web stream; passing an async iterable directly would send its string tag. */
 function iterableBody(value: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
   let iterator: AsyncIterator<Uint8Array> | undefined
+  let cleanup: Promise<void> | undefined
+  const closeIterator = (reason?: unknown): Promise<void> => {
+    cleanup ??= Promise.resolve().then(async () => {
+      await iterator?.return?.(reason)
+    })
+    return cleanup
+  }
   return new ReadableStream<Uint8Array>(
     {
       async pull(controller) {
-        iterator ??= value[Symbol.asyncIterator]()
-        const result = await iterator.next()
-        if (result.done) controller.close()
-        else controller.enqueue(result.value)
+        try {
+          iterator ??= value[Symbol.asyncIterator]()
+          const result = await iterator.next()
+          if (result.done) controller.close()
+          else controller.enqueue(result.value)
+        } catch (error) {
+          void closeIterator().catch(() => {
+            /* Cleanup cannot delay or replace the original read failure. */
+          })
+          throw error
+        }
       },
       async cancel(reason) {
-        await iterator?.return?.(reason)
+        await closeIterator(reason)
       },
     },
     { highWaterMark: 0 },
