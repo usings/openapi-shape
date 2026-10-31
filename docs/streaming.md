@@ -112,7 +112,7 @@ stop.abort()
 
 Abort errors consumption with `signal.reason`. Reader/stream cancellation closes consumption normally; breaking a `for await` loop also cancels. Merely releasing a reader lock does not cancel. Call `stream.cancel()` only while unlocked. Visibility changes do not stop subscriptions.
 
-Cancellation forwards the reason to the owned response reader, cleans up active work, and prevents reconnection. Explicit cancellation waits for that cleanup and rejects if it fails; an existing abort or parse error remains the consumer's error even if cleanup fails. Normal EOF releases resources without aborting a completed request.
+Cancellation forwards the reason to the owned response reader, cleans up active work, and prevents reconnection. Explicit cancellation waits for that cleanup and rejects if it fails. To bound the wait for a custom body whose cancellation does not settle, supply a call `signal` and abort it; the cancellation promise rejects with `signal.reason`, while cleanup continues to be observed. Without a call signal there is no cleanup timeout. An existing abort or parse error remains the consumer's error even if cleanup fails. Normal EOF releases resources without aborting a completed request.
 
 Native pipe cancellation and error propagation apply. Await the pipe so destination errors reach your caller:
 

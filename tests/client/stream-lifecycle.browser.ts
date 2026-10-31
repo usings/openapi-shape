@@ -257,3 +257,51 @@ describe("Web stream lifecycle", () => {
     expect(await response.text()).toBe("payload")
   })
 })
+
+it.each(["paused", "reading"])(
+  "allows aborting an explicit cancel wait while %s",
+  async (state) => {
+    const cleanup = Promise.withResolvers<void>()
+    const cancel = vi.fn<(reason?: unknown) => Promise<void>>(() => cleanup.promise)
+    const controller = new AbortController()
+    const body = new ReadableStream<Uint8Array>(
+      {
+        start(source) {
+          source.enqueue(encoder.encode("data: one\n\n"))
+        },
+        pull() {
+          return new Promise<void>(() => {
+            /* The source never finishes its pull. */
+          })
+        },
+        cancel,
+      },
+      { highWaterMark: 0 },
+    )
+    const reader = sseClient({
+      fetch: () =>
+        Promise.resolve(new Response(body, { headers: { "content-type": "text/event-stream" } })),
+    })
+      .stream("GET /events", { signal: controller.signal })
+      .getReader()
+    await reader.read()
+    const reading = state === "reading" ? reader.read() : undefined
+    const reason = { consumer: true }
+    const abortReason = { abort: true }
+    const cancellation = reader.cancel(reason)
+    const rejected = cancellation.then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    try {
+      controller.abort(abortReason)
+      expect(await rejected).toBe(abortReason)
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(cancel.mock.calls[0]?.[0]).toBe(reason)
+      await reading
+    } finally {
+      // A late cleanup failure remains observed after the caller stops waiting.
+      cleanup.reject(new Error("late cleanup failure"))
+    }
+  },
+)

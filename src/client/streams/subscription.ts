@@ -1,4 +1,5 @@
 import type { ReaderCancellationSlot } from "../cancellation"
+import { raceWithAbort } from "../cancellation"
 import type { RequestDispatcher } from "../exchange"
 import type { CallInit, RequestDefaults } from "../request"
 import type { StreamOptions } from "../types/stream"
@@ -80,7 +81,9 @@ export function createSubscriptionStream(
       },
       cancel(reason) {
         terminal = true
-        return dispose(reason)
+        const pending = dispose(reason)
+        // Bound the caller's wait without abandoning observation of the owned reader cleanup.
+        return externalSignal ? raceWithAbort(pending, externalSignal) : pending
       },
     },
     { highWaterMark: 0 },
